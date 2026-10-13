@@ -14,10 +14,10 @@ import ReplayKit
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
 
-    let controller = engineBridge.pluginRegistry.registrar(forPlugin: "AppleCastCompanion")
+    let messenger = engineBridge.applicationRegistrar.messenger()
     let channel = FlutterMethodChannel(
       name: "com.applecast.mirror/control",
-      binaryMessenger: engineBridge.binaryMessenger
+      binaryMessenger: messenger
     )
 
     channel.setMethodCallHandler { [weak self] (call: FlutterMethodCall, result: @escaping FlutterResult) in

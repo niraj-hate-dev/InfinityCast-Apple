@@ -1,6 +1,17 @@
 #ifndef RUNNER_SCREEN_MIRROR_PLUGIN_H_
 #define RUNNER_SCREEN_MIRROR_PLUGIN_H_
 
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef _WINSOCK_DEPRECATED_NO_WARNINGS
+#define _WINSOCK_DEPRECATED_NO_WARNINGS
+#endif
+
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <windows.h>
+
 #include <flutter/method_channel.h>
 #include <flutter/event_channel.h>
 #include <flutter/standard_method_codec.h>
