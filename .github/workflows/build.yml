@@ -1,0 +1,99 @@
+name: Build AppleCast (Windows & iOS)
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  # ==============================================================
+  # Job 1: Windows Native Desktop Core & Host Build
+  # ==============================================================
+  build-windows:
+    name: Build Windows Host Client
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout Codebase
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter SDK
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Verify Environment & Tools
+        run: |
+          flutter doctor -v
+
+      - name: Install Dependencies
+        run: flutter pub get
+
+      - name: Run Static Code Analysis
+        run: flutter analyze
+
+      - name: Execute Automated Unit & Widget Tests
+        run: flutter test
+
+      - name: Build Windows Desktop Release
+        run: flutter build windows --release
+
+      - name: Package Windows Binary
+        shell: pwsh
+        run: |
+          $buildDir = "build/windows/x64/runner/Release"
+          $outputZip = "AppleCast-Windows-x64.zip"
+          Compress-Archive -Path "$buildDir/*" -DestinationPath $outputZip -Force
+
+      - name: Upload Windows Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AppleCast-Windows-x64
+          path: AppleCast-Windows-x64.zip
+          retention-days: 14
+
+  # ==============================================================
+  # Job 2: iOS Companion App & ReplayKit Extension Build
+  # ==============================================================
+  build-ios:
+    name: Build iOS Companion & Extension
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout Codebase
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter SDK
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Setup Xcode Version
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: 'latest-stable'
+
+      - name: Install Dependencies
+        run: flutter pub get
+
+      - name: Build iOS App Bundle (Unsigned for Sideloading)
+        run: flutter build ios --no-codesign --release
+
+      - name: Package Unsigned IPA for Sideloaders (AltStore / Sideloadly)
+        run: |
+          mkdir -p build/ios/ipa/Payload
+          cp -r build/ios/iphoneos/Runner.app build/ios/ipa/Payload/
+          cd build/ios/ipa
+          zip -qr AppleCast-iOS-Unsigned.ipa Payload
+          cd ../../..
+
+      - name: Upload iOS Sideloadable IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AppleCast-iOS-Unsigned
+          path: build/ios/ipa/AppleCast-iOS-Unsigned.ipa
+          retention-days: 14
