@@ -14,10 +14,12 @@
 
 #include <flutter/method_channel.h>
 #include <flutter/event_channel.h>
+#include <flutter/event_stream_handler_functions.h>
 #include <flutter/standard_method_codec.h>
 #include <flutter/binary_messenger.h>
 #include <flutter/texture_registrar.h>
 #include <flutter/encodable_value.h>
+#include <flutter/plugin_registrar_windows.h>
 
 #include <memory>
 #include <string>
@@ -33,14 +35,16 @@
 namespace applecast {
 
 /// Native Windows Plugin managing Platform Channels & Usbmuxd/FFmpeg Lifecycles.
-class ScreenMirrorPlugin {
+class ScreenMirrorPlugin : public flutter::Plugin {
  public:
+  static void RegisterWithRegistrar(flutter::PluginRegistrarWindows* registrar);
+  static void RegisterWithRegistrar(FlutterDesktopPluginRegistrarRef registrar);
   static void RegisterWithEngine(flutter::BinaryMessenger* messenger,
                                 flutter::TextureRegistrar* texture_registrar);
 
   ScreenMirrorPlugin(flutter::BinaryMessenger* messenger,
                      flutter::TextureRegistrar* texture_registrar);
-  ~ScreenMirrorPlugin();
+  virtual ~ScreenMirrorPlugin();
 
  private:
   void HandleMethodCall(

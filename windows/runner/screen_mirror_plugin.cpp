@@ -12,6 +12,22 @@ constexpr char kMetricsChannel[] = "com.applecast.mirror/metrics";
 constexpr char kStatusChannel[]  = "com.applecast.mirror/status";
 }  // namespace
 
+void ScreenMirrorPlugin::RegisterWithRegistrar(
+    FlutterDesktopPluginRegistrarRef registrar_ref) {
+  if (!registrar_ref) return;
+  auto* registrar = flutter::PluginRegistrarManager::GetInstance()
+                        ->GetRegistrar<flutter::PluginRegistrarWindows>(registrar_ref);
+  RegisterWithRegistrar(registrar);
+}
+
+void ScreenMirrorPlugin::RegisterWithRegistrar(
+    flutter::PluginRegistrarWindows* registrar) {
+  if (!registrar) return;
+  auto plugin = std::make_unique<ScreenMirrorPlugin>(
+      registrar->messenger(), registrar->texture_registrar());
+  registrar->AddPlugin(std::move(plugin));
+}
+
 void ScreenMirrorPlugin::RegisterWithEngine(
     flutter::BinaryMessenger* messenger,
     flutter::TextureRegistrar* texture_registrar) {

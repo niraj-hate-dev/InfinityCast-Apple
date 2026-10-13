@@ -28,9 +28,8 @@ bool FlutterWindow::OnCreate() {
   RegisterPlugins(flutter_controller_->engine());
 
   // Register AppleCast native screen mirroring core & texture registrar
-  applecast::ScreenMirrorPlugin::RegisterWithEngine(
-      flutter_controller_->engine()->messenger(),
-      flutter_controller_->engine()->texture_registrar());
+  applecast::ScreenMirrorPlugin::RegisterWithRegistrar(
+      flutter_controller_->engine()->GetRegistrarForPlugin("AppleCastScreenMirrorPlugin"));
 
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
