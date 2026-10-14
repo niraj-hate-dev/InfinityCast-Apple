@@ -87,6 +87,8 @@ jobs:
         run: |
           mkdir -p build/ios/ipa/Payload
           cp -r build/ios/iphoneos/Runner.app build/ios/ipa/Payload/
+          echo "=== Contents of Runner.app/PlugIns ==="
+          ls -la build/ios/ipa/Payload/Runner.app/PlugIns || true
           cd build/ios/ipa
           zip -qr AppleCast-iOS-Unsigned.ipa Payload
           cd ../../..

@@ -34,7 +34,7 @@ import ReplayKit
   private func presentBroadcastPicker() {
     DispatchQueue.main.async {
       let pickerView = RPSystemBroadcastPickerView(frame: CGRect(x: 0, y: 0, width: 44, height: 44))
-      pickerView.preferredExtension = "com.applecast.companion.extension"
+      pickerView.preferredExtension = "com.applecast.applecast.AppleCastExtension"
       pickerView.showsMicrophoneButton = false
 
       // Programmatically trigger button tap in pickerView to open system broadcast modal
