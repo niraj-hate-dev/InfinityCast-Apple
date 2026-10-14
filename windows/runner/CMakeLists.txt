@@ -39,7 +39,7 @@ target_compile_definitions(${BINARY_NAME} PRIVATE "_WINSOCK_DEPRECATED_NO_WARNIN
 
 # Add dependency libraries and include directories. Add any application-specific
 # dependencies here.
-target_link_libraries(${BINARY_NAME} PRIVATE flutter flutter_wrapper_app)
+target_link_libraries(${BINARY_NAME} PRIVATE flutter flutter_wrapper_app flutter_wrapper_plugin)
 target_link_libraries(${BINARY_NAME} PRIVATE "dwmapi.lib")
 target_link_libraries(${BINARY_NAME} PRIVATE "ws2_32.lib")
 target_link_libraries(${BINARY_NAME} PRIVATE "d3d11.lib")
