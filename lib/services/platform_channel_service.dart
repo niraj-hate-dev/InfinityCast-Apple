@@ -110,16 +110,6 @@ class PlatformChannelService {
     }
   }
 
-  /// iOS Companion Specific: Queries runtime resolved extension bundle identifier
-  Future<String?> getExtensionBundleId() async {
-    try {
-      final String? bundleId = await _controlChannel.invokeMethod<String>('getExtensionBundleId');
-      return bundleId;
-    } on PlatformException {
-      return null;
-    }
-  }
-
   /// iOS Companion Specific: Queries active broadcast extension status from App Group UserDefaults
   Future<Map<String, dynamic>> getExtensionStatus() async {
     try {

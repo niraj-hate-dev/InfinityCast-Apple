@@ -6,8 +6,7 @@ import Darwin
 /// Captures iOS display surfaces, compresses via VideoToolbox hardware encoder (Zero B-Frames),
 /// monitors Mach kernel memory to prevent Jetsam 50MB OOM kills, and streams RFC 2326 Interleaved RTP
 /// packets over local loopback TCP socket tunneled via usbmuxd.
-@objc(SampleHandler)
-public class SampleHandler: RPBroadcastSampleHandler {
+class SampleHandler: RPBroadcastSampleHandler {
 
     // MARK: - Constants & Architecture Specifications
     private let appGroupName = "group.applecast.mirror"
@@ -517,3 +516,8 @@ private func compressionCallback(
     let handler = Unmanaged<SampleHandler>.fromOpaque(refCon).takeUnretainedValue()
     handler.sendEncodedSampleBuffer(sampleBuffer)
 }
+
+/// Objective-C runtime alias ensuring that both "AppleCastExtension.SampleHandler"
+/// and "@objc(SampleHandler)" resolve in NSClassFromString / ReplayKit plugin loader.
+@objc(SampleHandler)
+class DirectSampleHandler: SampleHandler {}

@@ -371,11 +371,6 @@ class MirrorController extends ChangeNotifier {
     return _channelService.getExtensionStatus();
   }
 
-  /// iOS Companion Specific: Queries runtime resolved extension bundle identifier
-  Future<String?> getExtensionBundleId() async {
-    return _channelService.getExtensionBundleId();
-  }
-
   void _insertMockDeviceForPreview() {
     _state = _state.copyWith(
       devices: [

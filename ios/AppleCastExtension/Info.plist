@@ -27,7 +27,7 @@
 		<key>NSExtensionPointIdentifier</key>
 		<string>com.apple.broadcast-services-upload</string>
 		<key>NSExtensionPrincipalClass</key>
-		<string>SampleHandler</string>
+		<string>AppleCastExtension.SampleHandler</string>
 		<key>RPBroadcastProcessMode</key>
 		<string>RPBroadcastProcessModeSampleBuffer</string>
 	</dict>
