@@ -267,10 +267,10 @@ bool UsbmuxdClient::ConnectTunnel(uint32_t device_id,
   if (!out_socket) return false;
 
   // Retry loop: the iOS broadcast extension may not have its TCP server
-  // listening yet when the user clicks "Mirror". We retry up to 5 times
+  // listening yet when the user clicks "Mirror". We retry up to 8 times
   // with increasing backoff (500ms increments) to handle the timing gap
   // between starting the broadcast on iOS and connecting from Windows.
-  constexpr int kMaxRetries = 5;
+  constexpr int kMaxRetries = 8;
   constexpr int kBaseDelayMs = 500;
 
   for (int attempt = 0; attempt < kMaxRetries; ++attempt) {

@@ -110,6 +110,19 @@ class PlatformChannelService {
     }
   }
 
+  /// iOS Companion Specific: Queries active broadcast extension status from App Group UserDefaults
+  Future<Map<String, dynamic>> getExtensionStatus() async {
+    try {
+      final dynamic result = await _controlChannel.invokeMethod('getExtensionStatus');
+      if (result is Map) {
+        return Map<String, dynamic>.from(result);
+      }
+      return {'status': 'STOPPED', 'port': AppleCastConstants.defaultDeviceStreamingPort};
+    } on PlatformException {
+      return {'status': 'UNAVAILABLE', 'port': AppleCastConstants.defaultDeviceStreamingPort};
+    }
+  }
+
   /// Stream of attached iOS devices received from usbmuxd daemon.
   Stream<List<IosDeviceInfo>> get devicesStream {
     return _devicesChannel.receiveBroadcastStream().map((dynamic event) {

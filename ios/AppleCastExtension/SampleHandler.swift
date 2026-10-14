@@ -6,7 +6,6 @@ import Darwin
 /// Captures iOS display surfaces, compresses via VideoToolbox hardware encoder (Zero B-Frames),
 /// monitors Mach kernel memory to prevent Jetsam 50MB OOM kills, and streams RFC 2326 Interleaved RTP
 /// packets over local loopback TCP socket tunneled via usbmuxd.
-@objc(SampleHandler)
 class SampleHandler: RPBroadcastSampleHandler {
 
     // MARK: - Constants & Architecture Specifications
@@ -39,6 +38,7 @@ class SampleHandler: RPBroadcastSampleHandler {
 
     // MARK: - Broadcast Lifecycle
     override func broadcastStarted(withSetupInfo setupInfo: [String : NSObject]?) {
+        NSLog("[AppleCastExtension] >>> broadcastStarted invoked by ReplayKit host!")
         isBroadcasting = true
         frameIndex = 0
         rtpSequenceNumber = 0
@@ -56,20 +56,33 @@ class SampleHandler: RPBroadcastSampleHandler {
             targetBitrate = Int32(bitrate)
         }
 
+        // Record active lifecycle state for companion host app
+        sharedDefaults?.set("RUNNING", forKey: "extension_status")
+        sharedDefaults?.set(Int(streamingPort), forKey: "extension_active_port")
+        sharedDefaults?.set(Date().timeIntervalSince1970, forKey: "extension_start_time")
+        sharedDefaults?.set("INITIALIZING", forKey: "extension_socket_state")
+        sharedDefaults?.synchronize()
+
+        NSLog("[AppleCastExtension] Target streaming port: %d (FPS: %d, Bitrate: %d bps)", streamingPort, targetFps, targetBitrate)
+
         // Bind BSD TCP server to receive usbmuxd tunnel
         startLocalTcpServer(port: streamingPort)
     }
 
     override func broadcastPaused() {
-        // Paused state
+        NSLog("[AppleCastExtension] broadcastPaused invoked")
     }
 
     override func broadcastResumed() {
-        // Resumed state
+        NSLog("[AppleCastExtension] broadcastResumed invoked")
     }
 
     override func broadcastFinished() {
+        NSLog("[AppleCastExtension] >>> broadcastFinished invoked - shutting down")
         isBroadcasting = false
+        sharedDefaults?.set("STOPPED", forKey: "extension_status")
+        sharedDefaults?.set("STOPPED", forKey: "extension_socket_state")
+        sharedDefaults?.synchronize()
         teardownSession()
     }
 
@@ -91,6 +104,9 @@ class SampleHandler: RPBroadcastSampleHandler {
             encodeQueue.async { [weak self] in
                 autoreleasepool {
                     guard let self = self, self.isBroadcasting else { return }
+                    if self.frameIndex == 0 {
+                        NSLog("[AppleCastExtension] >>> First video CMSampleBuffer received from ReplayKit pipeline!")
+                    }
                     guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
                     let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
                     self.handleVideoPixelBuffer(pixelBuffer, pts: pts)
@@ -216,8 +232,13 @@ class SampleHandler: RPBroadcastSampleHandler {
         networkQueue.async { [weak self] in
             guard let self = self else { return }
 
+            NSLog("[AppleCastExtension] Initializing TCP server socket on port %d...", port)
+
             self.serverSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)
             if self.serverSocket < 0 {
+                NSLog("[AppleCastExtension] FAILED to create server socket: errno=%d (%s)", errno, strerror(errno))
+                self.sharedDefaults?.set("ERROR_SOCKET_CREATE", forKey: "extension_socket_state")
+                self.sharedDefaults?.synchronize()
                 return
             }
 
@@ -230,7 +251,8 @@ class SampleHandler: RPBroadcastSampleHandler {
             serverAddr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
             serverAddr.sin_family = sa_family_t(AF_INET)
             serverAddr.sin_port = port.bigEndian
-            serverAddr.sin_addr.s_addr = inet_addr("127.0.0.1")
+            // Bind to INADDR_ANY (in_addr_t(0)) so usbmuxd daemon connects via loopback (127.0.0.1) or composite interface
+            serverAddr.sin_addr.s_addr = in_addr_t(0)
 
             let bindRes = withUnsafePointer(to: &serverAddr) { ptr in
                 ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { saPtr in
@@ -239,16 +261,26 @@ class SampleHandler: RPBroadcastSampleHandler {
             }
 
             if bindRes < 0 {
+                NSLog("[AppleCastExtension] FAILED to bind server socket to port %d: errno=%d (%s)", port, errno, strerror(errno))
+                self.sharedDefaults?.set("ERROR_BIND_\(errno)", forKey: "extension_socket_state")
+                self.sharedDefaults?.synchronize()
                 close(self.serverSocket)
                 self.serverSocket = -1
                 return
             }
 
             if listen(self.serverSocket, 5) < 0 {
+                NSLog("[AppleCastExtension] FAILED to listen on server socket: errno=%d (%s)", errno, strerror(errno))
+                self.sharedDefaults?.set("ERROR_LISTEN_\(errno)", forKey: "extension_socket_state")
+                self.sharedDefaults?.synchronize()
                 close(self.serverSocket)
                 self.serverSocket = -1
                 return
             }
+
+            NSLog("[AppleCastExtension] SUCCESS: TCP server listening on 0.0.0.0:%d", port)
+            self.sharedDefaults?.set("LISTENING", forKey: "extension_socket_state")
+            self.sharedDefaults?.synchronize()
 
             // Connection Accept Loop
             while self.isBroadcasting {
@@ -271,8 +303,15 @@ class SampleHandler: RPBroadcastSampleHandler {
                     }
                     self.clientSocket = client
                     self.socketLock.unlock()
+
+                    NSLog("[AppleCastExtension] SUCCESS: Windows client connected to port %d via usbmuxd tunnel!", port)
+                    self.sharedDefaults?.set("CLIENT_CONNECTED", forKey: "extension_socket_state")
+                    self.sharedDefaults?.synchronize()
+                } else if self.isBroadcasting {
+                    NSLog("[AppleCastExtension] accept returned errno=%d", errno)
                 }
             }
+            NSLog("[AppleCastExtension] Server accept loop terminated.")
         }
     }
 
@@ -423,10 +462,12 @@ class SampleHandler: RPBroadcastSampleHandler {
 
         socketLock.lock()
         if clientSocket >= 0 {
+            shutdown(clientSocket, SHUT_RDWR)
             close(clientSocket)
             clientSocket = -1
         }
         if serverSocket >= 0 {
+            shutdown(serverSocket, SHUT_RDWR)
             close(serverSocket)
             serverSocket = -1
         }

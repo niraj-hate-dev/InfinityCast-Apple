@@ -366,6 +366,11 @@ class MirrorController extends ChangeNotifier {
     await _channelService.launchBroadcastPicker();
   }
 
+  /// iOS Companion Specific: Queries active broadcast extension status
+  Future<Map<String, dynamic>> getExtensionStatus() async {
+    return _channelService.getExtensionStatus();
+  }
+
   void _insertMockDeviceForPreview() {
     _state = _state.copyWith(
       devices: [

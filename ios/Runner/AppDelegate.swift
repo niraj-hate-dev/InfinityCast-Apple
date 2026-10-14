@@ -38,6 +38,18 @@ import ReplayKit
         self.synchronizeBroadcastConfiguration(targetPort: port)
         self.presentBroadcastPicker()
         result(true)
+      } else if call.method == "getExtensionStatus" {
+        let defaults = UserDefaults(suiteName: self.appGroup)
+        let status = defaults?.string(forKey: "extension_status") ?? "STOPPED"
+        let port = defaults?.integer(forKey: "extension_active_port") ?? Int(self.defaultPort)
+        let startTime = defaults?.double(forKey: "extension_start_time") ?? 0.0
+        let socketState = defaults?.string(forKey: "extension_socket_state") ?? "IDLE"
+        result([
+          "status": status,
+          "port": port,
+          "startTime": startTime,
+          "socketState": socketState
+        ])
       } else {
         result(FlutterMethodNotImplemented)
       }
@@ -61,10 +73,11 @@ import ReplayKit
   /// Embeds picker invisibly into window hierarchy and sends action to internal UIButton
   private func presentBroadcastPicker() {
     DispatchQueue.main.async {
-      let pickerView = RPSystemBroadcastPickerView(frame: CGRect(x: 0, y: 0, width: 60, height: 60))
+      let pickerView = RPSystemBroadcastPickerView(frame: CGRect(x: 0, y: 0, width: 44, height: 44))
       pickerView.preferredExtension = self.extensionBundleId
       pickerView.showsMicrophoneButton = false
-      pickerView.isHidden = true
+      // Use near-zero alpha instead of isHidden = true so UIKit does not ignore touch dispatch
+      pickerView.alpha = 0.01
 
       // Attach to active window or root view so UIKit processes touch events
       if let window = UIApplication.shared.windows.first(where: { $0.isKeyWindow }) ?? UIApplication.shared.windows.first {
