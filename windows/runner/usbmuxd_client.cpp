@@ -266,74 +266,108 @@ bool UsbmuxdClient::ConnectTunnel(uint32_t device_id,
                                   std::string* error_msg) {
   if (!out_socket) return false;
 
-  SOCKET tunnel_sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-  if (tunnel_sock == INVALID_SOCKET) {
-    if (error_msg) *error_msg = "Failed to create socket for usbmuxd tunnel.";
-    return false;
-  }
+  // Retry loop: the iOS broadcast extension may not have its TCP server
+  // listening yet when the user clicks "Mirror". We retry up to 5 times
+  // with increasing backoff (500ms increments) to handle the timing gap
+  // between starting the broadcast on iOS and connecting from Windows.
+  constexpr int kMaxRetries = 5;
+  constexpr int kBaseDelayMs = 500;
 
-  // Set low-latency TCP_NODELAY on tunnel socket
-  const BOOL flag = TRUE;
-  setsockopt(tunnel_sock, IPPROTO_TCP, TCP_NODELAY, reinterpret_cast<const char*>(&flag), sizeof(flag));
+  for (int attempt = 0; attempt < kMaxRetries; ++attempt) {
+    if (attempt > 0) {
+      // Backoff before retry: 500ms, 1000ms, 1500ms, 2000ms
+      const int delay_ms = kBaseDelayMs * attempt;
+      std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms));
+    }
 
-  sockaddr_in server_addr{};
-  server_addr.sin_family = AF_INET;
-  server_addr.sin_port = htons(kUsbmuxdDefaultPort);
-  inet_pton(AF_INET, kUsbmuxdLoopbackIp, &server_addr.sin_addr);
+    SOCKET tunnel_sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (tunnel_sock == INVALID_SOCKET) {
+      if (error_msg) *error_msg = "Failed to create socket for usbmuxd tunnel.";
+      return false;
+    }
 
-  if (connect(tunnel_sock, reinterpret_cast<sockaddr*>(&server_addr), sizeof(server_addr)) != 0) {
+    // Set low-latency TCP_NODELAY on tunnel socket
+    const BOOL flag = TRUE;
+    setsockopt(tunnel_sock, IPPROTO_TCP, TCP_NODELAY, reinterpret_cast<const char*>(&flag), sizeof(flag));
+
+    sockaddr_in server_addr{};
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_port = htons(kUsbmuxdDefaultPort);
+    inet_pton(AF_INET, kUsbmuxdLoopbackIp, &server_addr.sin_addr);
+
+    if (connect(tunnel_sock, reinterpret_cast<sockaddr*>(&server_addr), sizeof(server_addr)) != 0) {
+      closesocket(tunnel_sock);
+      if (error_msg) *error_msg = "Could not reach local usbmuxd daemon on 127.0.0.1:27015.";
+      return false;
+    }
+
+    // Target Port in Network Byte Order as specified in brain.md line 97:
+    // htons converts host byte order to network byte order
+    const uint16_t port_nbo = htons(target_port);
+
+    std::ostringstream ss;
+    ss << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+       << "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n"
+       << "<plist version=\"1.0\">\n"
+       << "<dict>\n"
+       << "    <key>BundleID</key><string>com.applecast.mirror</string>\n"
+       << "    <key>ClientVersionString</key><string>applecast-1.0</string>\n"
+       << "    <key>MessageType</key><string>Connect</string>\n"
+       << "    <key>ProgName</key><string>AppleCast</string>\n"
+       << "    <key>DeviceID</key><integer>" << device_id << "</integer>\n"
+       << "    <key>PortNumber</key><integer>" << port_nbo << "</integer>\n"
+       << "</dict>\n"
+       << "</plist>\n";
+
+    if (!SendUsbmuxPacket(tunnel_sock, ss.str(), 2)) {
+      closesocket(tunnel_sock);
+      if (error_msg) *error_msg = "Failed to send 'Connect' request to usbmuxd.";
+      return false;
+    }
+
+    std::string response_xml;
+    if (!ReceiveUsbmuxPacket(tunnel_sock, &response_xml, 5000)) {
+      closesocket(tunnel_sock);
+      if (error_msg) *error_msg = "Timed out waiting for usbmuxd 'Connect' response.";
+      return false;
+    }
+
+    const int result_code = ParseResultCode(response_xml);
+    if (result_code == 0) {
+      // Success! The socket is now transparently tunneling raw TCP directly to port 15333 on the iOS device!
+      *out_socket = tunnel_sock;
+      return true;
+    }
+
+    // Connection refused (61 = ECONNREFUSED, 3 = usbmuxd internal error):
+    // The iOS broadcast extension TCP server may not be listening yet.
+    // Close this socket and retry after backoff.
     closesocket(tunnel_sock);
-    if (error_msg) *error_msg = "Could not reach local usbmuxd daemon on 127.0.0.1:27015.";
-    return false;
-  }
 
-  // Target Port in Network Byte Order as specified in brain.md line 97:
-  // htons converts host byte order to network byte order
-  const uint16_t port_nbo = htons(target_port);
-
-  std::ostringstream ss;
-  ss << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
-     << "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n"
-     << "<plist version=\"1.0\">\n"
-     << "<dict>\n"
-     << "    <key>BundleID</key><string>com.applecast.mirror</string>\n"
-     << "    <key>ClientVersionString</key><string>applecast-1.0</string>\n"
-     << "    <key>MessageType</key><string>Connect</string>\n"
-     << "    <key>ProgName</key><string>AppleCast</string>\n"
-     << "    <key>DeviceID</key><integer>" << device_id << "</integer>\n"
-     << "    <key>PortNumber</key><integer>" << port_nbo << "</integer>\n"
-     << "</dict>\n"
-     << "</plist>\n";
-
-  if (!SendUsbmuxPacket(tunnel_sock, ss.str(), 2)) {
-    closesocket(tunnel_sock);
-    if (error_msg) *error_msg = "Failed to send 'Connect' request to usbmuxd.";
-    return false;
-  }
-
-  std::string response_xml;
-  if (!ReceiveUsbmuxPacket(tunnel_sock, &response_xml, 5000)) {
-    closesocket(tunnel_sock);
-    if (error_msg) *error_msg = "Timed out waiting for usbmuxd 'Connect' response.";
-    return false;
-  }
-
-  const int result_code = ParseResultCode(response_xml);
-  if (result_code != 0) {
-    closesocket(tunnel_sock);
-    if (error_msg) {
-      if (result_code == 61) {
-        *error_msg = "Connection refused on target port 15333. Please ensure the iOS AppleCast broadcast is active.";
-      } else {
-        *error_msg = "usbmuxd rejected connection with result code: " + std::to_string(result_code);
+    if (result_code == 61 || result_code == 3) {
+      // Retryable: iOS broadcast server not ready yet
+      if (attempt < kMaxRetries - 1) {
+        continue;  // Try again after backoff
       }
+      // Exhausted all retries
+      if (error_msg) {
+        *error_msg = "Connection refused on target port " + std::to_string(target_port) +
+                     " after " + std::to_string(kMaxRetries) +
+                     " attempts. Please ensure the iOS AppleCast broadcast is active.";
+      }
+      return false;
+    }
+
+    // Non-retryable error
+    if (error_msg) {
+      *error_msg = "usbmuxd rejected connection with result code: " + std::to_string(result_code);
     }
     return false;
   }
 
-  // Result code 0: The socket is now transparently tunneling raw TCP directly to port 15333 on the iOS device!
-  *out_socket = tunnel_sock;
-  return true;
+  // Should not reach here, but safety net
+  if (error_msg) *error_msg = "ConnectTunnel exhausted retry attempts.";
+  return false;
 }
 
 }  // namespace applecast

@@ -151,6 +151,7 @@ class MirrorController extends ChangeNotifier {
       selectedDevice: targetDevice,
       status: MirrorConnectionStatus.connected,
       clearError: true,
+      errorMessage: 'Connecting to iOS broadcast on port 15333...',
     );
     notifyListeners();
 
@@ -164,6 +165,8 @@ class MirrorController extends ChangeNotifier {
     }
 
     // 2. Connect virtual TCP tunnel to iOS companion app port 15333
+    //    The native side retries up to 5 times with backoff if the iOS broadcast
+    //    extension's TCP server isn't listening yet.
     final bool success = await _channelService.connectDevice(
       deviceId: targetDevice.deviceId,
     );
