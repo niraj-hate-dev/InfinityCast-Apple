@@ -202,7 +202,7 @@ class SampleHandler: RPBroadcastSampleHandler {
         guard clientSocket >= 0 else { return }
 
         guard let formatDesc = CMSampleBufferGetFormatDescription(sampleBuffer),
-              let blockBuffer = CMSampleBufferGetDataPointer(sampleBuffer, atIndex: 0, lengthAtOffsetOut: nil, totalLengthOut: nil, dataPointerOut: nil) != nil ? CMSampleBufferGetDataBuffer(sampleBuffer) : nil else {
+              let blockBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else {
             return
         }
 
@@ -228,7 +228,7 @@ class SampleHandler: RPBroadcastSampleHandler {
         var totalLength: size_t = 0
         var dataPointer: UnsafeMutablePointer<Int8>?
 
-        CMBlockBufferGetDataPointer(blockBuffer, atIndex: 0, lengthAtOffsetOut: nil, totalLengthOut: &totalLength, dataPointerOut: &dataPointer)
+        CMBlockBufferGetDataPointer(blockBuffer, atOffset: 0, lengthAtOffsetOut: nil, totalLengthOut: &totalLength, dataPointerOut: &dataPointer)
 
         guard let rawBytes = dataPointer else { return }
 
