@@ -1,3 +1,4 @@
+import 'debug_log_entry.dart';
 import 'device_info.dart';
 import 'stream_metrics.dart';
 
@@ -21,6 +22,8 @@ class MirrorState {
   final bool isRotatedLandscape;
   final bool isFullscreen;
   final bool isHudVisible;
+  final bool isConsoleVisible;
+  final List<DebugLogEntry> logs;
 
   const MirrorState({
     this.status = MirrorConnectionStatus.scanning,
@@ -32,6 +35,8 @@ class MirrorState {
     this.isRotatedLandscape = false,
     this.isFullscreen = false,
     this.isHudVisible = true,
+    this.isConsoleVisible = false,
+    this.logs = const [],
   });
 
   bool get isMirroring => status == MirrorConnectionStatus.mirroring && textureId != null;
@@ -51,6 +56,8 @@ class MirrorState {
     bool? isRotatedLandscape,
     bool? isFullscreen,
     bool? isHudVisible,
+    bool? isConsoleVisible,
+    List<DebugLogEntry>? logs,
   }) {
     return MirrorState(
       status: status ?? this.status,
@@ -62,6 +69,8 @@ class MirrorState {
       isRotatedLandscape: isRotatedLandscape ?? this.isRotatedLandscape,
       isFullscreen: isFullscreen ?? this.isFullscreen,
       isHudVisible: isHudVisible ?? this.isHudVisible,
+      isConsoleVisible: isConsoleVisible ?? this.isConsoleVisible,
+      logs: logs ?? this.logs,
     );
   }
 }

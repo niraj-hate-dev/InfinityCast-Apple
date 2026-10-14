@@ -13,10 +13,12 @@ class MirrorViewport extends StatelessWidget {
   final bool isRotatedLandscape;
   final bool isHudVisible;
   final StreamMetrics metrics;
+  final bool isConsoleVisible;
   final VoidCallback onToggleRotate;
   final VoidCallback onStopMirroring;
   final VoidCallback onToggleFullscreen;
   final VoidCallback onToggleHud;
+  final VoidCallback? onToggleConsole;
 
   const MirrorViewport({
     super.key,
@@ -24,11 +26,13 @@ class MirrorViewport extends StatelessWidget {
     required this.status,
     required this.isRotatedLandscape,
     required this.isHudVisible,
+    this.isConsoleVisible = false,
     required this.metrics,
     required this.onToggleRotate,
     required this.onStopMirroring,
     required this.onToggleFullscreen,
     required this.onToggleHud,
+    this.onToggleConsole,
   });
 
   bool get isMirroring => status == MirrorConnectionStatus.mirroring && textureId != null;
@@ -124,8 +128,10 @@ class MirrorViewport extends StatelessWidget {
             bottom: 24,
             child: ControlToolbar(
               isRotated: isRotatedLandscape,
+              isConsoleVisible: isConsoleVisible,
               onToggleRotate: onToggleRotate,
               onStopMirroring: onStopMirroring,
+              onToggleConsole: onToggleConsole,
             ),
           ),
         ],

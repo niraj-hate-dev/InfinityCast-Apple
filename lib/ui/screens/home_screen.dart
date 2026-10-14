@@ -4,6 +4,7 @@ import '../../core/constants.dart';
 import '../../core/theme.dart';
 import '../../models/mirror_state.dart';
 import '../../services/mirror_controller.dart';
+import '../widgets/debug_console.dart';
 import '../widgets/device_card.dart';
 import '../widgets/ios_transmitter_view.dart';
 import '../widgets/mirror_viewport.dart';
@@ -57,11 +58,13 @@ class _HomeScreenState extends State<HomeScreen> {
                   status: state.status,
                   isRotatedLandscape: state.isRotatedLandscape,
                   isHudVisible: state.isHudVisible,
+                  isConsoleVisible: state.isConsoleVisible,
                   metrics: state.metrics,
                   onToggleRotate: _controller.toggleRotation,
                   onStopMirroring: _controller.stopMirroring,
                   onToggleFullscreen: _controller.toggleFullscreen,
                   onToggleHud: _controller.toggleHudVisibility,
+                  onToggleConsole: _controller.toggleConsoleVisibility,
                 ),
                 Positioned(
                   top: 16,
@@ -75,6 +78,19 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                   ),
                 ),
+                // Floating Developer Console Overlay in Fullscreen
+                if (state.isConsoleVisible)
+                  Positioned(
+                    right: 20,
+                    bottom: 20,
+                    width: 580,
+                    height: 320,
+                    child: DebugConsole(
+                      logs: state.logs,
+                      onClose: _controller.toggleConsoleVisibility,
+                      onClear: _controller.clearLogs,
+                    ),
+                  ),
               ],
             ),
           );
@@ -83,28 +99,47 @@ class _HomeScreenState extends State<HomeScreen> {
         return Scaffold(
           backgroundColor: AppleCastTheme.darkBackground,
           appBar: _buildDesktopAppBar(state),
-          body: Row(
+          body: Stack(
             children: [
-              // Left Sidebar: Device Management & Usbmuxd Discovery
-              SizedBox(
-                width: 330,
-                child: _buildDeviceSidebar(state),
+              Row(
+                children: [
+                  // Left Sidebar: Device Management & Usbmuxd Discovery
+                  SizedBox(
+                    width: 330,
+                    child: _buildDeviceSidebar(state),
+                  ),
+                  const VerticalDivider(width: 1, color: AppleCastTheme.darkBorder),
+                  // Main Video Viewport Canvas
+                  Expanded(
+                    child: MirrorViewport(
+                      textureId: state.textureId,
+                      status: state.status,
+                      isRotatedLandscape: state.isRotatedLandscape,
+                      isHudVisible: state.isHudVisible,
+                      isConsoleVisible: state.isConsoleVisible,
+                      metrics: state.metrics,
+                      onToggleRotate: _controller.toggleRotation,
+                      onStopMirroring: _controller.stopMirroring,
+                      onToggleFullscreen: _controller.toggleFullscreen,
+                      onToggleHud: _controller.toggleHudVisibility,
+                      onToggleConsole: _controller.toggleConsoleVisibility,
+                    ),
+                  ),
+                ],
               ),
-              const VerticalDivider(width: 1, color: AppleCastTheme.darkBorder),
-              // Main Video Viewport Canvas
-              Expanded(
-                child: MirrorViewport(
-                  textureId: state.textureId,
-                  status: state.status,
-                  isRotatedLandscape: state.isRotatedLandscape,
-                  isHudVisible: state.isHudVisible,
-                  metrics: state.metrics,
-                  onToggleRotate: _controller.toggleRotation,
-                  onStopMirroring: _controller.stopMirroring,
-                  onToggleFullscreen: _controller.toggleFullscreen,
-                  onToggleHud: _controller.toggleHudVisibility,
+              // Floating Developer Debug Console Overlay
+              if (state.isConsoleVisible)
+                Positioned(
+                  right: 20,
+                  bottom: 20,
+                  width: 580,
+                  height: 320,
+                  child: DebugConsole(
+                    logs: state.logs,
+                    onClose: _controller.toggleConsoleVisibility,
+                    onClear: _controller.clearLogs,
+                  ),
                 ),
-              ),
             ],
           ),
         );
@@ -116,6 +151,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return AppBar(
       backgroundColor: AppleCastTheme.darkSurface,
       title: Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
           Container(
             padding: const EdgeInsets.all(6),
@@ -129,7 +165,7 @@ class _HomeScreenState extends State<HomeScreen> {
               size: 20,
             ),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 10),
           const Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -148,8 +184,10 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ],
           ),
-          const SizedBox(width: 24),
-          _buildDaemonStatusBadge(state),
+          const SizedBox(width: 14),
+          Flexible(
+            child: _buildDaemonStatusBadge(state),
+          ),
         ],
       ),
       actions: [
@@ -161,6 +199,15 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           tooltip: 'Toggle Telemetry HUD',
           onPressed: _controller.toggleHudVisibility,
+        ),
+        IconButton(
+          icon: Icon(
+            state.isConsoleVisible ? Icons.terminal_rounded : Icons.terminal_outlined,
+            size: 20,
+            color: state.isConsoleVisible ? AppleCastTheme.appleGreen : AppleCastTheme.textSecondary,
+          ),
+          tooltip: 'Toggle Developer Debug Console',
+          onPressed: _controller.toggleConsoleVisibility,
         ),
         IconButton(
           icon: const Icon(Icons.fullscreen_rounded, size: 22),
@@ -214,13 +261,17 @@ class _HomeScreenState extends State<HomeScreen> {
         children: [
           Icon(Icons.circle, size: 7, color: badgeColor),
           const SizedBox(width: 6),
-          Text(
-            statusText,
-            style: TextStyle(
-              fontSize: 11,
-              fontFamily: 'monospace',
-              color: badgeColor,
-              fontWeight: FontWeight.w600,
+          Flexible(
+            child: Text(
+              statusText,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 11,
+                fontFamily: 'monospace',
+                color: badgeColor,
+                fontWeight: FontWeight.w600,
+              ),
             ),
           ),
         ],

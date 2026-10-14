@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:applecast/main.dart';
+import 'package:applecast/models/debug_log_entry.dart';
 import 'package:applecast/models/device_info.dart';
 import 'package:applecast/models/stream_metrics.dart';
+import 'package:applecast/ui/widgets/debug_console.dart';
 import 'package:applecast/ui/widgets/device_card.dart';
 import 'package:applecast/ui/widgets/telemetry_hud.dart';
 
@@ -74,5 +76,47 @@ void main() {
     expect(find.text('15.2 Mbps'), findsOneWidget);
     expect(find.text('H.264 / D3D11VA'), findsOneWidget);
     expect(find.text('1920x1080'), findsOneWidget);
+  });
+
+  testWidgets('DebugConsole renders log entries and responds to clear action', (WidgetTester tester) async {
+    final testLogs = [
+      DebugLogEntry(
+        timestamp: DateTime(2026, 10, 14, 12, 0, 0),
+        tag: 'USBMUXD',
+        message: 'Device attached: iPhone 15 Pro',
+        level: LogLevel.success,
+      ),
+      DebugLogEntry(
+        timestamp: DateTime(2026, 10, 14, 12, 0, 1),
+        tag: 'STREAM',
+        message: '60.0 FPS | 15.0 Mbps | IDR keyframe received',
+        level: LogLevel.frame,
+      ),
+    ];
+
+    bool cleared = false;
+    bool closed = false;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: DebugConsole(
+            logs: testLogs,
+            onClose: () => closed = true,
+            onClear: () => cleared = true,
+          ),
+        ),
+      ),
+    );
+
+    expect(find.text('DEVELOPER DEBUG CONSOLE'), findsOneWidget);
+    expect(find.text('Device attached: iPhone 15 Pro'), findsOneWidget);
+    expect(find.text('60.0 FPS | 15.0 Mbps | IDR keyframe received'), findsOneWidget);
+
+    await tester.tap(find.byIcon(Icons.delete_sweep_outlined));
+    expect(cleared, isTrue);
+
+    await tester.tap(find.byIcon(Icons.close_rounded));
+    expect(closed, isTrue);
   });
 }

@@ -5,14 +5,18 @@ import '../../core/theme.dart';
 /// Floating control bar for active mirroring actions (Rotate, Fullscreen, Disconnect).
 class ControlToolbar extends StatelessWidget {
   final bool isRotated;
+  final bool isConsoleVisible;
   final VoidCallback onToggleRotate;
   final VoidCallback onStopMirroring;
+  final VoidCallback? onToggleConsole;
 
   const ControlToolbar({
     super.key,
     required this.isRotated,
+    this.isConsoleVisible = false,
     required this.onToggleRotate,
     required this.onStopMirroring,
+    this.onToggleConsole,
   });
 
   @override
@@ -66,6 +70,16 @@ class ControlToolbar extends StatelessWidget {
                   );
                 },
               ),
+              if (onToggleConsole != null) ...[
+                const SizedBox(width: 4),
+                _buildIconButton(
+                  icon: Icons.terminal_rounded,
+                  tooltip: 'Developer Debug Console',
+                  onPressed: onToggleConsole!,
+                  isActive: isConsoleVisible,
+                  color: isConsoleVisible ? AppleCastTheme.appleGreen : Colors.white,
+                ),
+              ],
               Container(
                 height: 20,
                 width: 1,

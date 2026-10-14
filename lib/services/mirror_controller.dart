@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
+import '../models/debug_log_entry.dart';
 import '../models/device_info.dart';
 import '../models/mirror_state.dart';
 import '../models/stream_metrics.dart';
@@ -16,10 +17,50 @@ class MirrorController extends ChangeNotifier {
   StreamSubscription<Map<String, dynamic>>? _statusSub;
   Timer? _disconnectResetTimer;
 
+  final List<DebugLogEntry> _logs = [];
+  static const int _maxLogs = 500;
+  double _lastFps = 0.0;
+  int _lastDroppedFrames = 0;
+
   MirrorController({PlatformChannelService? channelService})
       : _channelService = channelService ?? PlatformChannelService();
 
   MirrorState get state => _state;
+
+  /// Appends a new timestamped log entry to the internal developer console buffer.
+  void addLog(String tag, String message, {LogLevel level = LogLevel.info}) {
+    final entry = DebugLogEntry(
+      timestamp: DateTime.now(),
+      tag: tag,
+      message: message,
+      level: level,
+    );
+    _logs.add(entry);
+    if (_logs.length > _maxLogs) {
+      _logs.removeRange(0, _logs.length - _maxLogs);
+    }
+    _state = _state.copyWith(logs: List.unmodifiable(_logs));
+    notifyListeners();
+  }
+
+  /// Clears all entries from the developer debug console.
+  void clearLogs() {
+    _logs.clear();
+    _state = _state.copyWith(logs: const []);
+    notifyListeners();
+  }
+
+  /// Toggles visibility of the floating developer debug console terminal.
+  void toggleConsoleVisibility() {
+    final nextVisible = !_state.isConsoleVisible;
+    _state = _state.copyWith(isConsoleVisible: nextVisible);
+    addLog(
+      'CONSOLE',
+      nextVisible ? 'Debug terminal overlay opened.' : 'Debug terminal overlay closed.',
+      level: LogLevel.info,
+    );
+    notifyListeners();
+  }
 
   /// Initializes the controller and starts listening for usbmuxd device discovery events.
   Future<void> initialize() async {
@@ -28,6 +69,9 @@ class MirrorController extends ChangeNotifier {
       clearError: true,
     );
     notifyListeners();
+
+    addLog('SYSTEM', 'AppleCast host initialized. Listening for usbmuxd events...', level: LogLevel.info);
+    addLog('USBMUXD', 'Connecting to daemon on 127.0.0.1:27015 (USB Multiplexer)...', level: LogLevel.info);
 
     _subscribeChannels();
     await _channelService.startDeviceDiscovery();
@@ -43,6 +87,7 @@ class MirrorController extends ChangeNotifier {
     _deviceSub = _channelService.devicesStream.listen((devices) {
       _handleDeviceListUpdate(devices);
     }, onError: (err) {
+      addLog('USBMUXD', 'usbmuxd daemon discovery error: $err', level: LogLevel.error);
       _state = _state.copyWith(
         status: MirrorConnectionStatus.error,
         errorMessage: 'usbmuxd daemon discovery error: $err',
@@ -53,6 +98,31 @@ class MirrorController extends ChangeNotifier {
     _metricsSub?.cancel();
     _metricsSub = _channelService.metricsStream.listen((metrics) {
       if (_state.status == MirrorConnectionStatus.mirroring) {
+        // Detect initial frame or IDR recovery
+        if (_lastFps == 0.0 && metrics.fps > 0.0) {
+          addLog(
+            'DECODER',
+            'IDR keyframe received! Hardware decoding stream active at ${metrics.width}x${metrics.height} (${metrics.codec})',
+            level: LogLevel.success,
+          );
+        }
+
+        // Detect frame drop surge
+        if (metrics.droppedFrames > _lastDroppedFrames) {
+          final diff = metrics.droppedFrames - _lastDroppedFrames;
+          addLog('DECODER', 'Frame drops detected: +$diff frame(s) dropped (total: ${metrics.droppedFrames})', level: LogLevel.warning);
+        }
+
+        _lastFps = metrics.fps;
+        _lastDroppedFrames = metrics.droppedFrames;
+
+        // Log continuous frame telemetry
+        addLog(
+          'STREAM',
+          '${metrics.fps.toStringAsFixed(1)} FPS | ${(metrics.bitrateMbps).toStringAsFixed(2)} Mbps | ${metrics.latencyMs.toStringAsFixed(1)}ms | ${metrics.width}x${metrics.height} | Pkts: ${metrics.packetsReceived} | Drops: ${metrics.droppedFrames}',
+          level: LogLevel.frame,
+        );
+
         _state = _state.copyWith(metrics: metrics);
         notifyListeners();
       }
@@ -68,12 +138,20 @@ class MirrorController extends ChangeNotifier {
   }
 
   void _handleDeviceListUpdate(List<IosDeviceInfo> devices) {
+    // Check if any device was newly attached or detached
+    for (final dev in devices) {
+      if (!_state.devices.any((d) => d.deviceId == dev.deviceId)) {
+        addLog('USBMUXD', 'Device attached: ${dev.deviceName} (${dev.serialNumber}) [${dev.connectionType} ${(dev.connectionSpeed / 1000000).toStringAsFixed(0)} Mbps]', level: LogLevel.success);
+      }
+    }
+
     // Check if the currently active device was unplugged
     final activeDevice = _state.selectedDevice;
     final bool activeWasUnplugged = activeDevice != null &&
         !devices.any((d) => d.deviceId == activeDevice.deviceId || d.serialNumber == activeDevice.serialNumber);
 
     if (activeWasUnplugged) {
+      addLog('USBMUXD', 'Active device (${activeDevice.serialNumber}) unplugged from USB cable.', level: LogLevel.warning);
       handleDeviceDisconnected('Device was unplugged from the USB port.');
       return;
     }
@@ -104,6 +182,7 @@ class MirrorController extends ChangeNotifier {
     switch (statusStr) {
       case 'mirroring':
         final tex = data['textureId'] as int?;
+        addLog('PIPELINE', 'Native status: Mirroring active on TextureId $tex', level: LogLevel.success);
         _state = _state.copyWith(
           status: MirrorConnectionStatus.mirroring,
           textureId: tex ?? _state.textureId,
@@ -111,12 +190,15 @@ class MirrorController extends ChangeNotifier {
         );
         break;
       case 'disconnected':
+        addLog('PIPELINE', 'Native status: Disconnected by host or device.', level: LogLevel.warning);
         handleDeviceDisconnected('Mirroring session ended by host or device.');
         break;
       case 'error':
+        final msg = data['message']?.toString() ?? 'Streaming pipeline error.';
+        addLog('PIPELINE', 'Native error: $msg', level: LogLevel.error);
         _state = _state.copyWith(
           status: MirrorConnectionStatus.error,
-          errorMessage: data['message']?.toString() ?? 'Streaming pipeline error.',
+          errorMessage: msg,
         );
         break;
     }
@@ -126,6 +208,8 @@ class MirrorController extends ChangeNotifier {
   /// Selects a detected iOS device.
   void selectDevice(IosDeviceInfo device) {
     if (_state.status == MirrorConnectionStatus.mirroring) return;
+
+    addLog('SELECTION', 'Device selected: ${device.deviceName} (${device.serialNumber})', level: LogLevel.info);
 
     _state = _state.copyWith(
       selectedDevice: device,
@@ -139,6 +223,7 @@ class MirrorController extends ChangeNotifier {
   Future<void> startMirroring({IosDeviceInfo? device}) async {
     final targetDevice = device ?? _state.selectedDevice;
     if (targetDevice == null) {
+      addLog('PIPELINE', 'Cannot mirror: No iOS device selected.', level: LogLevel.warning);
       _state = _state.copyWith(
         status: MirrorConnectionStatus.error,
         errorMessage: 'Please select an iOS device before mirroring.',
@@ -146,6 +231,8 @@ class MirrorController extends ChangeNotifier {
       notifyListeners();
       return;
     }
+
+    addLog('PIPELINE', 'Initiating mirroring session with ${targetDevice.deviceName} (UDID: ${targetDevice.serialNumber})...', level: LogLevel.info);
 
     _state = _state.copyWith(
       selectedDevice: targetDevice,
@@ -158,8 +245,10 @@ class MirrorController extends ChangeNotifier {
     // 1. Ensure Flutter Engine TextureRegistrar allocates a texture
     int? textureId = _state.textureId;
     if (textureId == null) {
+      addLog('D3D11VA', 'Allocating zero-copy Direct3D 11 surface texture...', level: LogLevel.info);
       textureId = await _channelService.registerTexture();
       textureId ??= 1001; // Mock fallback for preview if native registrar not yet bound
+      addLog('D3D11VA', 'Texture surface registered: ID=$textureId', level: LogLevel.success);
       _state = _state.copyWith(textureId: textureId);
       notifyListeners();
     }
@@ -167,11 +256,14 @@ class MirrorController extends ChangeNotifier {
     // 2. Connect virtual TCP tunnel to iOS companion app port 15333
     //    The native side retries up to 5 times with backoff if the iOS broadcast
     //    extension's TCP server isn't listening yet.
+    addLog('TUNNEL', 'Opening usbmuxd virtual TCP tunnel to device port 15333 (with backoff retry)...', level: LogLevel.info);
+
     final bool success = await _channelService.connectDevice(
       deviceId: targetDevice.deviceId,
     );
 
     if (success) {
+      addLog('TUNNEL', 'Virtual TCP tunnel connected! Demuxing RFC 2326 Interleaved RTP stream...', level: LogLevel.success);
       _state = _state.copyWith(
         status: MirrorConnectionStatus.mirroring,
         metrics: const StreamMetrics(
@@ -184,6 +276,7 @@ class MirrorController extends ChangeNotifier {
         ),
       );
     } else {
+      addLog('TUNNEL', 'Connection failed on port 15333. iOS AppleCast broadcast may not be active.', level: LogLevel.error);
       _state = _state.copyWith(
         status: MirrorConnectionStatus.error,
         errorMessage: 'Could not connect to port 15333 on device ${targetDevice.serialNumber}. Make sure the AppleCast broadcast is active on iOS.',
@@ -194,6 +287,7 @@ class MirrorController extends ChangeNotifier {
 
   /// Stops the current screen mirroring session gracefully.
   Future<void> stopMirroring() async {
+    addLog('PIPELINE', 'User requested stream disconnect. Teardown underway...', level: LogLevel.info);
     await _channelService.disconnectDevice();
     handleDeviceDisconnected(null);
   }
@@ -201,6 +295,10 @@ class MirrorController extends ChangeNotifier {
   /// Graceful disconnection handler that resets pipeline and transitions back safely.
   void handleDeviceDisconnected(String? message) {
     _disconnectResetTimer?.cancel();
+    _lastFps = 0.0;
+    _lastDroppedFrames = 0;
+
+    addLog('PIPELINE', 'Stream teardown complete. Texture unmapped.', level: LogLevel.info);
 
     _state = _state.copyWith(
       status: MirrorConnectionStatus.disconnected,
@@ -226,11 +324,13 @@ class MirrorController extends ChangeNotifier {
 
   /// Requests trust authorization from iOS device over lockdown port 62078.
   Future<void> requestPairTrust(int deviceId) async {
+    addLog('LOCKDOWN', 'Sending lockdown pair authorization request for device ID $deviceId...', level: LogLevel.info);
     await _channelService.requestPairTrust(deviceId);
   }
 
   /// Manually triggers a rescan of usbmuxd attached devices.
   Future<void> rescan() async {
+    addLog('USBMUXD', 'Manual USB bus rescan requested.', level: LogLevel.info);
     await initialize();
   }
 
@@ -242,7 +342,9 @@ class MirrorController extends ChangeNotifier {
 
   /// Toggles canvas orientation (0 deg portrait vs 90 deg landscape).
   void toggleRotation() {
-    _state = _state.copyWith(isRotatedLandscape: !_state.isRotatedLandscape);
+    final next = !_state.isRotatedLandscape;
+    addLog('VIEWPORT', next ? 'Orientation switched to Landscape (19.5:9)' : 'Orientation switched to Portrait (9:19.5)', level: LogLevel.info);
+    _state = _state.copyWith(isRotatedLandscape: next);
     notifyListeners();
   }
 
@@ -260,6 +362,7 @@ class MirrorController extends ChangeNotifier {
 
   /// Launches iOS companion broadcast picker.
   Future<void> launchIosBroadcastPicker() async {
+    addLog('REPLAYKIT', 'Invoking RPSystemBroadcastPickerView on iOS companion...', level: LogLevel.info);
     await _channelService.launchBroadcastPicker();
   }
 
