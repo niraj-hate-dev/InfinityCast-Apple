@@ -7,7 +7,6 @@ import ReplayKit
 
   private let appGroup = "group.applecast.mirror"
   private let defaultPort: UInt16 = 15333
-  private let extensionBundleId = "com.applecast.applecast.AppleCastExtension"
 
   override func application(
     _ application: UIApplication,
@@ -69,12 +68,44 @@ import ReplayKit
     }
   }
 
+  /// Dynamically detects the runtime Bundle Identifier of AppleCastExtension.appex
+  /// Sideloaders (AltStore, Sideloadly) rewrite both the host app and extension Bundle IDs
+  /// upon re-signing. Reading the actual CFBundleIdentifier directly from the installed .appex
+  /// guarantees that RPSystemBroadcastPickerView matches the exact re-signed extension ID.
+  private func resolveExtensionBundleIdentifier() -> String {
+    if let pluginsPath = Bundle.main.builtInPlugInsPath {
+      let fileManager = FileManager.default
+      if let items = try? fileManager.contentsOfDirectory(atPath: pluginsPath) {
+        for item in items where item.hasSuffix(".appex") {
+          let plistPath = (pluginsPath as NSString).appendingPathComponent("\(item)/Info.plist")
+          if let plistData = try? Data(contentsOf: URL(fileURLWithPath: plistPath)),
+             let plist = try? PropertyListSerialization.propertyList(from: plistData, format: nil) as? [String: Any],
+             let bundleId = plist["CFBundleIdentifier"] as? String, !bundleId.isEmpty {
+            NSLog("[AppleCast Host] Discovered runtime extension bundle ID from %@: %@", item, bundleId)
+            return bundleId
+          }
+        }
+      }
+    }
+
+    if let mainBundleId = Bundle.main.bundleIdentifier, !mainBundleId.isEmpty {
+      let fallbackId = "\(mainBundleId).AppleCastExtension"
+      NSLog("[AppleCast Host] Using fallback extension bundle ID: %@", fallbackId)
+      return fallbackId
+    }
+
+    return "com.applecast.applecast.AppleCastExtension"
+  }
+
   /// Automatically triggers RPSystemBroadcastPickerView presentation
   /// Embeds picker invisibly into window hierarchy and sends action to internal UIButton
   private func presentBroadcastPicker() {
     DispatchQueue.main.async {
+      let extensionId = self.resolveExtensionBundleIdentifier()
+      NSLog("[AppleCast Host] Presenting RPSystemBroadcastPickerView with target: %@", extensionId)
+
       let pickerView = RPSystemBroadcastPickerView(frame: CGRect(x: 0, y: 0, width: 44, height: 44))
-      pickerView.preferredExtension = self.extensionBundleId
+      pickerView.preferredExtension = extensionId
       pickerView.showsMicrophoneButton = false
       // Use near-zero alpha instead of isHidden = true so UIKit does not ignore touch dispatch
       pickerView.alpha = 0.01

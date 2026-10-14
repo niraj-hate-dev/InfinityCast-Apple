@@ -490,3 +490,8 @@ private func compressionCallback(
     let handler = Unmanaged<SampleHandler>.fromOpaque(refCon).takeUnretainedValue()
     handler.sendEncodedSampleBuffer(sampleBuffer)
 }
+
+/// Objective-C runtime alias ensuring that both "AppleCastExtension.SampleHandler"
+/// and "@objc(SampleHandler)" resolve in NSClassFromString / ReplayKit plugin loader.
+@objc(SampleHandler)
+class DirectSampleHandler: SampleHandler {}

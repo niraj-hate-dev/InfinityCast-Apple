@@ -87,8 +87,57 @@ jobs:
         run: |
           mkdir -p build/ios/ipa/Payload
           cp -r build/ios/iphoneos/Runner.app build/ios/ipa/Payload/
+
+          RUNNER_PLIST="build/ios/ipa/Payload/Runner.app/Info.plist"
+          EXT_PLIST="build/ios/ipa/Payload/Runner.app/PlugIns/AppleCastExtension.appex/Info.plist"
+
+          echo "=== Inspecting Runner and Extension Plists ==="
+          RUNNER_BUNDLE_ID=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$RUNNER_PLIST")
+          RUNNER_MIN_OS=$(/usr/libexec/PlistBuddy -c "Print :MinimumOSVersion" "$RUNNER_PLIST" 2>/dev/null || echo "15.0")
+          RUNNER_SHORT_VER=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$RUNNER_PLIST" 2>/dev/null || echo "1.0.0")
+          RUNNER_VER=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$RUNNER_PLIST" 2>/dev/null || echo "1")
+
+          echo "Runner Bundle ID: $RUNNER_BUNDLE_ID"
+          echo "Runner MinimumOSVersion: $RUNNER_MIN_OS"
+          echo "Runner Short Version: $RUNNER_SHORT_VER"
+          echo "Runner Build Version: $RUNNER_VER"
+
+          if [ -f "$EXT_PLIST" ]; then
+            echo "Configuring AppleCastExtension.appex/Info.plist with exact Runner metadata..."
+            /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier ${RUNNER_BUNDLE_ID}.AppleCastExtension" "$EXT_PLIST" || \
+            /usr/libexec/PlistBuddy -c "Add :CFBundleIdentifier string ${RUNNER_BUNDLE_ID}.AppleCastExtension" "$EXT_PLIST"
+
+            /usr/libexec/PlistBuddy -c "Set :MinimumOSVersion ${RUNNER_MIN_OS}" "$EXT_PLIST" || \
+            /usr/libexec/PlistBuddy -c "Add :MinimumOSVersion string ${RUNNER_MIN_OS}" "$EXT_PLIST"
+
+            /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${RUNNER_SHORT_VER}" "$EXT_PLIST" || \
+            /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string ${RUNNER_SHORT_VER}" "$EXT_PLIST"
+
+            /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${RUNNER_VER}" "$EXT_PLIST" || \
+            /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string ${RUNNER_VER}" "$EXT_PLIST"
+
+            /usr/libexec/PlistBuddy -c "Set :CFBundlePackageType XPC!" "$EXT_PLIST" || \
+            /usr/libexec/PlistBuddy -c "Add :CFBundlePackageType string XPC!" "$EXT_PLIST"
+
+            /usr/libexec/PlistBuddy -c "Set :CFBundleExecutable AppleCastExtension" "$EXT_PLIST" || \
+            /usr/libexec/PlistBuddy -c "Add :CFBundleExecutable string AppleCastExtension" "$EXT_PLIST"
+
+            /usr/libexec/PlistBuddy -c "Set :CFBundleName AppleCastExtension" "$EXT_PLIST" || \
+            /usr/libexec/PlistBuddy -c "Add :CFBundleName string AppleCastExtension" "$EXT_PLIST"
+
+            /usr/libexec/PlistBuddy -c "Set :NSExtension:NSExtensionPrincipalClass AppleCastExtension.SampleHandler" "$EXT_PLIST" || \
+            /usr/libexec/PlistBuddy -c "Add :NSExtension:NSExtensionPrincipalClass string AppleCastExtension.SampleHandler" "$EXT_PLIST"
+
+            echo "=== Verified AppleCastExtension.appex Info.plist ==="
+            /usr/libexec/PlistBuddy -c "Print" "$EXT_PLIST"
+          else
+            echo "::error::AppleCastExtension.appex/Info.plist not found in Payload!"
+            exit 1
+          fi
+
           echo "=== Contents of Runner.app/PlugIns ==="
           ls -la build/ios/ipa/Payload/Runner.app/PlugIns || true
+
           cd build/ios/ipa
           zip -qr AppleCast-iOS-Unsigned.ipa Payload
           cd ../../..
