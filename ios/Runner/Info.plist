@@ -66,5 +66,16 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>AppleCast connects to your PC over the local USB/Wi-Fi connection to mirror your screen.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_mirrorserver._tcp</string>
+		<string>_applecast._tcp</string>
+	</array>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>audio</string>
+	</array>
 </dict>
 </plist>

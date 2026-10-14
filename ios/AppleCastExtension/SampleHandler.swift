@@ -4,37 +4,60 @@ import Darwin
 
 /// ReplayKit 2 Screen Broadcast Extension (Transmitter Core)
 /// Captures iOS display surfaces, compresses via VideoToolbox hardware encoder (Zero B-Frames),
-/// and streams RFC 2326 Interleaved RTP packets over local loopback TCP socket (127.0.0.1:15333) tunneled via usbmuxd.
+/// monitors Mach kernel memory to prevent Jetsam 50MB OOM kills, and streams RFC 2326 Interleaved RTP
+/// packets over local loopback TCP socket tunneled via usbmuxd.
+@objc(SampleHandler)
 class SampleHandler: RPBroadcastSampleHandler {
 
-    // Architecture Specifications (brain.md Blueprint)
-    private let streamingPort: UInt16 = 15333
-    private let targetFps: Int32 = 60
-    private let targetBitrate: Int = 15_000_000 // 15 Mbps
+    // MARK: - Constants & Architecture Specifications
+    private let appGroupName = "group.applecast.mirror"
+    private let defaultPort: UInt16 = 15333
+    private var streamingPort: UInt16 = 15333
+    private var targetFps: Int32 = 60
+    private var targetBitrate: Int32 = 15_000_000 // 15 Mbps
     private let rtpMagicByte: UInt8 = 0x24       // '$'
     private let rtpChannelVideo: UInt8 = 0x00
     private let rtpPayloadType: UInt8 = 96       // Dynamic H.264
     private let ssrcId: UInt32 = 0x11223344
 
-    // VideoToolbox Pipeline
+    // MARK: - VideoToolbox Pipeline
     private var compressionSession: VTCompressionSession?
     private var frameIndex: Int64 = 0
     private var rtpSequenceNumber: UInt16 = 0
 
-    // Sockets & Concurrency
+    // MARK: - Memory Management & Backpressure State
+    private var sharedDefaults: UserDefaults?
+    private var isMemoryLocked = false
+    private let encodeQueue = DispatchQueue(label: "com.applecast.encoder.queue", qos: .userInteractive)
+
+    // MARK: - Sockets & Concurrency
     private var serverSocket: Int32 = -1
     private var clientSocket: Int32 = -1
     private let socketLock = NSLock()
     private let networkQueue = DispatchQueue(label: "com.applecast.networkQueue", qos: .userInteractive)
     private var isBroadcasting = false
 
+    // MARK: - Broadcast Lifecycle
     override func broadcastStarted(withSetupInfo setupInfo: [String : NSObject]?) {
         isBroadcasting = true
         frameIndex = 0
         rtpSequenceNumber = 0
+        isMemoryLocked = false
 
-        // Step 1: Bind BSD TCP server on 127.0.0.1:15333 to receive usbmuxd tunnel
-        startLocalTcpServer()
+        // Read configuration from shared App Group UserDefaults
+        sharedDefaults = UserDefaults(suiteName: appGroupName)
+        let targetPortInt = sharedDefaults?.integer(forKey: "wxiosserverport") ?? 0
+        streamingPort = targetPortInt > 0 ? UInt16(targetPortInt) : defaultPort
+
+        if let fps = sharedDefaults?.integer(forKey: "videoFps"), fps > 0 {
+            targetFps = Int32(fps)
+        }
+        if let bitrate = sharedDefaults?.integer(forKey: "videoBitrate"), bitrate > 0 {
+            targetBitrate = Int32(bitrate)
+        }
+
+        // Bind BSD TCP server to receive usbmuxd tunnel
+        startLocalTcpServer(port: streamingPort)
     }
 
     override func broadcastPaused() {
@@ -50,17 +73,35 @@ class SampleHandler: RPBroadcastSampleHandler {
         teardownSession()
     }
 
+    // MARK: - Frame Processing Pipeline
     override func processSampleBuffer(_ sampleBuffer: CMSampleBuffer, with sampleBufferType: RPSampleBufferType) {
         guard isBroadcasting else { return }
 
         switch sampleBufferType {
         case .video:
-            guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
-            let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
-            handleVideoPixelBuffer(pixelBuffer, pts: pts)
+            // Critical Jetsam 50MB OOM Prevention:
+            // If physical footprint reaches 41 MB, drop frame immediately without queuing.
+            if isMemoryLocked || getPhysicalFootprintMB() >= 41 {
+                isMemoryLocked = true
+                scheduleMemoryRecoveryCheck()
+                return // Drop frame under memory pressure
+            }
+
+            // Encode on dedicated queue with explicit autoreleasepool to drain CoreVideo buffers
+            encodeQueue.async { [weak self] in
+                autoreleasepool {
+                    guard let self = self, self.isBroadcasting else { return }
+                    guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+                    let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+                    self.handleVideoPixelBuffer(pixelBuffer, pts: pts)
+                }
+            }
 
         case .audioApp:
-            // Reserved for audio channel (0x01)
+            let voiceMuted = sharedDefaults?.bool(forKey: "kGroupMirrorVoiceSwitch") ?? false
+            if !voiceMuted {
+                // Reserved for audio channel
+            }
             break
 
         case .audioMic:
@@ -71,8 +112,31 @@ class SampleHandler: RPBroadcastSampleHandler {
         }
     }
 
-    // MARK: - VideoToolbox Hardware Compression (Zero-Latency Setup)
+    // MARK: - Mach Kernel Memory Diagnostics (TASK_VM_INFO)
+    private func getPhysicalFootprintMB() -> Int64 {
+        var vmInfo = task_vm_info_data_t()
+        var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / 4)
+        let kr = withUnsafeMutablePointer(to: &vmInfo) { infoPtr in
+            infoPtr.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { intPtr in
+                task_info(mach_task_self(), task_flavor_t(TASK_VM_INFO), intPtr, &count)
+            }
+        }
+        guard kr == KERN_SUCCESS else { return -1 }
+        return Int64(vmInfo.phys_footprint >> 20) // Bytes to Megabytes
+    }
 
+    private func scheduleMemoryRecoveryCheck() {
+        DispatchQueue.global().asyncAfter(deadline: .now() + 1.5) { [weak self] in
+            guard let self = self else { return }
+            if self.getPhysicalFootprintMB() <= 39 {
+                self.isMemoryLocked = false
+            } else {
+                self.scheduleMemoryRecoveryCheck()
+            }
+        }
+    }
+
+    // MARK: - VideoToolbox Hardware Compression (Zero-Latency Setup)
     private func handleVideoPixelBuffer(_ pixelBuffer: CVPixelBuffer, pts: CMTime) {
         if compressionSession == nil {
             setupCompressionSession(for: pixelBuffer)
@@ -118,22 +182,37 @@ class SampleHandler: RPBroadcastSampleHandler {
             return
         }
 
-        // Section 4 Blueprint: Configure Real-Time Zero-Latency Encoding
+        // 1. Low-latency real-time flags
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_RealTime, value: kCFBooleanTrue)
-        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ProfileLevel, value: kVTProfileLevel_H264_High_AutoLevel)
-        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AverageBitRate, value: targetBitrate as CFNumber)
-        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameInterval, value: targetFps as CFNumber)
-        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ExpectedFrameRate, value: targetFps as CFNumber)
 
-        // CRITICAL FOR ZERO LATENCY: Disable frame reordering (eliminates B-frame buffering latency)
+        // CRITICAL FOR ZERO LATENCY & MEMORY: Disable frame reordering (strictly eliminates B-frames)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AllowFrameReordering, value: kCFBooleanFalse)
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AllowTemporalCompression, value: kCFBooleanTrue)
+
+        // 2. Profile Level selection (Main for >=1080p, Baseline for <1080p)
+        let profile = width >= 1920 ? kVTProfileLevel_H264_Main_AutoLevel : kVTProfileLevel_H264_Baseline_AutoLevel
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ProfileLevel, value: profile)
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_H264EntropyMode, value: kVTH264EntropyMode_CABAC)
+
+        // 3. Bitrate & Burst Limits (DataRateLimits clamps memory buffers during complex scenes)
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AverageBitRate, value: targetBitrate as CFNumber)
+        let byteLimit = (targetBitrate * 2) / 8 // 2x average bitrate cap per second
+        let limits: [CFNumber] = [byteLimit as CFNumber, 1 as CFNumber]
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_DataRateLimits, value: limits as CFArray)
+
+        // 4. Critical Jetsam OOM Prevention: MaxFrameDelayCount = 1 (forces immediate flush, zero queueing)
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxFrameDelayCount, value: 1 as CFNumber)
+
+        // 5. Framerate & Keyframe intervals (GOP size)
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ExpectedFrameRate, value: targetFps as CFNumber)
+        let gopSize = targetFps >= 60 ? (targetFps * 2) : (targetFps * 3)
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameInterval, value: gopSize as CFNumber)
 
         VTCompressionSessionPrepareToEncodeFrames(session)
     }
 
-    // MARK: - BSD Socket Server (Port 15333)
-
-    private func startLocalTcpServer() {
+    // MARK: - BSD Socket Server (Port from wxiosserverport)
+    private func startLocalTcpServer(port: UInt16) {
         networkQueue.async { [weak self] in
             guard let self = self else { return }
 
@@ -144,12 +223,13 @@ class SampleHandler: RPBroadcastSampleHandler {
 
             var yes: Int32 = 1
             setsockopt(self.serverSocket, SOL_SOCKET, SO_REUSEADDR, &yes, socklen_t(MemoryLayout<Int32>.size))
+            setsockopt(self.serverSocket, SOL_SOCKET, SO_REUSEPORT, &yes, socklen_t(MemoryLayout<Int32>.size))
             setsockopt(self.serverSocket, IPPROTO_TCP, TCP_NODELAY, &yes, socklen_t(MemoryLayout<Int32>.size))
 
             var serverAddr = sockaddr_in()
             serverAddr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
             serverAddr.sin_family = sa_family_t(AF_INET)
-            serverAddr.sin_port = self.streamingPort.bigEndian
+            serverAddr.sin_port = port.bigEndian
             serverAddr.sin_addr.s_addr = inet_addr("127.0.0.1")
 
             let bindRes = withUnsafePointer(to: &serverAddr) { ptr in
@@ -197,7 +277,6 @@ class SampleHandler: RPBroadcastSampleHandler {
     }
 
     // MARK: - RFC 2326 Interleaved RTP Packet Packaging
-
     fileprivate func sendEncodedSampleBuffer(_ sampleBuffer: CMSampleBuffer) {
         guard clientSocket >= 0 else { return }
 

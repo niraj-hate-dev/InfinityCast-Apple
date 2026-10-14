@@ -28,6 +28,6 @@ class AppleCastConstants {
   static const int defaultBitrateMbps = 15;
 
   // App Group Identifier for iOS Companion and Broadcast Extension IPC
-  static const String iosAppGroupId = 'group.com.applecast.companion';
-  static const String iosExtensionBundleId = 'com.applecast.companion.extension';
+  static const String iosAppGroupId = 'group.applecast.mirror';
+  static const String iosExtensionBundleId = 'com.applecast.applecast.AppleCastExtension';
 }
