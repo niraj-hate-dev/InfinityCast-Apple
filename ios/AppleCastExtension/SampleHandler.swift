@@ -118,7 +118,7 @@ class SampleHandler: RPBroadcastSampleHandler {
         var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / 4)
         let kr = withUnsafeMutablePointer(to: &vmInfo) { infoPtr in
             infoPtr.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { intPtr in
-                task_info(mach_task_self(), task_flavor_t(TASK_VM_INFO), intPtr, &count)
+                task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), intPtr, &count)
             }
         }
         guard kr == KERN_SUCCESS else { return -1 }
