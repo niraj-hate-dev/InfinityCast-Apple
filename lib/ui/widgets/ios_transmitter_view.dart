@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../../core/constants.dart';
 import '../../core/theme.dart';
 import '../../services/mirror_controller.dart';
@@ -24,12 +26,23 @@ class _IosTransmitterViewState extends State<IosTransmitterView> {
   String _extensionStatus = 'CHECKING';
   int _activePort = AppleCastConstants.defaultDeviceStreamingPort;
   String _socketState = 'IDLE';
+  String? _extensionBundleId;
 
   @override
   void initState() {
     super.initState();
     _refreshStatus();
+    _fetchExtensionBundleId();
     _statusTimer = Timer.periodic(const Duration(seconds: 2), (_) => _refreshStatus());
+  }
+
+  Future<void> _fetchExtensionBundleId() async {
+    final bundleId = await widget.controller.getExtensionBundleId();
+    if (mounted && bundleId != null) {
+      setState(() {
+        _extensionBundleId = bundleId;
+      });
+    }
   }
 
   @override
@@ -168,6 +181,47 @@ class _IosTransmitterViewState extends State<IosTransmitterView> {
                 : 'Tap below to open iOS ReplayKit Screen Broadcast picker. Select "AppleCast" and tap "Start Broadcast" to begin streaming frames to your PC.',
             style: const TextStyle(fontSize: 13, color: AppleCastTheme.textSecondary, height: 1.4),
           ),
+          if (defaultTargetPlatform == TargetPlatform.iOS) ...[
+            const SizedBox(height: 18),
+            Center(
+              child: Column(
+                children: [
+                  Container(
+                    width: 68,
+                    height: 68,
+                    decoration: BoxDecoration(
+                      color: isRunning
+                          ? AppleCastTheme.appleGreen.withValues(alpha: 0.15)
+                          : AppleCastTheme.appleBlue.withValues(alpha: 0.15),
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: isRunning ? AppleCastTheme.appleGreen : AppleCastTheme.appleBlue,
+                        width: 2.5,
+                      ),
+                    ),
+                    child: ClipOval(
+                      child: UiKitView(
+                        viewType: 'com.applecast.mirror/broadcast_picker',
+                        creationParams: {
+                          'preferredExtension': _extensionBundleId ?? AppleCastConstants.iosExtensionBundleId,
+                        },
+                        creationParamsCodec: const StandardMessageCodec(),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    isRunning ? 'Tap icon to Stop Broadcast' : 'Tap icon above to Start Broadcast',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: AppleCastTheme.textSecondary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
           const SizedBox(height: 16),
           ElevatedButton.icon(
             onPressed: () {

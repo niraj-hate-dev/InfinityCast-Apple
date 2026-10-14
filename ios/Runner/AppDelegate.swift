@@ -26,6 +26,13 @@ import ReplayKit
       binaryMessenger: messenger
     )
 
+    // Register native PlatformView factory for RPSystemBroadcastPickerView
+    // This allows Flutter to embed Apple's real, native broadcast picker button
+    // which users tap directly, avoiding UIKit programmatic touch suppression.
+    let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "AppleCastBroadcastPicker")
+    let factory = BroadcastPickerViewFactory(messenger: registrar.messenger())
+    registrar.register(factory, withId: "com.applecast.mirror/broadcast_picker")
+
     channel.setMethodCallHandler { [weak self] (call: FlutterMethodCall, result: @escaping FlutterResult) in
       guard let self = self else { return }
       if call.method == "launchBroadcastPicker" {
@@ -49,6 +56,8 @@ import ReplayKit
           "startTime": startTime,
           "socketState": socketState
         ])
+      } else if call.method == "getExtensionBundleId" {
+        result(self.resolveExtensionBundleIdentifier())
       } else {
         result(FlutterMethodNotImplemented)
       }
@@ -63,7 +72,8 @@ import ReplayKit
       defaults.set(0, forKey: "kGroupReplayKitRecordType") // 0 = Custom Local TCP stream
       defaults.set(false, forKey: "kGroupMirrorVoiceSwitch")
       defaults.set(60, forKey: "videoFps")
-      defaults.set(15_000_000, forKey: "videoBitrate")
+      defaults.set(8_000_000, forKey: "videoBitrate") // 8 Mbps safe budget under 50MB Jetsam limit
+      defaults.set(1080, forKey: "videoResolution")
       defaults.synchronize()
     }
   }
@@ -72,7 +82,7 @@ import ReplayKit
   /// Sideloaders (AltStore, Sideloadly) rewrite both the host app and extension Bundle IDs
   /// upon re-signing. Reading the actual CFBundleIdentifier directly from the installed .appex
   /// guarantees that RPSystemBroadcastPickerView matches the exact re-signed extension ID.
-  private func resolveExtensionBundleIdentifier() -> String {
+  func resolveExtensionBundleIdentifier() -> String {
     if let pluginsPath = Bundle.main.builtInPlugInsPath {
       let fileManager = FileManager.default
       if let items = try? fileManager.contentsOfDirectory(atPath: pluginsPath) {
@@ -98,19 +108,18 @@ import ReplayKit
   }
 
   /// Automatically triggers RPSystemBroadcastPickerView presentation
-  /// Embeds picker invisibly into window hierarchy and sends action to internal UIButton
+  /// Embeds picker into window hierarchy and sends action to internal UIButton
   private func presentBroadcastPicker() {
     DispatchQueue.main.async {
       let extensionId = self.resolveExtensionBundleIdentifier()
       NSLog("[AppleCast Host] Presenting RPSystemBroadcastPickerView with target: %@", extensionId)
 
-      let pickerView = RPSystemBroadcastPickerView(frame: CGRect(x: 0, y: 0, width: 44, height: 44))
+      let pickerView = RPSystemBroadcastPickerView(frame: CGRect(x: 0, y: 0, width: 60, height: 60))
       pickerView.preferredExtension = extensionId
       pickerView.showsMicrophoneButton = false
-      // Use near-zero alpha instead of isHidden = true so UIKit does not ignore touch dispatch
-      pickerView.alpha = 0.01
+      pickerView.alpha = 0.05
 
-      // Attach to active window or root view so UIKit processes touch events
+      // Attach to active window or root view
       if let window = UIApplication.shared.windows.first(where: { $0.isKeyWindow }) ?? UIApplication.shared.windows.first {
         window.addSubview(pickerView)
       } else if let rootVC = self.window?.rootViewController {
@@ -126,5 +135,53 @@ import ReplayKit
         }
       }
     }
+  }
+}
+
+/// Native PlatformView for embedding RPSystemBroadcastPickerView directly in Flutter UI.
+/// Tapping this view is a genuine user touch directly on Apple's UI, guaranteeing
+/// reliable invocation of the ReplayKit broadcast sheet without synthetic touch suppression.
+class BroadcastPickerPlatformView: NSObject, FlutterPlatformView {
+  private let containerView: UIView
+  private let pickerView: RPSystemBroadcastPickerView
+
+  init(frame: CGRect, viewId: Int64, args: Any?, messenger: FlutterBinaryMessenger) {
+    self.containerView = UIView(frame: frame)
+    let pickerSize = CGSize(
+      width: frame.size.width > 0 ? frame.size.width : 60,
+      height: frame.size.height > 0 ? frame.size.height : 60
+    )
+    self.pickerView = RPSystemBroadcastPickerView(frame: CGRect(origin: .zero, size: pickerSize))
+    super.init()
+
+    if let args = args as? [String: Any],
+       let extId = args["preferredExtension"] as? String, !extId.isEmpty {
+      pickerView.preferredExtension = extId
+      NSLog("[AppleCast PlatformView] Initialized RPSystemBroadcastPickerView with preferredExtension: %@", extId)
+    }
+    pickerView.showsMicrophoneButton = false
+    pickerView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+    containerView.addSubview(pickerView)
+  }
+
+  func view() -> UIView {
+    return containerView
+  }
+}
+
+class BroadcastPickerViewFactory: NSObject, FlutterPlatformViewFactory {
+  private let messenger: FlutterBinaryMessenger
+
+  init(messenger: FlutterBinaryMessenger) {
+    self.messenger = messenger
+    super.init()
+  }
+
+  func create(withFrame frame: CGRect, viewIdentifier viewId: Int64, arguments args: Any?) -> FlutterPlatformView {
+    return BroadcastPickerPlatformView(frame: frame, viewId: viewId, args: args, messenger: messenger)
+  }
+
+  func createArgsCodec() -> FlutterMessageCodec & NSObjectProtocol {
+    return FlutterStandardMessageCodec.sharedInstance()
   }
 }

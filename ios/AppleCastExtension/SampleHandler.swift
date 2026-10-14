@@ -6,14 +6,15 @@ import Darwin
 /// Captures iOS display surfaces, compresses via VideoToolbox hardware encoder (Zero B-Frames),
 /// monitors Mach kernel memory to prevent Jetsam 50MB OOM kills, and streams RFC 2326 Interleaved RTP
 /// packets over local loopback TCP socket tunneled via usbmuxd.
-class SampleHandler: RPBroadcastSampleHandler {
+@objc(SampleHandler)
+public class SampleHandler: RPBroadcastSampleHandler {
 
     // MARK: - Constants & Architecture Specifications
     private let appGroupName = "group.applecast.mirror"
     private let defaultPort: UInt16 = 15333
     private var streamingPort: UInt16 = 15333
     private var targetFps: Int32 = 60
-    private var targetBitrate: Int32 = 15_000_000 // 15 Mbps
+    private var targetBitrate: Int32 = 8_000_000 // 8 Mbps (Prevents 50MB Jetsam OOM)
     private let rtpMagicByte: UInt8 = 0x24       // '$'
     private let rtpChannelVideo: UInt8 = 0x00
     private let rtpPayloadType: UInt8 = 96       // Dynamic H.264
@@ -178,8 +179,34 @@ class SampleHandler: RPBroadcastSampleHandler {
     }
 
     private func setupCompressionSession(for pixelBuffer: CVPixelBuffer) {
-        let width = Int32(CVPixelBufferGetWidth(pixelBuffer))
-        let height = Int32(CVPixelBufferGetHeight(pixelBuffer))
+        let rawWidth = Int32(CVPixelBufferGetWidth(pixelBuffer))
+        let rawHeight = Int32(CVPixelBufferGetHeight(pixelBuffer))
+
+        // OpenTok / ReplayKit Jetsam 50MB Safeguard:
+        // Modern iPhones capture at native 3x Retina (e.g. 2556x1179 or 2796x1290).
+        // Encoding at full Retina allocates >40MB of hardware reference frames,
+        // instantly exceeding the 50MB Jetsam kernel limit. Clamping maximum dimension
+        // to 1600 allows VideoToolbox to hardware downscale with zero latency and keeps
+        // memory usage strictly around 20-25MB.
+        let maxDimension: Int32 = 1600
+        var width = rawWidth
+        var height = rawHeight
+
+        if max(rawWidth, rawHeight) > maxDimension {
+            if rawWidth > rawHeight {
+                width = maxDimension
+                height = Int32(Double(rawHeight) * Double(maxDimension) / Double(rawWidth))
+            } else {
+                height = maxDimension
+                width = Int32(Double(rawWidth) * Double(maxDimension) / Double(rawHeight))
+            }
+        }
+        // H.264 macroblock alignment (must be divisible by 2)
+        width = (width / 2) * 2
+        height = (height / 2) * 2
+
+        NSLog("[AppleCastExtension] Initializing VideoToolbox session: input=%dx%d -> encoded=%dx%d (targetFps: %d, bitrate: %d bps)",
+              rawWidth, rawHeight, width, height, targetFps, targetBitrate)
 
         let status = VTCompressionSessionCreate(
             allocator: kCFAllocatorDefault,
@@ -490,8 +517,3 @@ private func compressionCallback(
     let handler = Unmanaged<SampleHandler>.fromOpaque(refCon).takeUnretainedValue()
     handler.sendEncodedSampleBuffer(sampleBuffer)
 }
-
-/// Objective-C runtime alias ensuring that both "AppleCastExtension.SampleHandler"
-/// and "@objc(SampleHandler)" resolve in NSClassFromString / ReplayKit plugin loader.
-@objc(SampleHandler)
-class DirectSampleHandler: SampleHandler {}
