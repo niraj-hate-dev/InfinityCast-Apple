@@ -99,75 +99,125 @@ import Darwin
     }
   }
 
-  /// Starts a local loopback TCP listener on port 15332 for Laptop / usbmuxd connection detection
+  private var controlServerSocket: Int32 = -1
+  private var activeControlClientSocket: Int32 = -1
+
+  /// Starts a local BSD TCP listener on port 15332 for Laptop / usbmuxd connection detection
   private func startControlServer(port: UInt16) {
-    do {
-      let tcpOptions = NWProtocolTCP.Options()
-      tcpOptions.noDelay = true
-      let params = NWParameters(tls: nil, tcp: tcpOptions)
-      params.requiredInterfaceType = .loopback
-      params.allowLocalEndpointReuse = true
+    DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+      guard let self = self else { return }
 
-      let listener = try NWListener(using: params, on: NWEndpoint.Port(rawValue: port) ?? 15332)
-      listener.stateUpdateHandler = { state in
-        NSLog("[AppleCast Host] Control listener on port %d state: %@", port, String(describing: state))
+      let sock = socket(AF_INET, SOCK_STREAM, 0)
+      guard sock >= 0 else {
+        NSLog("[AppleCast Host] Failed to create control socket: errno %d", errno)
+        return
       }
-      listener.newConnectionHandler = { [weak self] connection in
-        guard let self = self else { return }
-        NSLog("[AppleCast Host] SUCCESS: Laptop connected to control port %d via usbmuxd tunnel!", port)
-        self.controlConnection?.cancel()
-        self.controlConnection = connection
-        self.isLaptopConnected = true
-        self.laptopClientName = "Windows PC (usbmuxd)"
-        self.laptopLastSeen = Date().timeIntervalSince1970
 
-        DispatchQueue.main.async {
-          self.flutterChannel?.invokeMethod("onLaptopDetected", arguments: [
-            "connected": true,
-            "name": self.laptopClientName
-          ])
+      var opt: Int32 = 1
+      setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &opt, socklen_t(MemoryLayout<Int32>.size))
+      setsockopt(sock, SOL_SOCKET, SO_REUSEPORT, &opt, socklen_t(MemoryLayout<Int32>.size))
+      setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, &opt, socklen_t(MemoryLayout<Int32>.size))
+
+      var addr = sockaddr_in()
+      addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+      addr.sin_family = sa_family_t(AF_INET)
+      addr.sin_port = port.bigEndian
+      addr.sin_addr.s_addr = in_addr_t(0) // Bind to INADDR_ANY (0.0.0.0) so it accepts usbmuxd loopback 127.0.0.1!
+
+      let bindRes = withUnsafePointer(to: &addr) {
+        $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+          bind(sock, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+        }
+      }
+
+      guard bindRes == 0 else {
+        NSLog("[AppleCast Host] Failed to bind control socket on port %d: errno %d", port, errno)
+        close(sock)
+        return
+      }
+
+      guard listen(sock, 5) == 0 else {
+        NSLog("[AppleCast Host] Failed to listen on control socket on port %d: errno %d", port, errno)
+        close(sock)
+        return
+      }
+
+      self.controlServerSocket = sock
+      NSLog("[AppleCast Host] >>> SUCCESS: Control BSD Server listening on port %d! <<<", port)
+
+      while true {
+        var clientAddr = sockaddr_in()
+        var clientLen = socklen_t(MemoryLayout<sockaddr_in>.size)
+        let client = withUnsafeMutablePointer(to: &clientAddr) {
+          $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+            accept(sock, $0, &clientLen)
+          }
         }
 
-        self.receiveControlMessage(connection: connection)
-        connection.start(queue: DispatchQueue.global(qos: .userInitiated))
+        guard client >= 0 else { continue }
+
+        var flag: Int32 = 1
+        setsockopt(client, IPPROTO_TCP, TCP_NODELAY, &flag, socklen_t(MemoryLayout<Int32>.size))
+
+        NSLog("[AppleCast Host] >>> Client CONNECTED to control port %d! <<<", port)
+        self.handleBsdControlClient(client: client)
       }
-      self.controlListener = listener
-      listener.start(queue: DispatchQueue.global(qos: .userInitiated))
-      NSLog("[AppleCast Host] Control listener initialized on port %d (loopback)", port)
-    } catch {
-      NSLog("[AppleCast Host] Control listener failed on port %d: %@", port, String(describing: error))
     }
   }
 
-  private func receiveControlMessage(connection: NWConnection) {
-    connection.receive(minimumIncompleteLength: 1, maximumLength: 4096) { [weak self] data, _, isComplete, error in
-      guard let self = self else { return }
-      if let data = data, !data.isEmpty,
-         let text = String(data: data, encoding: .utf8) {
-        NSLog("[AppleCast Host] Control packet received: %@", text.trimmingCharacters(in: .whitespacesAndNewlines))
+  private func handleBsdControlClient(client: Int32) {
+    self.activeControlClientSocket = client
+    self.isLaptopConnected = true
+    self.laptopClientName = "Windows PC (usbmuxd)"
+    self.laptopLastSeen = Date().timeIntervalSince1970
+
+    DispatchQueue.main.async { [weak self] in
+      self?.flutterChannel?.invokeMethod("onLaptopDetected", arguments: [
+        "connected": true,
+        "name": "Windows PC (usbmuxd)"
+      ])
+    }
+
+    DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+      guard let self = self else { close(client); return }
+
+      var buffer = [UInt8](repeating: 0, count: 1024)
+      while true {
+        let bytesRead = recv(client, &buffer, buffer.count - 1, 0)
+        guard bytesRead > 0 else { break }
+
+        buffer[bytesRead] = 0
+        let str = String(cString: buffer)
+        NSLog("[AppleCast Host] Control packet: %@", str.trimmingCharacters(in: .whitespacesAndNewlines))
+
         self.isLaptopConnected = true
         self.laptopLastSeen = Date().timeIntervalSince1970
-        if text.contains("Windows") {
+        if str.contains("Windows") {
           self.laptopClientName = "Windows PC (AppleCast)"
         }
 
         let isCaptured = UIScreen.main.isCaptured
         let resp = "{\"status\":\"OK\",\"isCaptured\":\(isCaptured),\"streamingPort\":\(self.defaultPort),\"model\":\"\(UIDevice.current.model)\"}\n"
         if let respData = resp.data(using: .utf8) {
-          connection.send(content: respData, completion: .idempotent)
+          respData.withUnsafeBytes { rawPtr in
+            if let ptr = rawPtr.baseAddress {
+              send(client, ptr, respData.count, 0)
+            }
+          }
         }
       }
 
-      if isComplete || error != nil {
-        self.isLaptopConnected = false
-        DispatchQueue.main.async {
-          self.flutterChannel?.invokeMethod("onLaptopDetected", arguments: [
-            "connected": false,
-            "name": ""
-          ])
-        }
-      } else {
-        self.receiveControlMessage(connection: connection)
+      NSLog("[AppleCast Host] Control client disconnected")
+      close(client)
+      if self.activeControlClientSocket == client {
+        self.activeControlClientSocket = -1
+      }
+      self.isLaptopConnected = false
+      DispatchQueue.main.async { [weak self] in
+        self?.flutterChannel?.invokeMethod("onLaptopDetected", arguments: [
+          "connected": false,
+          "name": ""
+        ])
       }
     }
   }
