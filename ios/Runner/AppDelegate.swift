@@ -38,14 +38,15 @@ import ReplayKit
         self.presentBroadcastPicker()
         result(true)
       } else if call.method == "getExtensionStatus" {
-        let defaults = UserDefaults(suiteName: self.appGroup)
-        let status = defaults?.string(forKey: "extension_status") ?? "STOPPED"
-        let port = defaults?.integer(forKey: "extension_active_port") ?? Int(self.defaultPort)
-        let startTime = defaults?.double(forKey: "extension_start_time") ?? 0.0
-        let socketState = defaults?.string(forKey: "extension_socket_state") ?? "IDLE"
+        let defaults = UserDefaults(suiteName: self.appGroup) ?? UserDefaults.standard
+        let status = defaults.string(forKey: "extension_status") ?? "STOPPED"
+        let port = defaults.integer(forKey: "extension_active_port")
+        let actualPort = port > 0 ? port : Int(self.defaultPort)
+        let startTime = defaults.double(forKey: "extension_start_time")
+        let socketState = defaults.string(forKey: "extension_socket_state") ?? "IDLE"
         result([
           "status": status,
-          "port": port,
+          "port": actualPort,
           "startTime": startTime,
           "socketState": socketState
         ])
@@ -58,15 +59,14 @@ import ReplayKit
   /// Synchronizes dynamic port and encoding profiles to App Group UserDefaults
   /// As reverse-engineered in brainapple.md Section 3 & 8 (wxiosserverport key)
   private func synchronizeBroadcastConfiguration(targetPort: UInt16) {
-    if let defaults = UserDefaults(suiteName: appGroup) {
-      defaults.set(Int(targetPort), forKey: "wxiosserverport")
-      defaults.set(0, forKey: "kGroupReplayKitRecordType") // 0 = Custom Local TCP stream
-      defaults.set(false, forKey: "kGroupMirrorVoiceSwitch")
-      defaults.set(60, forKey: "videoFps")
-      defaults.set(8_000_000, forKey: "videoBitrate") // 8 Mbps safe budget under 50MB Jetsam limit
-      defaults.set(1080, forKey: "videoResolution")
-      defaults.synchronize()
-    }
+    let defaults = UserDefaults(suiteName: appGroup) ?? UserDefaults.standard
+    defaults.set(Int(targetPort), forKey: "wxiosserverport")
+    defaults.set(0, forKey: "kGroupReplayKitRecordType") // 0 = Custom Local TCP stream
+    defaults.set(false, forKey: "kGroupMirrorVoiceSwitch")
+    defaults.set(60, forKey: "videoFps")
+    defaults.set(8_000_000, forKey: "videoBitrate") // 8 Mbps safe budget under 50MB Jetsam limit
+    defaults.set(1080, forKey: "videoResolution")
+    defaults.synchronize()
   }
 
   /// Dynamically detects the runtime Bundle Identifier of AppleCastExtension.appex

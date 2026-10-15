@@ -44,8 +44,8 @@ class SampleHandler: RPBroadcastSampleHandler {
         rtpSequenceNumber = 0
         isMemoryLocked = false
 
-        // Read configuration from shared App Group UserDefaults
-        sharedDefaults = UserDefaults(suiteName: appGroupName)
+        // Read configuration from shared App Group UserDefaults (fallback to standard for sideloading)
+        sharedDefaults = UserDefaults(suiteName: appGroupName) ?? UserDefaults.standard
         let targetPortInt = sharedDefaults?.integer(forKey: "wxiosserverport") ?? 0
         streamingPort = targetPortInt > 0 ? UInt16(targetPortInt) : defaultPort
 
