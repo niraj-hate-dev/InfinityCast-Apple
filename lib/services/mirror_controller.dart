@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
+import '../core/constants.dart';
 import '../models/debug_log_entry.dart';
 import '../models/device_info.dart';
 import '../models/mirror_state.dart';
@@ -253,8 +254,15 @@ class MirrorController extends ChangeNotifier {
       notifyListeners();
     }
 
-    // 2. Connect virtual TCP tunnel to iOS companion app port 15333
-    //    The native side retries up to 5 times with backoff if the iOS broadcast
+    // 2. Probe control channel on port 15332 to notify iPhone that Laptop is connected
+    addLog('CONTROL', 'Probing device control channel on port 15332...', level: LogLevel.info);
+    final probeResult = await _channelService.probeDevice(deviceId: targetDevice.deviceId);
+    if (probeResult['connected'] == true) {
+      addLog('CONTROL', 'iPhone AppleCast companion confirmed online! (Screen Captured: ${probeResult["isCaptured"]})', level: LogLevel.success);
+    }
+
+    // 3. Connect virtual TCP tunnel to iOS companion app port 15333
+    //    The native side retries up to 8 times with backoff if the iOS broadcast
     //    extension's TCP server isn't listening yet.
     addLog('TUNNEL', 'Opening usbmuxd virtual TCP tunnel to device port 15333 (with backoff retry)...', level: LogLevel.info);
 
@@ -279,7 +287,7 @@ class MirrorController extends ChangeNotifier {
       addLog('TUNNEL', 'Connection failed on port 15333. iOS AppleCast broadcast may not be active.', level: LogLevel.error);
       _state = _state.copyWith(
         status: MirrorConnectionStatus.error,
-        errorMessage: 'Could not connect to port 15333 on device ${targetDevice.serialNumber}. Make sure the AppleCast broadcast is active on iOS.',
+        errorMessage: 'Could not connect to port 15333 on device ${targetDevice.serialNumber}. Make sure to tap "Launch ReplayKit Picker" and "Start Broadcast" on your iPhone.',
       );
     }
     notifyListeners();
@@ -369,6 +377,19 @@ class MirrorController extends ChangeNotifier {
   /// iOS Companion Specific: Queries active broadcast extension status
   Future<Map<String, dynamic>> getExtensionStatus() async {
     return _channelService.getExtensionStatus();
+  }
+
+  /// iOS Companion Specific: Queries active hardware and laptop detector status
+  Future<Map<String, dynamic>> getDetectorStatus() async {
+    return _channelService.getDetectorStatus();
+  }
+
+  /// Probes iOS device over control port (15332)
+  Future<Map<String, dynamic>> probeDevice({
+    required int deviceId,
+    int port = AppleCastConstants.defaultDeviceControlPort,
+  }) async {
+    return _channelService.probeDevice(deviceId: deviceId, port: port);
   }
 
   void _insertMockDeviceForPreview() {

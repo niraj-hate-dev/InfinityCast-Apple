@@ -258,19 +258,27 @@ class SampleHandler: RPBroadcastSampleHandler {
 
     // MARK: - Dual TCP Server (Network.framework NWListener + BSD Socket Fallback)
     private func startLocalTcpServer(port: UInt16) {
-        // 1. Apple Network.framework NWListener (Sandbox-Safe for App Extensions)
+        // 1. Apple Network.framework NWListener with strict loopback interface (Sandbox-Safe for App Extensions)
+        var nwStarted = false
         do {
             let tcpOptions = NWProtocolTCP.Options()
             tcpOptions.noDelay = true
             let params = NWParameters(tls: nil, tcp: tcpOptions)
+            params.requiredInterfaceType = .loopback
             params.allowLocalEndpointReuse = true
 
             let listener = try NWListener(using: params, on: NWEndpoint.Port(rawValue: port) ?? 15333)
             listener.stateUpdateHandler = { [weak self] state in
                 NSLog("[AppleCastExtension] NWListener state on port %d: %@", port, String(describing: state))
-                if case .ready = state {
+                switch state {
+                case .ready:
                     self?.sharedDefaults?.set("LISTENING", forKey: "extension_socket_state")
                     self?.sharedDefaults?.synchronize()
+                case .failed(let err):
+                    NSLog("[AppleCastExtension] NWListener failed: %@ - activating BSD socket fallback", String(describing: err))
+                    self?.startBsdLoopbackServer(port: port)
+                default:
+                    break
                 }
             }
             listener.newConnectionHandler = { [weak self] connection in
@@ -292,16 +300,23 @@ class SampleHandler: RPBroadcastSampleHandler {
             }
             self.nwListener = listener
             listener.start(queue: networkQueue)
-            NSLog("[AppleCastExtension] SUCCESS: NWListener active on port %d", port)
+            nwStarted = true
+            NSLog("[AppleCastExtension] SUCCESS: NWListener initialized on port %d (loopback)", port)
         } catch {
             NSLog("[AppleCastExtension] NWListener init failed on port %d: %@", port, String(describing: error))
         }
 
-        // 2. BSD Socket Server on 127.0.0.1 as fallback
-        networkQueue.async { [weak self] in
-            guard let self = self else { return }
+        if !nwStarted {
+            startBsdLoopbackServer(port: port)
+        }
+    }
 
-            NSLog("[AppleCastExtension] Initializing BSD server socket on port %d...", port)
+    private func startBsdLoopbackServer(port: UInt16) {
+        networkQueue.async { [weak self] in
+            guard let self = self, self.isBroadcasting else { return }
+            guard self.serverSocket < 0 else { return }
+
+            NSLog("[AppleCastExtension] Initializing BSD server socket on 127.0.0.1:%d...", port)
 
             let sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)
             guard sock >= 0 else { return }
@@ -315,7 +330,7 @@ class SampleHandler: RPBroadcastSampleHandler {
             serverAddr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
             serverAddr.sin_family = sa_family_t(AF_INET)
             serverAddr.sin_port = port.bigEndian
-            serverAddr.sin_addr.s_addr = in_addr_t(0)
+            serverAddr.sin_addr.s_addr = inet_addr("127.0.0.1")
 
             let bindRes = withUnsafePointer(to: &serverAddr) { ptr in
                 ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { saPtr in
@@ -324,12 +339,15 @@ class SampleHandler: RPBroadcastSampleHandler {
             }
 
             guard bindRes >= 0, listen(sock, 5) >= 0 else {
+                NSLog("[AppleCastExtension] BSD socket bind/listen failed on 127.0.0.1:%d (errno: %d)", port, errno)
                 close(sock)
                 return
             }
 
             self.serverSocket = sock
-            NSLog("[AppleCastExtension] BSD socket server listening on port %d", port)
+            NSLog("[AppleCastExtension] BSD socket server listening on 127.0.0.1:%d", port)
+            self.sharedDefaults?.set("LISTENING", forKey: "extension_socket_state")
+            self.sharedDefaults?.synchronize()
 
             while self.isBroadcasting {
                 var clientAddr = sockaddr_in()
@@ -347,6 +365,8 @@ class SampleHandler: RPBroadcastSampleHandler {
                     self.clientSocket = client
                     self.socketLock.unlock()
                     NSLog("[AppleCastExtension] SUCCESS: Client connected to BSD socket!")
+                    self.sharedDefaults?.set("CLIENT_CONNECTED", forKey: "extension_socket_state")
+                    self.sharedDefaults?.synchronize()
                 }
             }
         }

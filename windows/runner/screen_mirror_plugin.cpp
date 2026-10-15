@@ -327,6 +327,63 @@ void ScreenMirrorPlugin::HandleMethodCall(
       video_decoder_->Teardown();
     }
     result->Success(flutter::EncodableValue(true));
+  } else if (method_name == "probeDevice") {
+    const auto* args = std::get_if<flutter::EncodableMap>(method_call.arguments());
+    uint32_t device_id = 0;
+    uint16_t target_port = 15332;
+
+    if (args) {
+      auto dev_it = args->find(flutter::EncodableValue("deviceId"));
+      if (dev_it != args->end()) {
+        if (std::holds_alternative<int32_t>(dev_it->second)) {
+          device_id = static_cast<uint32_t>(std::get<int32_t>(dev_it->second));
+        } else if (std::holds_alternative<int64_t>(dev_it->second)) {
+          device_id = static_cast<uint32_t>(std::get<int64_t>(dev_it->second));
+        }
+      }
+
+      auto port_it = args->find(flutter::EncodableValue("port"));
+      if (port_it != args->end()) {
+        if (std::holds_alternative<int32_t>(port_it->second)) {
+          target_port = static_cast<uint16_t>(std::get<int32_t>(port_it->second));
+        } else if (std::holds_alternative<int64_t>(port_it->second)) {
+          target_port = static_cast<uint16_t>(std::get<int64_t>(port_it->second));
+        }
+      }
+    }
+
+    SOCKET probe_sock = INVALID_SOCKET;
+    std::string err_msg;
+    const bool success = usbmuxd_client_->ConnectTunnel(device_id, target_port, &probe_sock, &err_msg);
+
+    flutter::EncodableMap resp;
+    if (success) {
+      // Send PING message
+      const std::string ping_payload = "{\"cmd\":\"PING\",\"client\":\"AppleCast-Windows\"}\n";
+      send(probe_sock, ping_payload.c_str(), static_cast<int>(ping_payload.length()), 0);
+
+      // Read reply with timeout
+      char recv_buf[512] = {0};
+      int bytes_read = recv(probe_sock, recv_buf, sizeof(recv_buf) - 1, 0);
+      closesocket(probe_sock);
+
+      bool is_captured = false;
+      if (bytes_read > 0) {
+        recv_buf[bytes_read] = '\0';
+        std::string reply(recv_buf);
+        if (reply.find("\"isCaptured\":true") != std::string::npos) {
+          is_captured = true;
+        }
+      }
+
+      resp[flutter::EncodableValue("connected")] = flutter::EncodableValue(true);
+      resp[flutter::EncodableValue("isCaptured")] = flutter::EncodableValue(is_captured);
+      result->Success(flutter::EncodableValue(resp));
+    } else {
+      resp[flutter::EncodableValue("connected")] = flutter::EncodableValue(false);
+      resp[flutter::EncodableValue("error")] = flutter::EncodableValue(err_msg);
+      result->Success(flutter::EncodableValue(resp));
+    }
   } else if (method_name == "requestPairTrust") {
     result->Success(flutter::EncodableValue(true));
   } else {

@@ -5,8 +5,10 @@ import '../../core/theme.dart';
 import '../../services/mirror_controller.dart';
 
 /// iOS Companion Mode View
-/// Provides the UI when running on an iPhone / iPad to initiate ReplayKit broadcast
-/// and monitor the broadcast extension's live lifecycle state.
+/// Provides an interactive status HUD on the iPhone / iPad:
+/// 1. Detects whether the Windows Laptop is connected over USB/usbmuxd.
+/// 2. Live ReplayKit Screen Recording detector (Pulsing Red badge with live stopwatch).
+/// 3. Physical USB cable charging detection & active network interface enumeration.
 class IosTransmitterView extends StatefulWidget {
   final MirrorController controller;
 
@@ -19,45 +21,118 @@ class IosTransmitterView extends StatefulWidget {
   State<IosTransmitterView> createState() => _IosTransmitterViewState();
 }
 
-class _IosTransmitterViewState extends State<IosTransmitterView> {
+class _IosTransmitterViewState extends State<IosTransmitterView>
+    with SingleTickerProviderStateMixin {
   Timer? _statusTimer;
-  String _extensionStatus = 'CHECKING';
-  int _activePort = AppleCastConstants.defaultDeviceStreamingPort;
+  Timer? _recordingStopwatchTimer;
+  late AnimationController _pulseController;
+  late Animation<double> _pulseAnimation;
+
+  // Real-time detector state
+  bool _isCaptured = false;
+  bool _laptopConnected = false;
+  String _laptopName = '';
+  bool _usbCableConnected = false;
+  int _streamingPort = AppleCastConstants.defaultDeviceStreamingPort;
+  int _controlPort = AppleCastConstants.defaultDeviceControlPort;
   String _socketState = 'IDLE';
+  List<Map<String, String>> _interfaces = [];
+  int _recordingSeconds = 0;
 
   @override
   void initState() {
     super.initState();
-    _refreshStatus();
-    _statusTimer = Timer.periodic(const Duration(seconds: 2), (_) => _refreshStatus());
+
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    )..repeat(reverse: true);
+
+    _pulseAnimation = Tween<double>(begin: 0.85, end: 1.15).animate(
+      CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
+    );
+
+    _refreshDetectorStatus();
+    _statusTimer = Timer.periodic(const Duration(seconds: 1), (_) => _refreshDetectorStatus());
+
+    _recordingStopwatchTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (_isCaptured) {
+        setState(() {
+          _recordingSeconds++;
+        });
+      } else {
+        if (_recordingSeconds != 0) {
+          setState(() {
+            _recordingSeconds = 0;
+          });
+        }
+      }
+    });
   }
 
   @override
   void dispose() {
     _statusTimer?.cancel();
+    _recordingStopwatchTimer?.cancel();
+    _pulseController.dispose();
     super.dispose();
   }
 
-  Future<void> _refreshStatus() async {
-    final statusMap = await widget.controller.getExtensionStatus();
+  Future<void> _refreshDetectorStatus() async {
+    final statusMap = await widget.controller.getDetectorStatus();
     if (!mounted) return;
+
+    final isCaptured = (statusMap['isCaptured'] as bool?) ?? false;
+    final laptopConnected = (statusMap['laptopConnected'] as bool?) ?? false;
+    final laptopName = (statusMap['laptopName'] as String?) ?? '';
+    final usbCableConnected = (statusMap['usbCableConnected'] as bool?) ?? false;
+    final streamingPort = (statusMap['streamingPort'] as int?) ?? AppleCastConstants.defaultDeviceStreamingPort;
+    final controlPort = (statusMap['controlPort'] as int?) ?? AppleCastConstants.defaultDeviceControlPort;
+    final socketState = (statusMap['socketState'] as String?) ?? 'IDLE';
+
+    final rawInterfaces = statusMap['interfaces'];
+    List<Map<String, String>> ifList = [];
+    if (rawInterfaces is List) {
+      for (final item in rawInterfaces) {
+        if (item is Map) {
+          ifList.add({
+            'name': item['name']?.toString() ?? '',
+            'ip': item['ip']?.toString() ?? '',
+          });
+        }
+      }
+    }
+
     setState(() {
-      _extensionStatus = (statusMap['status'] as String?) ?? 'STOPPED';
-      _activePort = (statusMap['port'] as int?) ?? AppleCastConstants.defaultDeviceStreamingPort;
-      _socketState = (statusMap['socketState'] as String?) ?? 'IDLE';
+      _isCaptured = isCaptured;
+      _laptopConnected = laptopConnected;
+      _laptopName = laptopName;
+      _usbCableConnected = usbCableConnected;
+      _streamingPort = streamingPort;
+      _controlPort = controlPort;
+      _socketState = socketState;
+      if (ifList.isNotEmpty) {
+        _interfaces = ifList;
+      }
     });
+  }
+
+  String _formatDuration(int totalSeconds) {
+    final minutes = (totalSeconds ~/ 60).toString().padLeft(2, '0');
+    final seconds = (totalSeconds % 60).toString().padLeft(2, '0');
+    return '$minutes:$seconds';
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('AppleCast Companion'),
+        title: const Text('AppleCast Companion HUD'),
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh_rounded),
-            tooltip: 'Refresh Status',
-            onPressed: _refreshStatus,
+            tooltip: 'Refresh Detector',
+            onPressed: _refreshDetectorStatus,
           ),
           IconButton(
             icon: const Icon(Icons.info_outline),
@@ -66,32 +141,28 @@ class _IosTransmitterViewState extends State<IosTransmitterView> {
         ],
       ),
       body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            _buildStatusHeader(),
-            const SizedBox(height: 24),
+            _buildScreenRecordingHero(),
+            const SizedBox(height: 18),
+            _buildLaptopDetectorCard(),
+            const SizedBox(height: 18),
             _buildBroadcastActionCard(context),
-            const SizedBox(height: 20),
-            _buildConfigurationCard(),
-            const SizedBox(height: 20),
-            _buildInstructionsCard(),
+            const SizedBox(height: 18),
+            _buildNetworkInterfacesCard(),
+            const SizedBox(height: 18),
+            _buildEncoderProfileCard(),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildStatusHeader() {
-    final bool isRunning = _extensionStatus == 'RUNNING';
-    final Color badgeColor = isRunning ? AppleCastTheme.appleGreen : AppleCastTheme.appleYellow;
-    final IconData badgeIcon = isRunning ? Icons.sensors_rounded : Icons.sensors_off_rounded;
-
-    final String title = isRunning ? 'Broadcast Extension Active' : 'Broadcast Extension Idle';
-    final String subtitle = isRunning
-        ? 'Listening on 0.0.0.0:$_activePort (${_socketState == "CLIENT_CONNECTED" ? "PC Connected" : "Awaiting Windows usbmuxd tunnel"})'
-        : 'ReplayKit not running yet • Tap "Launch ReplayKit Picker" below';
+  /// Top Hero: Visual Screen Recording Detector (Pulsing Red circle with live stopwatch)
+  Widget _buildScreenRecordingHero() {
+    final bool isRecording = _isCaptured;
 
     return Container(
       padding: const EdgeInsets.all(20),
@@ -99,50 +170,205 @@ class _IosTransmitterViewState extends State<IosTransmitterView> {
         color: AppleCastTheme.darkSurfaceElevated,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: isRunning ? AppleCastTheme.appleGreen.withValues(alpha: 0.5) : AppleCastTheme.darkBorder,
+          color: isRecording ? AppleCastTheme.appleRed.withValues(alpha: 0.6) : AppleCastTheme.darkBorder,
+          width: isRecording ? 2 : 1,
         ),
+        boxShadow: isRecording
+            ? [
+                BoxShadow(
+                  color: AppleCastTheme.appleRed.withValues(alpha: 0.25),
+                  blurRadius: 18,
+                  spreadRadius: 2,
+                )
+              ]
+            : null,
       ),
       child: Column(
         children: [
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: badgeColor.withValues(alpha: 0.15),
-              shape: BoxShape.circle,
-            ),
-            child: Icon(
-              badgeIcon,
-              color: badgeColor,
-              size: 36,
-            ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              if (isRecording)
+                ScaleTransition(
+                  scale: _pulseAnimation,
+                  child: Container(
+                    width: 22,
+                    height: 22,
+                    decoration: const BoxDecoration(
+                      color: AppleCastTheme.appleRed,
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: AppleCastTheme.appleRed,
+                          blurRadius: 10,
+                          spreadRadius: 2,
+                        )
+                      ],
+                    ),
+                  ),
+                )
+              else
+                Container(
+                  width: 20,
+                  height: 20,
+                  decoration: BoxDecoration(
+                    color: Colors.transparent,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: AppleCastTheme.textSecondary, width: 2),
+                  ),
+                ),
+              const SizedBox(width: 12),
+              Text(
+                isRecording ? 'SCREEN RECORDING ACTIVE' : 'SCREEN RECORDING IDLE',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0.8,
+                  color: isRecording ? AppleCastTheme.appleRed : AppleCastTheme.textPrimary,
+                ),
+              ),
+            ],
           ),
+          const SizedBox(height: 10),
+          if (isRecording) ...[
+            Text(
+              _formatDuration(_recordingSeconds),
+              style: const TextStyle(
+                fontSize: 32,
+                fontWeight: FontWeight.bold,
+                fontFamily: 'monospace',
+                color: AppleCastTheme.textPrimary,
+              ),
+            ),
+            const SizedBox(height: 4),
+            const Text(
+              'Encoding 60 FPS H.264 stream • Zero B-Frames',
+              style: TextStyle(fontSize: 12, color: AppleCastTheme.appleGreen, fontWeight: FontWeight.w600),
+            ),
+          ] else ...[
+            const Text(
+              'ReplayKit broadcast extension is not capturing yet.\nTap "Launch ReplayKit Picker" below to start.',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 13, color: AppleCastTheme.textSecondary, height: 1.4),
+            ),
+          ],
           const SizedBox(height: 14),
-          Text(
-            title,
-            style: const TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-              color: AppleCastTheme.textPrimary,
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            subtitle,
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 12,
-              color: isRunning ? AppleCastTheme.appleGreen : AppleCastTheme.textSecondary,
-              fontWeight: isRunning ? FontWeight.w600 : FontWeight.normal,
-            ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              _buildPill(
+                label: isRecording ? 'Capture: ON' : 'Capture: OFF',
+                color: isRecording ? AppleCastTheme.appleRed : AppleCastTheme.textSecondary,
+                icon: isRecording ? Icons.fiber_manual_record : Icons.stop_circle_outlined,
+              ),
+              const SizedBox(width: 8),
+              _buildPill(
+                label: 'Port $_streamingPort',
+                color: AppleCastTheme.appleBlue,
+                icon: Icons.router_outlined,
+              ),
+              const SizedBox(width: 8),
+              _buildPill(
+                label: _socketState == 'CLIENT_CONNECTED' ? 'Tunnel: LINKED' : 'Tunnel: READY',
+                color: _socketState == 'CLIENT_CONNECTED' ? AppleCastTheme.appleGreen : AppleCastTheme.appleYellow,
+                icon: Icons.sync_alt_rounded,
+              ),
+            ],
           ),
         ],
       ),
     );
   }
 
-  Widget _buildBroadcastActionCard(BuildContext context) {
-    final bool isRunning = _extensionStatus == 'RUNNING';
+  /// Laptop USB / usbmuxd Connection Detector HUD
+  Widget _buildLaptopDetectorCard() {
+    final bool isDetected = _laptopConnected;
+    final Color badgeColor = isDetected ? AppleCastTheme.appleGreen : AppleCastTheme.appleYellow;
 
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: AppleCastTheme.darkSurfaceElevated,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isDetected ? AppleCastTheme.appleGreen.withValues(alpha: 0.6) : AppleCastTheme.darkBorder,
+          width: isDetected ? 2 : 1,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: badgeColor.withValues(alpha: 0.15),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  Icons.laptop_chromebook_rounded,
+                  color: badgeColor,
+                  size: 26,
+                ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      isDetected ? 'Laptop Detected: Connected' : 'Laptop Status: Awaiting Connection',
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.bold,
+                        color: isDetected ? AppleCastTheme.appleGreen : AppleCastTheme.textPrimary,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      isDetected
+                          ? (_laptopName.isNotEmpty ? _laptopName : 'Windows PC (usbmuxd virtual tunnel)')
+                          : 'Checking local USB multiplexer tunnel on port $_controlPort...',
+                      style: const TextStyle(fontSize: 12, color: AppleCastTheme.textSecondary),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          const Divider(height: 1),
+          const SizedBox(height: 14),
+          _buildInfoRow(
+            icon: Icons.power_rounded,
+            label: 'USB Cable Link',
+            value: _usbCableConnected ? 'Connected (Charging ⚡)' : 'Unplugged / No Power',
+            isPositive: _usbCableConnected,
+          ),
+          const SizedBox(height: 10),
+          _buildInfoRow(
+            icon: Icons.settings_ethernet_rounded,
+            label: 'usbmuxd Control Channel',
+            value: isDetected ? 'Active (Port $_controlPort Synced)' : 'Listening on 127.0.0.1:$_controlPort',
+            isPositive: isDetected,
+          ),
+          const SizedBox(height: 10),
+          _buildInfoRow(
+            icon: Icons.screen_share_outlined,
+            label: 'Video Tunnel Status',
+            value: _isCaptured
+                ? (_socketState == 'CLIENT_CONNECTED' ? 'Transmitting to Desktop' : 'Listening on Port $_streamingPort')
+                : 'Ready (Awaiting ReplayKit Start)',
+            isPositive: _isCaptured,
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Broadcast Action Card
+  Widget _buildBroadcastActionCard(BuildContext context) {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -154,7 +380,7 @@ class _IosTransmitterViewState extends State<IosTransmitterView> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(
-            isRunning ? 'Screen Broadcast is Running' : 'Start Screen Mirroring',
+            _isCaptured ? 'Screen Mirroring in Progress' : 'Start Screen Mirroring',
             style: const TextStyle(
               fontSize: 16,
               fontWeight: FontWeight.bold,
@@ -163,10 +389,10 @@ class _IosTransmitterViewState extends State<IosTransmitterView> {
           ),
           const SizedBox(height: 8),
           Text(
-            isRunning
-                ? 'ReplayKit is encoding and streaming frames on port $_activePort. Open AppleCast on Windows and click "Mirror" to start desktop display.'
-                : 'Tap below to open iOS ReplayKit Screen Broadcast picker. Select "AppleCast" and tap "Start Broadcast" to begin streaming frames to your PC.',
-            style: const TextStyle(fontSize: 13, color: AppleCastTheme.textSecondary, height: 1.4),
+            _isCaptured
+                ? 'Your screen is being broadcasted. Keep AppleCast open on your Windows laptop to view the live mirror.'
+                : '1. Tap the button below to open iOS Screen Broadcast picker.\n2. Ensure "AppleCast" is selected with a checkmark.\n3. Tap "Start Broadcast" (countdown 3, 2, 1 will start).',
+            style: const TextStyle(fontSize: 13, color: AppleCastTheme.textSecondary, height: 1.45),
           ),
           const SizedBox(height: 16),
           ElevatedButton.icon(
@@ -174,20 +400,20 @@ class _IosTransmitterViewState extends State<IosTransmitterView> {
               widget.controller.launchIosBroadcastPicker();
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(
-                  content: Text('Triggering ReplayKit Screen Broadcast picker...'),
+                  content: Text('Opening ReplayKit Screen Broadcast picker...'),
                   duration: Duration(seconds: 2),
                 ),
               );
             },
             style: ElevatedButton.styleFrom(
-              backgroundColor: isRunning ? AppleCastTheme.appleGreen : AppleCastTheme.appleBlue,
+              backgroundColor: _isCaptured ? AppleCastTheme.appleGreen : AppleCastTheme.appleBlue,
               foregroundColor: Colors.white,
               padding: const EdgeInsets.symmetric(vertical: 14),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
             ),
-            icon: Icon(isRunning ? Icons.check_circle_outline_rounded : Icons.screen_share_rounded),
+            icon: Icon(_isCaptured ? Icons.check_circle_rounded : Icons.screen_share_rounded),
             label: Text(
-              isRunning ? 'ReplayKit Active (Tap to Open Picker)' : 'Launch ReplayKit Picker',
+              _isCaptured ? 'Broadcast Active (Tap to Manage)' : 'Launch ReplayKit Picker',
               style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
             ),
           ),
@@ -196,7 +422,62 @@ class _IosTransmitterViewState extends State<IosTransmitterView> {
     );
   }
 
-  Widget _buildConfigurationCard() {
+  /// Network Interfaces Card
+  Widget _buildNetworkInterfacesCard() {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: AppleCastTheme.darkSurfaceElevated,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppleCastTheme.darkBorder),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            children: [
+              Icon(Icons.hub_outlined, size: 20, color: AppleCastTheme.appleBlue),
+              SizedBox(width: 10),
+              Text(
+                'Detected Network Interfaces',
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.bold,
+                  color: AppleCastTheme.textPrimary,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          if (_interfaces.isEmpty)
+            const Text(
+              'Enumerating local interfaces (lo0, bridge100, en0)...',
+              style: TextStyle(fontSize: 12, color: AppleCastTheme.textSecondary),
+            )
+          else
+            ..._interfaces.map((iface) => Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        iface['name'] ?? '',
+                        style: const TextStyle(fontSize: 13, fontFamily: 'monospace', color: AppleCastTheme.textSecondary),
+                      ),
+                      Text(
+                        iface['ip'] ?? '',
+                        style: const TextStyle(fontSize: 13, fontFamily: 'monospace', fontWeight: FontWeight.w600, color: AppleCastTheme.textPrimary),
+                      ),
+                    ],
+                  ),
+                )),
+        ],
+      ),
+    );
+  }
+
+  /// Stream Encoder Profile Card
+  Widget _buildEncoderProfileCard() {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -208,25 +489,54 @@ class _IosTransmitterViewState extends State<IosTransmitterView> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
-            'Stream Encoder Profile',
+            'Encoder Pipeline Configuration',
             style: TextStyle(
-              fontSize: 16,
+              fontSize: 15,
               fontWeight: FontWeight.bold,
               color: AppleCastTheme.textPrimary,
             ),
           ),
-          const SizedBox(height: 16),
-          _buildConfigRow('Target Resolution', '1080p (1920x1080 Native)'),
-          const Divider(height: 20),
-          _buildConfigRow('Framerate', '${AppleCastConstants.defaultFramerate} FPS (Real-Time Zero B-Frame)'),
-          const Divider(height: 20),
-          _buildConfigRow('Hardware Codec', 'VideoToolbox H.264 / High Profile'),
-          const Divider(height: 20),
-          _buildConfigRow('Bitrate', '${AppleCastConstants.defaultBitrateMbps} Mbps (Variable CBR/ABR)'),
-          const Divider(height: 20),
-          _buildConfigRow('Tunnel Port', '$_activePort (TCP Loopback)'),
+          const SizedBox(height: 14),
+          _buildConfigRow('Target Resolution', '1080p (Native Dynamic Scale)'),
+          const Divider(height: 16),
+          _buildConfigRow('Framerate', '${AppleCastConstants.defaultFramerate} FPS (Zero B-Frames)'),
+          const Divider(height: 16),
+          _buildConfigRow('Hardware Codec', 'VideoToolbox H.264 (High Profile)'),
+          const Divider(height: 16),
+          _buildConfigRow('Target Bitrate', '${AppleCastConstants.defaultBitrateMbps} Mbps (CBR/ABR)'),
+          const Divider(height: 16),
+          _buildConfigRow('Video Port', '$_streamingPort (Loopback Tunnel)'),
+          const Divider(height: 16),
+          _buildConfigRow('Control Port', '$_controlPort (Laptop Detector)'),
         ],
       ),
+    );
+  }
+
+  Widget _buildInfoRow({
+    required IconData icon,
+    required String label,
+    required String value,
+    required bool isPositive,
+  }) {
+    return Row(
+      children: [
+        Icon(icon, size: 18, color: isPositive ? AppleCastTheme.appleGreen : AppleCastTheme.textSecondary),
+        const SizedBox(width: 8),
+        Text(
+          label,
+          style: const TextStyle(fontSize: 13, color: AppleCastTheme.textSecondary),
+        ),
+        const Spacer(),
+        Text(
+          value,
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+            color: isPositive ? AppleCastTheme.appleGreen : AppleCastTheme.textPrimary,
+          ),
+        ),
+      ],
     );
   }
 
@@ -240,34 +550,22 @@ class _IosTransmitterViewState extends State<IosTransmitterView> {
     );
   }
 
-  Widget _buildInstructionsCard() {
+  Widget _buildPill({required String label, required Color color, required IconData icon}) {
     return Container(
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
-        color: AppleCastTheme.darkSurfaceElevated,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppleCastTheme.darkBorder),
+        color: color.withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: color.withValues(alpha: 0.4)),
       ),
-      child: const Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Row(
-            children: [
-              Icon(Icons.lightbulb_outline, size: 18, color: AppleCastTheme.appleYellow),
-              SizedBox(width: 8),
-              Text(
-                'Wired Pairing Tips',
-                style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: AppleCastTheme.appleYellow),
-              ),
-            ],
-          ),
-          SizedBox(height: 10),
+          Icon(icon, size: 12, color: color),
+          const SizedBox(width: 5),
           Text(
-            '• Keep the Lightning/USB-C cable connected directly to the PC.\n'
-            '• Ensure "Trust This Computer" is confirmed on your lock screen.\n'
-            '• Tap "Launch ReplayKit Picker", choose "AppleCast", and tap "Start Broadcast".\n'
-            '• Once active, click "Mirror" on the Windows AppleCast application.',
-            style: TextStyle(fontSize: 12, height: 1.5, color: AppleCastTheme.textSecondary),
+            label,
+            style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: color),
           ),
         ],
       ),
@@ -279,9 +577,10 @@ class _IosTransmitterViewState extends State<IosTransmitterView> {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppleCastTheme.darkSurfaceElevated,
-        title: const Text('About AppleCast iOS Companion'),
+        title: const Text('About AppleCast Companion'),
         content: const Text(
-          'AppleCast utilizes an embedded iOS ReplayKit 2 RPBroadcastSampleHandler extension and VideoToolbox hardware encoder to stream elementary H.264 NALUs over a local usbmuxd virtual tunnel socket.',
+          'AppleCast pairs an embedded ReplayKit 2 RPBroadcastSampleHandler extension with a high-performance VideoToolbox hardware encoder to stream low-latency H.264 video frames directly over a USB cable via usbmuxd.\n\n'
+          'The on-device detector monitors Apple usbmuxd virtual tunnel connections, screen capture states, and active local interfaces in real-time.',
           style: TextStyle(fontSize: 13, height: 1.5),
         ),
         actions: [

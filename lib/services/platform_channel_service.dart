@@ -123,6 +123,38 @@ class PlatformChannelService {
     }
   }
 
+  /// iOS Companion Specific: Queries active hardware and laptop detector status
+  Future<Map<String, dynamic>> getDetectorStatus() async {
+    try {
+      final dynamic result = await _controlChannel.invokeMethod('getDetectorStatus');
+      if (result is Map) {
+        return Map<String, dynamic>.from(result);
+      }
+      return {'status': 'STOPPED', 'isCaptured': false, 'laptopConnected': false};
+    } on PlatformException {
+      return {'status': 'UNAVAILABLE', 'isCaptured': false, 'laptopConnected': false};
+    }
+  }
+
+  /// Probes iOS device over control port (15332) via usbmuxd tunnel
+  Future<Map<String, dynamic>> probeDevice({
+    required int deviceId,
+    int port = AppleCastConstants.defaultDeviceControlPort,
+  }) async {
+    try {
+      final dynamic result = await _controlChannel.invokeMethod('probeDevice', {
+        'deviceId': deviceId,
+        'port': port,
+      });
+      if (result is Map) {
+        return Map<String, dynamic>.from(result);
+      }
+      return {'connected': false};
+    } on PlatformException {
+      return {'connected': false};
+    }
+  }
+
   /// Stream of attached iOS devices received from usbmuxd daemon.
   Stream<List<IosDeviceInfo>> get devicesStream {
     return _devicesChannel.receiveBroadcastStream().map((dynamic event) {
