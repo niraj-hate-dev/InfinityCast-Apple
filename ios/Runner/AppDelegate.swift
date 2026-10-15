@@ -46,7 +46,7 @@ import Darwin
     let isCaptured = UIScreen.main.isCaptured
     NSLog("[AppleCast Host] UIScreen.capturedDidChangeNotification: isCaptured = %@", String(isCaptured))
     DispatchQueue.main.async { [weak self] in
-      self?.flutterChannel?.invokeMethod("onScreenCaptureChanged", ["isCaptured": isCaptured])
+      self?.flutterChannel?.invokeMethod("onScreenCaptureChanged", arguments: ["isCaptured": isCaptured])
     }
   }
 
@@ -122,7 +122,7 @@ import Darwin
         self.laptopLastSeen = Date().timeIntervalSince1970
 
         DispatchQueue.main.async {
-          self.flutterChannel?.invokeMethod("onLaptopDetected", [
+          self.flutterChannel?.invokeMethod("onLaptopDetected", arguments: [
             "connected": true,
             "name": self.laptopClientName
           ])
@@ -161,7 +161,7 @@ import Darwin
       if isComplete || error != nil {
         self.isLaptopConnected = false
         DispatchQueue.main.async {
-          self.flutterChannel?.invokeMethod("onLaptopDetected", [
+          self.flutterChannel?.invokeMethod("onLaptopDetected", arguments: [
             "connected": false,
             "name": ""
           ])
