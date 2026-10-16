@@ -174,8 +174,8 @@ void ScreenMirrorPlugin::EmitDeviceList() {
   flutter::EncodableList list;
 
   for (const auto& d : devices) {
-    // Strictly filter out non-USB devices (e.g. Wi-Fi / Network devices reported by iTunes sync)
-    if (d.connection_type != "USB") {
+    // Support both USB and Network/Wi-Fi devices reported by usbmuxd
+    if (d.connection_type != "USB" && d.connection_type != "Network") {
       continue;
     }
 
@@ -309,6 +309,30 @@ void ScreenMirrorPlugin::HandleMethodCall(
     if (!success && target_port == 25334) {
       // Auto-fallback to port 15333
       success = usbmuxd_client_->ConnectTunnel(device_id, 15333, &tunnel_sock, &err_msg);
+    }
+
+    if (!success) {
+      // Direct TCP fallback: check if iPhone is directly reachable on local network (e.g. 172.20.10.1:25334)
+      SOCKET direct_sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+      if (direct_sock != INVALID_SOCKET) {
+        const BOOL flag = TRUE;
+        setsockopt(direct_sock, IPPROTO_TCP, TCP_NODELAY, reinterpret_cast<const char*>(&flag), sizeof(flag));
+        sockaddr_in direct_addr{};
+        direct_addr.sin_family = AF_INET;
+        direct_addr.sin_port = htons(target_port);
+        inet_pton(AF_INET, "172.20.10.1", &direct_addr.sin_addr);
+
+        DWORD timeout = 2000;
+        setsockopt(direct_sock, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&timeout), sizeof(timeout));
+        setsockopt(direct_sock, SOL_SOCKET, SO_SNDTIMEO, reinterpret_cast<const char*>(&timeout), sizeof(timeout));
+
+        if (connect(direct_sock, reinterpret_cast<sockaddr*>(&direct_addr), sizeof(direct_addr)) == 0) {
+          tunnel_sock = direct_sock;
+          success = true;
+        } else {
+          closesocket(direct_sock);
+        }
+      }
     }
 
     if (success) {

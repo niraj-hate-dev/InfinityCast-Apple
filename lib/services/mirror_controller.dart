@@ -134,8 +134,8 @@ class MirrorController extends ChangeNotifier {
   }
 
   void _handleDeviceListUpdate(List<IosDeviceInfo> rawDevices) {
-    // Strictly filter to physical USB connections (ignore Wi-Fi/Network sync devices)
-    final devices = rawDevices.where((d) => d.connectionType.toUpperCase() == 'USB').toList();
+    // Allow both USB and Network connections (usbmuxd supports both)
+    final devices = rawDevices.where((d) => d.connectionType.toUpperCase() == 'USB' || d.connectionType.toUpperCase() == 'NETWORK').toList();
 
     // 1. If device list is completely empty, clear active device and set status to scanning
     if (devices.isEmpty) {
