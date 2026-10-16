@@ -76,11 +76,6 @@ class MirrorController extends ChangeNotifier {
 
     _subscribeChannels();
     await _channelService.startDeviceDiscovery();
-
-    // In debug mode when no physical device is plugged in, populate mock device for studio preview
-    if (kDebugMode && _state.devices.isEmpty) {
-      _insertMockDeviceForPreview();
-    }
   }
 
   void _subscribeChannels() {
@@ -139,44 +134,125 @@ class MirrorController extends ChangeNotifier {
   }
 
   void _handleDeviceListUpdate(List<IosDeviceInfo> devices) {
-    // Check if any device was newly attached or detached
+    // 1. If device list is completely empty, clear active device and set status to scanning
+    if (devices.isEmpty) {
+      final activeDevice = _state.selectedDevice;
+      if (activeDevice != null) {
+        addLog('USBMUXD', 'Device detached: ${activeDevice.deviceName} (${activeDevice.serialNumber})', level: LogLevel.warning);
+      }
+      _disconnectResetTimer?.cancel();
+      _lastFps = 0.0;
+      _lastDroppedFrames = 0;
+
+      _state = _state.copyWith(
+        devices: const [],
+        selectedDevice: null,
+        status: MirrorConnectionStatus.scanning,
+        clearTextureId: true,
+        metrics: StreamMetrics.empty,
+        clearError: true,
+      );
+      notifyListeners();
+      return;
+    }
+
+    // 2. Log newly attached devices & trigger metadata probe
     for (final dev in devices) {
       if (!_state.devices.any((d) => d.deviceId == dev.deviceId)) {
-        addLog('USBMUXD', 'Device attached: ${dev.deviceName} (${dev.serialNumber}) [${dev.connectionType} ${(dev.connectionSpeed / 1000000).toStringAsFixed(0)} Mbps]', level: LogLevel.success);
+        addLog(
+          'USBMUXD',
+          'Device attached: ${dev.deviceName} (${dev.serialNumber}) [${dev.connectionType} ${(dev.connectionSpeed / 1000000).toStringAsFixed(0)} Mbps]',
+          level: LogLevel.success,
+        );
+        _probeDeviceMetadata(dev.deviceId);
       }
     }
 
-    // Check if the currently active device was unplugged
+    // 3. Check if active device was unplugged
     final activeDevice = _state.selectedDevice;
     final bool activeWasUnplugged = activeDevice != null &&
         !devices.any((d) => d.deviceId == activeDevice.deviceId || d.serialNumber == activeDevice.serialNumber);
 
     if (activeWasUnplugged) {
       addLog('USBMUXD', 'Active device (${activeDevice.serialNumber}) unplugged from USB cable.', level: LogLevel.warning);
-      handleDeviceDisconnected('Device was unplugged from the USB port.');
-      return;
+      _disconnectResetTimer?.cancel();
+      _lastFps = 0.0;
+      _lastDroppedFrames = 0;
     }
 
-    // Auto-select the first device if none is selected
-    IosDeviceInfo? nextSelected = _state.selectedDevice;
-    MirrorConnectionStatus nextStatus = _state.status;
-
-    if (devices.isNotEmpty && nextSelected == null) {
+    // 4. Select active device
+    IosDeviceInfo? nextSelected;
+    if (activeDevice != null && !activeWasUnplugged) {
+      nextSelected = devices.firstWhere(
+        (d) => d.deviceId == activeDevice.deviceId || d.serialNumber == activeDevice.serialNumber,
+        orElse: () => devices.first,
+      );
+    } else {
       nextSelected = devices.first;
-      if (_state.status == MirrorConnectionStatus.scanning) {
-        nextStatus = MirrorConnectionStatus.connected;
-      }
-    } else if (devices.isEmpty && _state.status != MirrorConnectionStatus.mirroring) {
-      nextSelected = null;
-      nextStatus = MirrorConnectionStatus.scanning;
+    }
+
+    MirrorConnectionStatus nextStatus = _state.status;
+    if (activeWasUnplugged && _state.status == MirrorConnectionStatus.mirroring) {
+      nextStatus = MirrorConnectionStatus.connected;
+    } else if (_state.status == MirrorConnectionStatus.scanning || _state.status == MirrorConnectionStatus.disconnected) {
+      nextStatus = MirrorConnectionStatus.connected;
     }
 
     _state = _state.copyWith(
       devices: devices,
       selectedDevice: nextSelected,
       status: nextStatus,
+      clearError: !activeWasUnplugged,
+      errorMessage: activeWasUnplugged ? 'Device was unplugged from the USB port.' : null,
+      clearTextureId: activeWasUnplugged,
+      metrics: activeWasUnplugged ? StreamMetrics.empty : null,
     );
     notifyListeners();
+  }
+
+  Future<void> _probeDeviceMetadata(int deviceId) async {
+    try {
+      final probeResult = await _channelService.probeDevice(deviceId: deviceId);
+      if (probeResult['connected'] == true) {
+        final deviceName = probeResult['deviceName'] as String?;
+        final productType = probeResult['productType'] as String?;
+        final isCaptured = probeResult['isCaptured'] as bool? ?? false;
+
+        addLog(
+          'CONTROL',
+          'iPhone companion app detected online on port 15332! (Name: ${deviceName ?? "iPhone"}, Screen Captured: $isCaptured)',
+          level: LogLevel.success,
+        );
+
+        if (deviceName != null || productType != null) {
+          final updatedDevices = _state.devices.map((d) {
+            if (d.deviceId == deviceId) {
+              return d.copyWith(
+                deviceName: deviceName ?? d.deviceName,
+                productType: productType ?? d.productType,
+              );
+            }
+            return d;
+          }).toList();
+
+          IosDeviceInfo? updatedSelected = _state.selectedDevice;
+          if (updatedSelected?.deviceId == deviceId) {
+            updatedSelected = updatedSelected?.copyWith(
+              deviceName: deviceName ?? updatedSelected.deviceName,
+              productType: productType ?? updatedSelected.productType,
+            );
+          }
+
+          _state = _state.copyWith(
+            devices: updatedDevices,
+            selectedDevice: updatedSelected,
+          );
+          notifyListeners();
+        }
+      }
+    } catch (_) {
+      // Ignored if device not yet responding on control port
+    }
   }
 
   void _handleNativeStatusEvent(String statusStr, Map<String, dynamic> data) {
@@ -316,13 +392,15 @@ class MirrorController extends ChangeNotifier {
     );
     notifyListeners();
 
-    // Reset back to connected or scanning after a short feedback period
+    // Reset back to connected (if device still attached) or scanning after a short feedback period
     _disconnectResetTimer = Timer(const Duration(seconds: 2), () {
       if (_state.status == MirrorConnectionStatus.disconnected) {
+        final hasDevices = _state.devices.isNotEmpty;
         _state = _state.copyWith(
-          status: _state.selectedDevice != null
+          status: hasDevices && _state.selectedDevice != null
               ? MirrorConnectionStatus.connected
               : MirrorConnectionStatus.scanning,
+          selectedDevice: hasDevices ? _state.selectedDevice : null,
           clearError: true,
         );
         notifyListeners();
@@ -392,29 +470,6 @@ class MirrorController extends ChangeNotifier {
     return _channelService.probeDevice(deviceId: deviceId, port: port);
   }
 
-  void _insertMockDeviceForPreview() {
-    _state = _state.copyWith(
-      devices: [
-        const IosDeviceInfo(
-          deviceId: 3,
-          serialNumber: '00008110-00192C2E1160401E',
-          deviceName: "Viraj's iPhone",
-          productType: 'iPhone 15 Pro (A3102)',
-          connectionSpeed: 480000000,
-          trustStatus: DeviceTrustStatus.trusted,
-        ),
-      ],
-      selectedDevice: const IosDeviceInfo(
-        deviceId: 3,
-        serialNumber: '00008110-00192C2E1160401E',
-        deviceName: "Viraj's iPhone",
-        productType: 'iPhone 15 Pro (A3102)',
-        connectionSpeed: 480000000,
-        trustStatus: DeviceTrustStatus.trusted,
-      ),
-      status: MirrorConnectionStatus.connected,
-    );
-  }
 
   @override
   void dispose() {

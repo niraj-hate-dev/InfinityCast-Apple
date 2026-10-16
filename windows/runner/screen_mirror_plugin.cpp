@@ -268,6 +268,7 @@ void ScreenMirrorPlugin::HandleMethodCall(
           this->EmitDeviceList();
         });
 
+    this->EmitDeviceList();
     result->Success(flutter::EncodableValue(started));
   } else if (method_name == "connectDevice") {
     const auto* args = std::get_if<flutter::EncodableMap>(method_call.arguments());
@@ -358,6 +359,10 @@ void ScreenMirrorPlugin::HandleMethodCall(
 
     flutter::EncodableMap resp;
     if (success) {
+      // Set 1000ms receive timeout so probe never blocks
+      DWORD rcv_timeout = 1000;
+      setsockopt(probe_sock, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&rcv_timeout), sizeof(rcv_timeout));
+
       // Send PING message
       const std::string ping_payload = "{\"cmd\":\"PING\",\"client\":\"AppleCast-Windows\"}\n";
       send(probe_sock, ping_payload.c_str(), static_cast<int>(ping_payload.length()), 0);
@@ -368,16 +373,43 @@ void ScreenMirrorPlugin::HandleMethodCall(
       closesocket(probe_sock);
 
       bool is_captured = false;
+      std::string device_name;
+      std::string model;
+
       if (bytes_read > 0) {
         recv_buf[bytes_read] = '\0';
         std::string reply(recv_buf);
         if (reply.find("\"isCaptured\":true") != std::string::npos) {
           is_captured = true;
         }
+        // Extract name: "name":"..."
+        size_t name_pos = reply.find("\"name\":\"");
+        if (name_pos != std::string::npos) {
+          size_t start = name_pos + 8;
+          size_t end = reply.find("\"", start);
+          if (end != std::string::npos) {
+            device_name = reply.substr(start, end - start);
+          }
+        }
+        // Extract model: "model":"..."
+        size_t model_pos = reply.find("\"model\":\"");
+        if (model_pos != std::string::npos) {
+          size_t start = model_pos + 9;
+          size_t end = reply.find("\"", start);
+          if (end != std::string::npos) {
+            model = reply.substr(start, end - start);
+          }
+        }
       }
 
       resp[flutter::EncodableValue("connected")] = flutter::EncodableValue(true);
       resp[flutter::EncodableValue("isCaptured")] = flutter::EncodableValue(is_captured);
+      if (!device_name.empty()) {
+        resp[flutter::EncodableValue("deviceName")] = flutter::EncodableValue(device_name);
+      }
+      if (!model.empty()) {
+        resp[flutter::EncodableValue("productType")] = flutter::EncodableValue(model);
+      }
       result->Success(flutter::EncodableValue(resp));
     } else {
       resp[flutter::EncodableValue("connected")] = flutter::EncodableValue(false);

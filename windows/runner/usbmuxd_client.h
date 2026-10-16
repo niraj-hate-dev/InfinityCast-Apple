@@ -81,7 +81,7 @@ class UsbmuxdClient {
  private:
   void DiscoveryWorker();
   bool SendUsbmuxPacket(SOCKET sock, const std::string& plist_xml, uint32_t tag);
-  bool ReceiveUsbmuxPacket(SOCKET sock, std::string* out_plist, uint32_t timeout_ms = 3000);
+  bool ReceiveUsbmuxPacket(SOCKET sock, std::string* out_plist, uint32_t timeout_ms = 3000, bool* out_socket_closed = nullptr);
 
   // Plist parsing utilities
   void ParseAttachedDevice(const std::string& xml, UsbmuxDevice* out_device);

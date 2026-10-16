@@ -74,8 +74,9 @@ bool UsbmuxdClient::SendUsbmuxPacket(SOCKET sock, const std::string& plist_xml, 
   return true;
 }
 
-bool UsbmuxdClient::ReceiveUsbmuxPacket(SOCKET sock, std::string* out_plist, uint32_t timeout_ms) {
-  if (!out_plist) return false;
+bool UsbmuxdClient::ReceiveUsbmuxPacket(SOCKET sock, std::string* out_plist, uint32_t timeout_ms, bool* out_socket_closed) {
+  if (out_socket_closed) *out_socket_closed = false;
+  if (!out_plist || sock == INVALID_SOCKET) return false;
 
   // Wait for readability with timeout
   fd_set read_fds;
@@ -87,8 +88,12 @@ bool UsbmuxdClient::ReceiveUsbmuxPacket(SOCKET sock, std::string* out_plist, uin
   tv.tv_usec = (timeout_ms % 1000) * 1000;
 
   const int sel = select(0, &read_fds, nullptr, nullptr, (timeout_ms > 0) ? &tv : nullptr);
-  if (sel <= 0) {
+  if (sel < 0) {
+    if (out_socket_closed) *out_socket_closed = true;
     return false;
+  }
+  if (sel == 0) {
+    return false; // timeout
   }
 
   UsbmuxHeader header;
@@ -96,11 +101,15 @@ bool UsbmuxdClient::ReceiveUsbmuxPacket(SOCKET sock, std::string* out_plist, uin
   int received = 0;
   while (received < static_cast<int>(sizeof(UsbmuxHeader))) {
     const int n = recv(sock, header_ptr + received, static_cast<int>(sizeof(UsbmuxHeader)) - received, 0);
-    if (n <= 0) return false;
+    if (n <= 0) {
+      if (out_socket_closed) *out_socket_closed = true;
+      return false;
+    }
     received += n;
   }
 
   if (header.length < sizeof(UsbmuxHeader)) {
+    if (out_socket_closed) *out_socket_closed = true;
     return false;
   }
 
@@ -114,7 +123,10 @@ bool UsbmuxdClient::ReceiveUsbmuxPacket(SOCKET sock, std::string* out_plist, uin
   received = 0;
   while (received < static_cast<int>(payload_len)) {
     const int n = recv(sock, payload_buf.data() + received, payload_len - received, 0);
-    if (n <= 0) return false;
+    if (n <= 0) {
+      if (out_socket_closed) *out_socket_closed = true;
+      return false;
+    }
     received += n;
   }
 
@@ -193,8 +205,58 @@ void UsbmuxdClient::StopDiscovery() {
 void UsbmuxdClient::DiscoveryWorker() {
   while (is_running_) {
     std::string packet_xml;
+    bool socket_closed = false;
     // Timeout every 1000ms so thread responds quickly to is_running_ changes
-    if (!ReceiveUsbmuxPacket(discovery_sock_, &packet_xml, 1000)) {
+    if (!ReceiveUsbmuxPacket(discovery_sock_, &packet_xml, 1000, &socket_closed)) {
+      if (socket_closed && is_running_) {
+        // Daemon connection lost: clear attached devices and notify detached
+        {
+          std::lock_guard<std::mutex> lock(devices_mutex_);
+          attached_devices_.clear();
+        }
+        if (on_detached_) {
+          on_detached_(0);
+        }
+
+        if (discovery_sock_ != INVALID_SOCKET) {
+          closesocket(discovery_sock_);
+          discovery_sock_ = INVALID_SOCKET;
+        }
+
+        // Attempt reconnection to usbmuxd with backoff
+        while (is_running_) {
+          std::this_thread::sleep_for(std::chrono::milliseconds(2000));
+          if (!is_running_) break;
+
+          discovery_sock_ = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+          if (discovery_sock_ == INVALID_SOCKET) continue;
+
+          sockaddr_in server_addr{};
+          server_addr.sin_family = AF_INET;
+          server_addr.sin_port = htons(kUsbmuxdDefaultPort);
+          inet_pton(AF_INET, kUsbmuxdLoopbackIp, &server_addr.sin_addr);
+
+          if (connect(discovery_sock_, reinterpret_cast<sockaddr*>(&server_addr), sizeof(server_addr)) == 0) {
+            const std::string listen_plist =
+                "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+                "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n"
+                "<plist version=\"1.0\">\n"
+                "<dict>\n"
+                "    <key>BundleID</key><string>com.applecast.mirror</string>\n"
+                "    <key>ClientVersionString</key><string>applecast-1.0</string>\n"
+                "    <key>MessageType</key><string>Listen</string>\n"
+                "    <key>ProgName</key><string>AppleCast</string>\n"
+                "</dict>\n"
+                "</plist>\n";
+            if (SendUsbmuxPacket(discovery_sock_, listen_plist, 1)) {
+              break; // Successfully re-subscribed to usbmuxd Listen events
+            }
+          }
+
+          closesocket(discovery_sock_);
+          discovery_sock_ = INVALID_SOCKET;
+        }
+      }
       continue;
     }
 

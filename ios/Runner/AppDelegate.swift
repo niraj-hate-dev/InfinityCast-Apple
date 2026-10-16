@@ -197,7 +197,7 @@ import Darwin
         }
 
         let isCaptured = UIScreen.main.isCaptured
-        let resp = "{\"status\":\"OK\",\"isCaptured\":\(isCaptured),\"streamingPort\":\(self.defaultPort),\"model\":\"\(UIDevice.current.model)\"}\n"
+        let resp = "{\"status\":\"OK\",\"isCaptured\":\(isCaptured),\"streamingPort\":\(self.defaultPort),\"model\":\"\(UIDevice.current.model)\",\"name\":\"\(UIDevice.current.name)\"}\n"
         if let respData = resp.data(using: .utf8) {
           respData.withUnsafeBytes { rawPtr in
             if let ptr = rawPtr.baseAddress {
