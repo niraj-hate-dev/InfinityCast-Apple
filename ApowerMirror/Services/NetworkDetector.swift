@@ -19,6 +19,15 @@ public final class NetworkDetector {
     public private(set) var isConnectedViaCellular = false
     public private(set) var isConnectedViaWired = false
 
+    /// Returns the currently active network name / SSID fallback
+    public static func currentSSID() -> String? {
+        let interfaces = NetworkDetector.shared.getActiveIPv4Interfaces()
+        if interfaces.keys.contains(where: { $0.hasPrefix("en") }) {
+            return "Wi-Fi (Active)"
+        }
+        return "Connected"
+    }
+
     private init() {
         startMonitoring()
     }

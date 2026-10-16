@@ -29,6 +29,7 @@ jobs:
 
       - name: Build Native App & Extension
         run: |
+          set -o pipefail
           xcodebuild clean build \
             -project ApowerMirror.xcodeproj \
             -scheme ApowerMirror \
@@ -38,7 +39,7 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
-            AD_HOC_CODE_SIGNING_ALLOWED=YES
+            AD_HOC_CODE_SIGNING_ALLOWED=YES 2>&1 | tee xcodebuild.log || (echo "=== COMPILATION ERRORS ===" && grep -E "(error:|fatal error:)" xcodebuild.log && exit 1)
 
       - name: Package Unsigned IPA
         run: |
