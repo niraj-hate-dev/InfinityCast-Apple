@@ -14,7 +14,7 @@ open class WXCodeLinkViewController: UIViewController, UITextFieldDelegate {
 
     @IBOutlet public weak var backView: UIView!
     @IBOutlet public weak var codeView: UIView!
-    @IBOutlet public weak var inputView: WXCodeTextFiled!
+    @IBOutlet public weak var codeInputView: WXCodeTextFiled!
     @IBOutlet public weak var codeTF: UITextField!
     @IBOutlet public weak var connectBtn: UIButton!
     @IBOutlet public weak var alertView: UIView!
@@ -117,7 +117,7 @@ open class WXCodeLinkViewController: UIViewController, UITextFieldDelegate {
         input.translatesAutoresizingMaskIntoConstraints = false
         input.maxDigits = 4
         cView.addSubview(input)
-        self.inputView = input
+        self.codeInputView = input
 
         input.codeDidChange = { [weak self] newCode in
             self?.code = newCode
@@ -255,7 +255,7 @@ open class WXCodeLinkViewController: UIViewController, UITextFieldDelegate {
     @objc public func showDefaultView() {
         alertView?.isHidden = true
         code = ""
-        inputView?.code = ""
+        codeInputView?.code = ""
         refreshConnectBtn()
     }
 }
