@@ -172,4 +172,22 @@ public final class WXCastiOSSender: WXCastSenderServerDelegate {
         server.sendChannelMessage(resMsg)
         NSLog("[WXCastiOSSender] Synced orientation change: rot=%d, %dx%d", rotation, width, height)
     }
+
+    /// 5. Generic Custom Command Dispatcher
+    public func sendCustomMsg(action: String, data: [String: Any]? = nil) {
+        var payload: [String: Any] = [
+            "Action": action,
+            "Msg": ""
+        ]
+        if let extra = data {
+            for (k, v) in extra {
+                payload[k] = v
+            }
+        }
+        if let jsonData = try? JSONSerialization.data(withJSONObject: payload),
+           let jsonStr = String(data: jsonData, encoding: .utf8) {
+            server.sendChannelMessage(jsonStr + "\n")
+            NSLog("[WXCastiOSSender] Dispatched custom msg (%@): %@", action, jsonStr)
+        }
+    }
 }

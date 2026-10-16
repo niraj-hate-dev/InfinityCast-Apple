@@ -63,6 +63,16 @@ public final class BroadcastPickerManager {
         NSLog("[BroadcastPickerManager] Warning: Could not find internal button inside RPSystemBroadcastPickerView")
     }
 
+    /// Programmatically presents the ReplayKit broadcast picker dialog modal from top window
+    public func presentBroadcastPicker() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            let window = UIApplication.shared.windows.first(where: { $0.isKeyWindow }) ?? UIApplication.shared.windows.first
+            guard let targetView = window else { return }
+            self.launchBroadcastPicker(from: targetView)
+        }
+    }
+
     // MARK: - Screen Capture Observation
 
     private func setupScreenCaptureObserver() {
