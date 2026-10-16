@@ -37,6 +37,7 @@ public final class VideoEncoder {
     private var spsHeader: Data?
     private var ppsHeader: Data?
     private let annexBStartCode = Data([0x00, 0x00, 0x00, 0x01])
+    private var forceNextKeyframe = false
 
     // Maximum sub-packet size before slicing (10 KB / 0x2800 from ApowerMirror decompiled ASM)
     private let kMaxSliceChunkSize = 10240
@@ -51,6 +52,12 @@ public final class VideoEncoder {
 
     public func setDimensionChangeHandler(_ handler: @escaping DimensionChangeHandler) {
         self.dimensionHandler = handler
+    }
+
+    public func forceKeyFrame() {
+        encoderQueue.async { [weak self] in
+            self?.forceNextKeyframe = true
+        }
     }
 
     // MARK: - Frame Ingestion & Session Management
@@ -76,13 +83,20 @@ public final class VideoEncoder {
                 let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
                 let duration = CMSampleBufferGetDuration(sampleBuffer)
 
+                var frameProperties: CFDictionary? = nil
+                if self.forceNextKeyframe {
+                    self.forceNextKeyframe = false
+                    frameProperties = [kVTEncodeFrameOptionKey_ForceKeyFrame as String: kCFBooleanTrue] as CFDictionary
+                    NSLog("[VideoEncoder] Forcing IDR keyframe insertion on next frame")
+                }
+
                 var flags: VTEncodeInfoFlags = []
                 let status = VTCompressionSessionEncodeFrame(
                     session,
                     imageBuffer: pixelBuffer,
                     presentationTimeStamp: pts,
                     duration: duration,
-                    frameProperties: nil,
+                    frameProperties: frameProperties,
                     sourceFrameRefcon: nil,
                     infoFlagsOut: &flags
                 )
@@ -153,90 +167,90 @@ public final class VideoEncoder {
             return
         }
 
-        // 5. Apply exact ApowerMirror hardware encoder properties
-        // Real-time low-latency profile
+        // 5. Apply Hardened Low-Latency Properties
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_RealTime, value: kCFBooleanTrue)
-        // Zero B-frames for zero presentation delay
-        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AllowFrameReordering, value: kCFBooleanFalse)
-        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AllowTemporalCompression, value: kCFBooleanTrue)
-        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxFrameDelayCount, value: 1 as CFNumber)
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ProfileLevel, value: kVTProfileLevel_H264_High_AutoLevel)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_H264EntropyMode, value: kVTH264EntropyMode_CABAC)
-
-        // Profile Level: High AutoLevel (universally supported by Apple VideoToolbox hardware with CABAC)
-        let profile = kVTProfileLevel_H264_High_AutoLevel
-        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ProfileLevel, value: profile)
-
-        // Dynamic Quality factor (ASM @ 0x12e8c - 0x12ec0)
-        let quality: Float
-        if currentWidth >= 2560 {
-            quality = 0.85
-        } else if currentWidth >= 1920 {
-            quality = 0.80
-        } else {
-            quality = 0.70
-        }
-        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_Quality, value: quality as CFNumber)
-
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AllowFrameReordering, value: kCFBooleanFalse)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AverageBitRate, value: bitrate as CFNumber)
+
+        // Data rate limit ceiling: (bitrate / 8) * 1.5 bytes/sec
+        let byteLimit = Int(Float(bitrate) / 8.0 * 1.5)
+        let dataRateLimits: [CFNumber] = [byteLimit as CFNumber, 1 as CFNumber]
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_DataRateLimits, value: dataRateLimits as CFArray)
+
+        // Keyframe cadence: 1 keyframe per second
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ExpectedFrameRate, value: fps as CFNumber)
-        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameInterval, value: fps as CFNumber) // 1 keyframe/sec
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameInterval, value: fps as CFNumber)
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameIntervalDuration, value: 1.0 as CFNumber)
 
         VTCompressionSessionPrepareToEncodeFrames(session)
         self.compressionSession = session
 
-        // Notify geometry change
-        let rotationVal: Int32 = isLandscape ? 1 : 0
+        // 6. Notify Desktop Receiver of Geometry Change
+        let rotationVal: Int32 = isLandscape ? 90 : 0
         dimensionHandler?(currentWidth, currentHeight, rotationVal)
     }
 
-    // MARK: - Frame Parsing & Annex-B Packetization
+    // MARK: - Output Sample Handling & H.264 NAL Parsing
 
     private func handleEncodedSampleBuffer(_ sampleBuffer: CMSampleBuffer) {
-        guard let dataBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else { return }
-
-        // Determine if keyframe (IDR)
+        // Determine if keyframe (IDR) using type-safe CFDictionary casting
         var isKeyFrame = false
         if let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false) as? [[CFString: Any]],
-           let first = attachments.first {
-            let notSync = (first[kCMSampleAttachmentKey_NotSync] as? Bool) ?? false
+           let firstAttachment = attachments.first,
+           let notSync = firstAttachment[kCMSampleAttachmentKey_NotSync] as? Bool {
             isKeyFrame = !notSync
         }
 
         // On keyframe, extract SPS and PPS parameters (ASM @ 0x1349c)
         if isKeyFrame {
-            if let formatDesc = CMSampleBufferGetFormatDescription(sampleBuffer) {
-                var spsSize = 0
-                var spsCount = 0
-                var spsPtr: UnsafePointer<UInt8>?
+            guard let formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer) else { return }
 
-                let spsStatus = CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
-                    formatDesc,
-                    parameterSetIndex: 0,
-                    parameterSetPointerOut: &spsPtr,
-                    parameterSetSizeOut: &spsSize,
-                    parameterSetCountOut: &spsCount,
-                    nalUnitHeaderLengthOut: nil
-                )
+            var parameterSetCount = 0
+            CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
+                formatDescription,
+                parameterSetIndex: 0,
+                parameterSetPointerOut: nil,
+                parameterSetSizeOut: nil,
+                parameterSetCountOut: &parameterSetCount,
+                nalUnitHeaderLengthOut: nil
+            )
 
-                var ppsSize = 0
-                var ppsCount = 0
-                var ppsPtr: UnsafePointer<UInt8>?
+            // Extract SPS (Index 0)
+            var spsPointer: UnsafePointer<UInt8>?
+            var spsSize = 0
+            let spsStatus = CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
+                formatDescription,
+                parameterSetIndex: 0,
+                parameterSetPointerOut: &spsPointer,
+                parameterSetSizeOut: &spsSize,
+                parameterSetCountOut: nil,
+                nalUnitHeaderLengthOut: nil
+            )
 
-                let ppsStatus = CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
-                    formatDesc,
-                    parameterSetIndex: 1,
-                    parameterSetPointerOut: &ppsPtr,
-                    parameterSetSizeOut: &ppsSize,
-                    parameterSetCountOut: &ppsCount,
-                    nalUnitHeaderLengthOut: nil
-                )
+            // Extract PPS (Index 1)
+            var ppsPointer: UnsafePointer<UInt8>?
+            var ppsSize = 0
+            let ppsStatus = CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
+                formatDescription,
+                parameterSetIndex: 1,
+                parameterSetPointerOut: &ppsPointer,
+                parameterSetSizeOut: &ppsSize,
+                parameterSetCountOut: nil,
+                nalUnitHeaderLengthOut: nil
+            )
 
-                if spsStatus == noErr, ppsStatus == noErr, let sps = spsPtr, let pps = ppsPtr {
+            if spsStatus == noErr, ppsStatus == noErr, let sps = spsPointer, let pps = ppsPointer {
+                spsHeader = Data(bytes: sps, count: spsSize)
+                ppsHeader = Data(bytes: pps, count: ppsSize)
+
+                if let spsData = spsHeader, let ppsData = ppsHeader {
                     var spsPpsData = Data()
                     spsPpsData.append(annexBStartCode)
-                    spsPpsData.append(sps, count: spsSize)
+                    spsPpsData.append(spsData)
                     spsPpsData.append(annexBStartCode)
-                    spsPpsData.append(pps, count: ppsSize)
+                    spsPpsData.append(ppsData)
 
                     // Dispatch SPS/PPS as keyframe preamble
                     dispatchNetworkPackets(data: spsPpsData, isKeyFrame: true)
@@ -244,10 +258,12 @@ public final class VideoEncoder {
             }
         }
 
-        // Extract AVCC format slice and convert length prefixes to Annex-B start codes
+        // Extract AVCC length-prefixed NALUs and convert to Annex-B [00 00 00 01]
+        guard let dataBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else { return }
+
         var totalLength = 0
         var dataPointer: UnsafeMutablePointer<Int8>?
-        let status = CMBlockBufferGetDataPointer(
+        let blockStatus = CMBlockBufferGetDataPointer(
             dataBuffer,
             atOffset: 0,
             lengthAtOffsetOut: nil,
@@ -255,48 +271,41 @@ public final class VideoEncoder {
             dataPointerOut: &dataPointer
         )
 
-        guard status == noErr, let pointer = dataPointer, totalLength > 0 else { return }
+        guard blockStatus == noErr, let rawData = dataPointer else { return }
 
         var bufferOffset = 0
         let avccHeaderLength = 4
 
         while bufferOffset < totalLength - avccHeaderLength {
-            // Read 4-byte big endian length prefix
+            // Read 4-byte big-endian NALU length
             var naluLength: UInt32 = 0
-            memcpy(&naluLength, pointer + bufferOffset, avccHeaderLength)
+            memcpy(&naluLength, rawData + bufferOffset, avccHeaderLength)
             naluLength = CFSwapInt32BigToHost(naluLength)
-
-            guard naluLength > 0 else { break }
 
             bufferOffset += avccHeaderLength
 
             guard bufferOffset + Int(naluLength) <= totalLength else { break }
 
-            // Construct Annex-B slice: [00 00 00 01] + [NALU Payload]
+            // Construct Annex-B slice
             var sliceData = Data()
             sliceData.append(annexBStartCode)
-            sliceData.append(Data(bytes: pointer + bufferOffset, count: Int(naluLength)))
+            sliceData.append(Data(bytes: rawData + bufferOffset, count: Int(naluLength)))
 
-            // Slice into 10 KB packets and send
+            // Dispatch slice packets with ApowerMirror slicing tags
             dispatchNetworkPackets(data: sliceData, isKeyFrame: isKeyFrame)
 
             bufferOffset += Int(naluLength)
         }
     }
 
-    // MARK: - ApowerMirror 10 KB Slicing & Header Framing
-    // Decompiled directly from -[WXCastSenderServer sendH264Data:type:] @ 0x10450 - 0x10584:
-    // Slices larger than 10 KB (0x2800) are broken into chunks with tags:
-    // 0x00000000 = Intermediate slice chunk
-    // 0x00000002 = End of frame chunk
+    // MARK: - ApowerMirror Network Slicing & Header Tagging
 
     private func dispatchNetworkPackets(data: Data, isKeyFrame: Bool) {
-        var offset = 0
         let totalSize = data.count
+        var offset = 0
 
         while offset < totalSize {
-            let remaining = totalSize - offset
-            let chunkSize = min(remaining, kMaxSliceChunkSize)
+            let chunkSize = min(kMaxSliceChunkSize, totalSize - offset)
             let isEnd = (offset + chunkSize >= totalSize)
 
             // Framing tag: 4 bytes big-endian

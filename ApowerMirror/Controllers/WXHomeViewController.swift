@@ -2,22 +2,27 @@
 //  WXHomeViewController.swift
 //  ApowerMirror
 //
-//  Direct Start Screen Mirror UI with Real-time ReplayKit & Connection Diagnostics
+//  Clean Direct In-App Screen Recording & Real-time Live Diagnostics:
+//  - Prominent Start Screen Recording button with iOS permission prompt
+//  - Live ReplayKit Screen Recording Status Card (Success / Error / Duration)
+//  - Live Windows PC Receiver Connection Status Card (Connected / Listening / Error)
+//  - Seamless fallback to System Broadcast Extension if desired
 //
 
 import UIKit
 import ReplayKit
 
 @objc(WXHomeViewController)
-open class WXHomeViewController: UIViewController, BroadcastPickerManagerDelegate, WXCastiOSSenderDelegate {
+open class WXHomeViewController: UIViewController, ScreenRecorderManagerDelegate, WXCastiOSSenderDelegate, BroadcastPickerManagerDelegate {
 
     // MARK: - UI Components
     private var scanBtn: UIButton?
     private var scanBtnLabel: UILabel?
     private var scanBtnSubLabel: UILabel?
+    private var hintLabel: UILabel?
     private var pulseLayer: CAShapeLayer?
 
-    // Live Diagnostic UI
+    // Live Diagnostic UI Cards
     private var replayKitStatusCard: UIView?
     private var replayKitDotView: UIView?
     private var replayKitTitleLabel: UILabel?
@@ -28,9 +33,13 @@ open class WXHomeViewController: UIViewController, BroadcastPickerManagerDelegat
     private var connectionTitleLabel: UILabel?
     private var connectionDetailLabel: UILabel?
 
+    private var systemBroadcastButton: UIButton?
+
+    // State Tracking
     private var durationTimer: Timer?
     private var recordingSeconds = 0
-    private var broadcastRequestedTimestamp: Date?
+    private var lastErrorMessage: String?
+    private var isDesktopConnected = false
 
     // MARK: - Lifecycle
 
@@ -40,10 +49,11 @@ open class WXHomeViewController: UIViewController, BroadcastPickerManagerDelegat
         setupObservers()
 
         // Bind delegates
-        BroadcastPickerManager.shared.delegate = self
+        ScreenRecorderManager.shared.delegate = self
         WXCastiOSSender.shared.delegate = self
+        BroadcastPickerManager.shared.delegate = self
 
-        // Pre-warm the broadcast picker in view hierarchy
+        // Prepare broadcast picker view in hierarchy
         BroadcastPickerManager.shared.preparePickerView(in: view)
     }
 
@@ -104,7 +114,7 @@ open class WXHomeViewController: UIViewController, BroadcastPickerManagerDelegat
         wifiLbl.textColor = UIColor(red: 0.10, green: 0.65, blue: 0.35, alpha: 1.0)
         infoCard.addSubview(wifiLbl)
 
-        // Center Prominent Direct "START MIRROR" Button
+        // Center Prominent Direct "START SCREEN RECORDING" Button
         let btn = UIButton(type: .custom)
         btn.translatesAutoresizingMaskIntoConstraints = false
         btn.backgroundColor = UIColor(red: 0.15, green: 0.50, blue: 0.98, alpha: 1.0)
@@ -135,18 +145,19 @@ open class WXHomeViewController: UIViewController, BroadcastPickerManagerDelegat
         btn.addSubview(btnSub)
         self.scanBtnSubLabel = btnSub
 
-        let hintLabel = UILabel()
-        hintLabel.translatesAutoresizingMaskIntoConstraints = false
-        hintLabel.text = "Tap to Launch Screen Recording"
-        hintLabel.font = UIFont.systemFont(ofSize: 14, weight: .medium)
-        hintLabel.textColor = UIColor(white: 0.4, alpha: 1.0)
-        view.addSubview(hintLabel)
+        let hint = UILabel()
+        hint.translatesAutoresizingMaskIntoConstraints = false
+        hint.text = "Tap to Launch Screen Recording"
+        hint.font = UIFont.systemFont(ofSize: 14, weight: .medium)
+        hint.textColor = UIColor(white: 0.4, alpha: 1.0)
+        view.addSubview(hint)
+        self.hintLabel = hint
 
         // Diagnostic Card 1: ReplayKit Screen Recording Status
         let rkCard = createDiagnosticCard(
             title: "ReplayKit Screen Recording",
-            initialStatus: "Inactive",
-            initialDetail: "Tap Start Screen Mirror to launch broadcast.",
+            initialStatus: "Ready",
+            initialDetail: "Tap 'M' START above to grant screen recording permission.",
             dotColor: UIColor.systemGray
         )
         view.addSubview(rkCard.card)
@@ -155,11 +166,11 @@ open class WXHomeViewController: UIViewController, BroadcastPickerManagerDelegat
         self.replayKitTitleLabel = rkCard.titleLbl
         self.replayKitDetailLabel = rkCard.detailLbl
 
-        // Diagnostic Card 2: PC Connection Status
+        // Diagnostic Card 2: Windows PC Connection Status
         let connCard = createDiagnosticCard(
             title: "Windows Receiver Connection",
             initialStatus: "Listening on Ports 25333 / 25334",
-            initialDetail: "Waiting for Windows Software to connect.",
+            initialDetail: "Waiting for Windows Software (Open AppleCast on PC).",
             dotColor: UIColor.systemOrange
         )
         view.addSubview(connCard.card)
@@ -167,6 +178,16 @@ open class WXHomeViewController: UIViewController, BroadcastPickerManagerDelegat
         self.connectionDotView = connCard.dot
         self.connectionTitleLabel = connCard.titleLbl
         self.connectionDetailLabel = connCard.detailLbl
+
+        // Secondary Option: Launch System Broadcast Extension
+        let broadcastBtn = UIButton(type: .system)
+        broadcastBtn.translatesAutoresizingMaskIntoConstraints = false
+        broadcastBtn.setTitle("Or launch System Broadcast (Full Phone Mirror) ›", for: .normal)
+        broadcastBtn.titleLabel?.font = UIFont.systemFont(ofSize: 13, weight: .medium)
+        broadcastBtn.setTitleColor(UIColor(red: 0.15, green: 0.50, blue: 0.98, alpha: 1.0), for: .normal)
+        broadcastBtn.addTarget(self, action: #selector(handleLaunchBroadcastPicker), for: .touchUpInside)
+        view.addSubview(broadcastBtn)
+        self.systemBroadcastButton = broadcastBtn
 
         // Constraints
         NSLayoutConstraint.activate([
@@ -192,7 +213,7 @@ open class WXHomeViewController: UIViewController, BroadcastPickerManagerDelegat
             wifiLbl.centerYAnchor.constraint(equalTo: infoCard.centerYAnchor),
 
             btn.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            btn.topAnchor.constraint(equalTo: infoCard.bottomAnchor, constant: 36),
+            btn.topAnchor.constraint(equalTo: infoCard.bottomAnchor, constant: 32),
             btn.widthAnchor.constraint(equalToConstant: 160),
             btn.heightAnchor.constraint(equalToConstant: 160),
 
@@ -202,10 +223,10 @@ open class WXHomeViewController: UIViewController, BroadcastPickerManagerDelegat
             btnSub.centerXAnchor.constraint(equalTo: btn.centerXAnchor),
             btnSub.topAnchor.constraint(equalTo: btnTitle.bottomAnchor, constant: -4),
 
-            hintLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            hintLabel.topAnchor.constraint(equalTo: btn.bottomAnchor, constant: 14),
+            hint.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            hint.topAnchor.constraint(equalTo: btn.bottomAnchor, constant: 12),
 
-            rkCard.card.topAnchor.constraint(equalTo: hintLabel.bottomAnchor, constant: 28),
+            rkCard.card.topAnchor.constraint(equalTo: hint.bottomAnchor, constant: 24),
             rkCard.card.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
             rkCard.card.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
             rkCard.card.heightAnchor.constraint(equalToConstant: 78),
@@ -213,7 +234,10 @@ open class WXHomeViewController: UIViewController, BroadcastPickerManagerDelegat
             connCard.card.topAnchor.constraint(equalTo: rkCard.card.bottomAnchor, constant: 12),
             connCard.card.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
             connCard.card.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
-            connCard.card.heightAnchor.constraint(equalToConstant: 78)
+            connCard.card.heightAnchor.constraint(equalToConstant: 78),
+
+            broadcastBtn.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            broadcastBtn.topAnchor.constraint(equalTo: connCard.card.bottomAnchor, constant: 16)
         ])
     }
 
@@ -271,36 +295,40 @@ open class WXHomeViewController: UIViewController, BroadcastPickerManagerDelegat
         return (card, dot, tLbl, dLbl)
     }
 
-    // MARK: - Direct Action
+    // MARK: - Direct Screen Recording Actions
 
     @objc public func handleDirectMirrorAction() {
-        if UIScreen.main.isCaptured {
-            NSLog("[WXHomeViewController] User tapped STOP SCREEN MIRROR -> presenting stop dialog")
-            MMWormholeManager.shared.sendStopMirror()
-            BroadcastPickerManager.shared.presentBroadcastPicker()
+        if ScreenRecorderManager.shared.isCapturing {
+            // STOP Recording
+            NSLog("[WXHomeViewController] User tapped STOP SCREEN RECORDING")
+            ScreenRecorderManager.shared.stopRecording { [weak self] _ in
+                self?.updateStatusCards()
+            }
             return
         }
 
-        broadcastRequestedTimestamp = Date()
-        NSLog("[WXHomeViewController] User tapped START SCREEN MIRROR -> Launching ReplayKit Picker")
+        // START Recording -> Prompts iOS Screen Recording Permission
+        NSLog("[WXHomeViewController] User tapped START SCREEN RECORDING -> Triggering iOS permission dialog")
+        lastErrorMessage = nil
 
-        // Directly trigger Apple's native ReplayKit modal picker dialog
-        BroadcastPickerManager.shared.presentBroadcastPicker()
-
-        // Give immediate user feedback
-        replayKitTitleLabel?.text = "ReplayKit: Starting Broadcast..."
-        replayKitDetailLabel?.text = "Waiting for 3-2-1 countdown. Ensure ApowerMirrorUpload is selected."
+        // Immediate Visual Feedback
         replayKitDotView?.backgroundColor = UIColor.systemOrange
+        replayKitTitleLabel?.text = "ReplayKit: Requesting Permission..."
+        replayKitDetailLabel?.text = "Please tap 'Allow' on the iOS system prompt to start mirroring."
+        hintLabel?.text = "Waiting for permission..."
 
-        // Check after 6 seconds: if still not captured, show diagnostic hint
-        DispatchQueue.main.asyncAfter(deadline: .now() + 6.0) { [weak self] in
+        ScreenRecorderManager.shared.startRecording { [weak self] (success, error) in
             guard let self = self else { return }
-            if !UIScreen.main.isCaptured {
-                self.replayKitTitleLabel?.text = "ReplayKit: Not Active / Stopped"
-                self.replayKitDetailLabel?.text = "Broadcast failed or stopped. Tap Start again and select 'ApowerMirrorUpload'."
-                self.replayKitDotView?.backgroundColor = UIColor.systemRed
+            if let error = error {
+                self.lastErrorMessage = error.localizedDescription
             }
+            self.updateStatusCards()
         }
+    }
+
+    @objc public func handleLaunchBroadcastPicker() {
+        NSLog("[WXHomeViewController] User tapped Launch System Broadcast Picker")
+        BroadcastPickerManager.shared.presentBroadcastPicker()
     }
 
     // MARK: - Observer & State Handling
@@ -321,7 +349,7 @@ open class WXHomeViewController: UIViewController, BroadcastPickerManagerDelegat
                 guard let obs = observer else { return }
                 let vc = Unmanaged<WXHomeViewController>.fromOpaque(obs).takeUnretainedValue()
                 DispatchQueue.main.async {
-                    vc.handleExtensionBroadcastStarted()
+                    vc.updateStatusCards()
                 }
             },
             "com.apowermirror.broadcast.BroadcastStarted" as CFString,
@@ -336,7 +364,7 @@ open class WXHomeViewController: UIViewController, BroadcastPickerManagerDelegat
                 guard let obs = observer else { return }
                 let vc = Unmanaged<WXHomeViewController>.fromOpaque(obs).takeUnretainedValue()
                 DispatchQueue.main.async {
-                    vc.handleExtensionBroadcastFinished()
+                    vc.updateStatusCards()
                 }
             },
             "com.apowermirror.broadcast.Finish" as CFString,
@@ -351,38 +379,51 @@ open class WXHomeViewController: UIViewController, BroadcastPickerManagerDelegat
         }
     }
 
-    private func handleExtensionBroadcastStarted() {
-        NSLog("[WXHomeViewController] Darwin Notification received: Extension BroadcastStarted!")
-        updateStatusCards()
-    }
-
-    private func handleExtensionBroadcastFinished() {
-        NSLog("[WXHomeViewController] Darwin Notification received: Extension Finish!")
-        updateStatusCards()
-    }
-
     private func updateStatusCards() {
-        let isCaptured = UIScreen.main.isCaptured
+        let isCapturing = ScreenRecorderManager.shared.isCapturing || UIScreen.main.isCaptured
 
-        if isCaptured {
-            // Screen recording SUCCESS
+        if isCapturing {
+            // Screen Recording ACTIVE
             replayKitDotView?.backgroundColor = UIColor(red: 0.10, green: 0.75, blue: 0.35, alpha: 1.0)
             replayKitTitleLabel?.text = "ReplayKit: Screen Recording ACTIVE"
             replayKitDetailLabel?.text = "Capturing screen at 60 FPS -> Streaming on port 25334."
 
             scanBtn?.backgroundColor = UIColor(red: 0.90, green: 0.25, blue: 0.20, alpha: 1.0)
             scanBtnSubLabel?.text = "STOP"
+            hintLabel?.text = "Screen recording is live • Tap to stop"
 
             startDurationTimer()
-        } else {
-            // Screen recording INACTIVE or STOPPED
+        } else if let err = lastErrorMessage {
+            // Screen Recording FAILED / PERMISSION DENIED
             stopDurationTimer()
             replayKitDotView?.backgroundColor = UIColor.systemRed
-            replayKitTitleLabel?.text = "ReplayKit: Not Active / Stopped"
-            replayKitDetailLabel?.text = "Tap 'M' START above, select ApowerMirrorUpload, and tap Start Broadcast."
+            replayKitTitleLabel?.text = "ReplayKit: Error / Denied"
+            replayKitDetailLabel?.text = "Failed to start: \(err)"
 
             scanBtn?.backgroundColor = UIColor(red: 0.15, green: 0.50, blue: 0.98, alpha: 1.0)
             scanBtnSubLabel?.text = "START"
+            hintLabel?.text = "Tap to retry screen recording"
+        } else {
+            // Screen Recording INACTIVE / READY
+            stopDurationTimer()
+            replayKitDotView?.backgroundColor = UIColor.systemGray
+            replayKitTitleLabel?.text = "ReplayKit: Ready"
+            replayKitDetailLabel?.text = "Tap 'M' START above to grant screen recording permission."
+
+            scanBtn?.backgroundColor = UIColor(red: 0.15, green: 0.50, blue: 0.98, alpha: 1.0)
+            scanBtnSubLabel?.text = "START"
+            hintLabel?.text = "Tap to Launch Screen Recording"
+        }
+
+        // Update Windows Connection Card
+        if isDesktopConnected {
+            connectionDotView?.backgroundColor = UIColor(red: 0.10, green: 0.75, blue: 0.35, alpha: 1.0)
+            connectionTitleLabel?.text = "Windows Receiver: CONNECTED"
+            connectionDetailLabel?.text = "Desktop client connected and ready to receive live stream."
+        } else {
+            connectionDotView?.backgroundColor = UIColor.systemOrange
+            connectionTitleLabel?.text = "Windows Receiver: LISTENING"
+            connectionDetailLabel?.text = "Listening on Ports 25333 / 25334 (Open AppleCast on PC)."
         }
     }
 
@@ -442,6 +483,31 @@ open class WXHomeViewController: UIViewController, BroadcastPickerManagerDelegat
         pulseLayer = nil
     }
 
+    // MARK: - ScreenRecorderManagerDelegate Callbacks
+
+    public func screenRecorderDidStart() {
+        DispatchQueue.main.async { [weak self] in
+            self?.lastErrorMessage = nil
+            self?.updateStatusCards()
+        }
+    }
+
+    public func screenRecorderDidStop(error: Error?) {
+        DispatchQueue.main.async { [weak self] in
+            if let error = error {
+                self?.lastErrorMessage = error.localizedDescription
+            }
+            self?.updateStatusCards()
+        }
+    }
+
+    public func screenRecorderDidFail(error: Error) {
+        DispatchQueue.main.async { [weak self] in
+            self?.lastErrorMessage = error.localizedDescription
+            self?.updateStatusCards()
+        }
+    }
+
     // MARK: - BroadcastPickerManagerDelegate
 
     public func broadcastCaptureStateChanged(isCaptured: Bool) {
@@ -455,23 +521,22 @@ open class WXHomeViewController: UIViewController, BroadcastPickerManagerDelegat
     public func castSenderDidConnectDesktop() {
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
-            self.connectionDotView?.backgroundColor = UIColor(red: 0.10, green: 0.75, blue: 0.35, alpha: 1.0)
-            self.connectionTitleLabel?.text = "Windows Receiver: CONNECTED"
-            self.connectionDetailLabel?.text = "Desktop client connected and ready to receive live stream."
+            self.isDesktopConnected = true
+            self.updateStatusCards()
         }
     }
 
     public func castSenderDidDisconnectDesktop() {
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
-            self.connectionDotView?.backgroundColor = UIColor.systemOrange
-            self.connectionTitleLabel?.text = "Windows Receiver: DISCONNECTED"
-            self.connectionDetailLabel?.text = "Waiting for Windows software (Open AppleCast on PC)."
+            self.isDesktopConnected = false
+            self.updateStatusCards()
         }
     }
 
     public func castSenderDidRequestIDRKeyframe() {
         NSLog("[WXHomeViewController] Desktop requested IDR Keyframe refresh")
+        ScreenRecorderManager.shared.requestKeyframe()
     }
 
     deinit {

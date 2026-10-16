@@ -2,22 +2,17 @@
 //  WXCastSenderServer.swift
 //  ApowerMirror / WXCastiOSSender
 //
-//  Reconstructed 1:1 from ApowerMirror WXCastiOSSender.framework:
-//  - -[WXCastSenderServer init]
-//  - -[WXCastSenderServer startMirror:port:msg:]
-//  - -[WXCastSenderServer webSocketServer:didAcceptSocket:]
-//  - -[WXCastSenderServer webSocketServer:didReceiveData:fromConnection:]
-//
-//  NOTE ON PORT SEPARATION (Preventing EADDRINUSE / errno 48):
-//  The Main App process binds ONLY to port 25333 (/channel.do) for control, signaling,
-//  and geometry sync.
-//  The Extension process (SampleHandler) binds to port 25334 (/mirror.do and /mirrorVoice.do)
-//  for real-time H.264/AAC data.
+//  Dual-Port Server Engine for ApowerMirror & AppleCast:
+//  - Port 25333: Control / Signaling (/channel.do WebSocket & JSON RPC)
+//  - Port 25334: Video Media Stream (/mirror.do HTTP & Raw H.264 NALU Stream)
+//  Hosted directly inside the Main App process to bypass iOS 18 extension
+//  sandbox network restrictions.
 //
 
 import Foundation
 import Network
 import CommonCrypto
+import Darwin
 
 public protocol WXCastSenderServerDelegate: AnyObject {
     func serverDidReceiveCommand(_ command: String, data: [String: Any]?)
@@ -30,12 +25,23 @@ public final class WXCastSenderServer {
 
     // MARK: - Constants
     public static let defaultChannelPort: UInt16 = 25333 // 0x62F5 (/channel.do)
-    public static let defaultMirrorPort: UInt16 = 25334  // 0x62F6 (Extension only)
+    public static let defaultMirrorPort: UInt16 = 25334  // 0x62F6 (/mirror.do)
 
     // MARK: - Properties
     public weak var delegate: WXCastSenderServerDelegate?
+
+    // Channel (Port 25333)
     private var channelListener: NWListener?
     private var channelClients: [NWConnection] = []
+
+    // Video Stream (Port 25334)
+    private var mirrorListener: NWListener?
+    private var mirrorClients: [NWConnection] = []
+
+    // BSD Sockets Engine for Port 25334 (Fail-safe direct socket stream)
+    private var bsdListenSocket: Int32 = -1
+    private var bsdClientSockets: [Int32] = []
+    private let bsdSocketLock = NSLock()
 
     private let serverQueue = DispatchQueue(label: "com.apowermirror.server.queue", qos: .userInteractive)
     private var isRunning = false
@@ -46,14 +52,15 @@ public final class WXCastSenderServer {
 
     // MARK: - Lifecycle
 
-    /// Starts the Control / Signaling server on 0.0.0.0:25333 (/channel.do)
-    public func start(channelPort: UInt16 = defaultChannelPort) {
+    /// Starts both Control (25333) and Video Mirror (25334) server engines
+    public func start(channelPort: UInt16 = defaultChannelPort, mirrorPort: UInt16 = defaultMirrorPort) {
         serverQueue.async { [weak self] in
             guard let self = self, !self.isRunning else { return }
             self.isRunning = true
 
             self.setupChannelListener(port: channelPort)
-            NSLog("[WXCastSenderServer] Control server active on 0.0.0.0:%d (/channel.do)", channelPort)
+            self.setupMirrorListener(port: mirrorPort)
+            NSLog("[WXCastSenderServer] Control active on 0.0.0.0:%d, Video Stream active on 0.0.0.0:%d", channelPort, mirrorPort)
         }
     }
 
@@ -62,13 +69,31 @@ public final class WXCastSenderServer {
             guard let self = self else { return }
             self.isRunning = false
 
+            // Stop Channel Listener & Clients
             self.channelListener?.cancel()
             self.channelListener = nil
-
             self.channelClients.forEach { $0.cancel() }
             self.channelClients.removeAll()
 
-            NSLog("[WXCastSenderServer] Stopped control listener and closed client connections")
+            // Stop Mirror Listener & Clients
+            self.mirrorListener?.cancel()
+            self.mirrorListener = nil
+            self.mirrorClients.forEach { $0.cancel() }
+            self.mirrorClients.removeAll()
+
+            // Close BSD Sockets
+            self.bsdSocketLock.lock()
+            if self.bsdListenSocket >= 0 {
+                close(self.bsdListenSocket)
+                self.bsdListenSocket = -1
+            }
+            for fd in self.bsdClientSockets {
+                close(fd)
+            }
+            self.bsdClientSockets.removeAll()
+            self.bsdSocketLock.unlock()
+
+            NSLog("[WXCastSenderServer] Stopped all listeners and closed client connections")
         }
     }
 
@@ -79,6 +104,7 @@ public final class WXCastSenderServer {
             let tcpOptions = NWProtocolTCP.Options()
             tcpOptions.noDelay = true
             let params = NWParameters(tls: nil, tcp: tcpOptions)
+            params.allowLocalEndpointReuse = true
 
             let listener = try NWListener(using: params, on: NWEndpoint.Port(rawValue: port)!)
             listener.newConnectionHandler = { [weak self] connection in
@@ -89,7 +115,7 @@ public final class WXCastSenderServer {
                 case .ready:
                     NSLog("[WXCastSenderServer] Successfully bound channel listener to 0.0.0.0:%d", port)
                 case .failed(let err):
-                    NSLog("[WXCastSenderServer] Channel listener failed (check for EADDRINUSE): %@", err.localizedDescription)
+                    NSLog("[WXCastSenderServer] Channel listener failed: %@", err.localizedDescription)
                 default:
                     break
                 }
@@ -108,19 +134,210 @@ public final class WXCastSenderServer {
             case .ready:
                 self.serverQueue.async {
                     self.channelClients.append(conn)
-                    self.delegate?.serverClientConnected(endpoint: String(describing: conn.endpoint))
+                    let endpoint = String(describing: conn.endpoint)
+                    NSLog("[WXCastSenderServer] Control client connected: %@", endpoint)
+                    self.delegate?.serverClientConnected(endpoint: endpoint)
                     self.receiveHttpOrWebSocket(connection: conn)
                 }
             case .failed, .cancelled:
                 self.serverQueue.async {
                     self.channelClients.removeAll { $0 === conn }
-                    self.delegate?.serverClientDisconnected(endpoint: String(describing: conn.endpoint))
+                    let endpoint = String(describing: conn.endpoint)
+                    self.delegate?.serverClientDisconnected(endpoint: endpoint)
                 }
             default:
                 break
             }
         }
         connection.start(queue: serverQueue)
+    }
+
+    // MARK: - Video Mirror Server (/mirror.do on 25334)
+
+    private func setupMirrorListener(port: UInt16) {
+        // 1. Setup BSD socket server for port 25334 (instant, zero privacy prompt)
+        setupBsdMirrorServer(port: port)
+
+        // 2. Setup NWListener on port 25334
+        do {
+            let tcpOptions = NWProtocolTCP.Options()
+            tcpOptions.noDelay = true
+            tcpOptions.enableKeepalive = true
+            let params = NWParameters(tls: nil, tcp: tcpOptions)
+            params.allowLocalEndpointReuse = true
+
+            let listener = try NWListener(using: params, on: NWEndpoint.Port(rawValue: port)!)
+            listener.newConnectionHandler = { [weak self] connection in
+                self?.handleMirrorConnection(connection)
+            }
+            listener.stateUpdateHandler = { state in
+                switch state {
+                case .ready:
+                    NSLog("[WXCastSenderServer] Successfully bound Video Mirror listener to 0.0.0.0:%d", port)
+                case .failed(let err):
+                    NSLog("[WXCastSenderServer] Mirror listener state note: %@ (BSD socket active)", err.localizedDescription)
+                default:
+                    break
+                }
+            }
+            listener.start(queue: serverQueue)
+            self.mirrorListener = listener
+        } catch {
+            NSLog("[WXCastSenderServer] Failed to bind Mirror Listener on port %d: %@", port, error.localizedDescription)
+        }
+    }
+
+    private func handleMirrorConnection(_ connection: NWConnection) {
+        connection.stateUpdateHandler = { [weak self, weak connection] state in
+            guard let self = self, let conn = connection else { return }
+            switch state {
+            case .ready:
+                self.serverQueue.async {
+                    self.mirrorClients.append(conn)
+                    let endpoint = String(describing: conn.endpoint)
+                    NSLog("[WXCastSenderServer] Desktop Mirror client connected on 25334: %@", endpoint)
+                    self.delegate?.serverClientConnected(endpoint: endpoint)
+                    self.delegate?.serverDidRequestKeyframeRefresh()
+                    self.receiveMirrorHandshake(connection: conn)
+                }
+            case .failed, .cancelled:
+                self.serverQueue.async {
+                    self.mirrorClients.removeAll { $0 === conn }
+                    NSLog("[WXCastSenderServer] Desktop Mirror client disconnected on 25334")
+                }
+            default:
+                break
+            }
+        }
+        connection.start(queue: serverQueue)
+    }
+
+    private func receiveMirrorHandshake(connection: NWConnection) {
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 4096) { [weak self, weak connection] (data, _, isComplete, error) in
+            guard let _ = self, let conn = connection, let data = data, !data.isEmpty else { return }
+
+            if let text = String(data: data, encoding: .utf8), text.contains("GET ") {
+                let response = "HTTP/1.1 200 OK\r\nContent-Type: video/h264\r\nConnection: keep-alive\r\n\r\n"
+                if let respData = response.data(using: .utf8) {
+                    conn.send(content: respData, completion: .idempotent)
+                }
+                NSLog("[WXCastSenderServer] Acknowledged HTTP /mirror.do stream request")
+            }
+        }
+    }
+
+    // MARK: - BSD Sockets Engine for Port 25334
+
+    private func setupBsdMirrorServer(port: UInt16) {
+        serverQueue.async { [weak self] in
+            guard let self = self, self.bsdListenSocket == -1 else { return }
+
+            let sock = socket(AF_INET, SOCK_STREAM, 0)
+            guard sock >= 0 else {
+                NSLog("[WXCastSenderServer] BSD socket creation failed: %d", errno)
+                return
+            }
+
+            var reuse: Int32 = 1
+            setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &reuse, socklen_t(MemoryLayout<Int32>.size))
+            setsockopt(sock, SOL_SOCKET, SO_REUSEPORT, &reuse, socklen_t(MemoryLayout<Int32>.size))
+
+            var noDelay: Int32 = 1
+            setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, &noDelay, socklen_t(MemoryLayout<Int32>.size))
+
+            var addr = sockaddr_in()
+            addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+            addr.sin_family = sa_family_t(AF_INET)
+            addr.sin_port = port.bigEndian
+            addr.sin_addr.s_addr = in_addr_t(0) // 0.0.0.0
+
+            let bindRes = withUnsafePointer(to: &addr) {
+                $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                    bind(sock, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+                }
+            }
+
+            guard bindRes >= 0 else {
+                NSLog("[WXCastSenderServer] BSD socket bind note on port %d: %d", port, errno)
+                close(sock)
+                return
+            }
+
+            guard listen(sock, 5) >= 0 else {
+                NSLog("[WXCastSenderServer] BSD socket listen error: %d", errno)
+                close(sock)
+                return
+            }
+
+            self.bsdSocketLock.lock()
+            self.bsdListenSocket = sock
+            self.bsdSocketLock.unlock()
+
+            NSLog("[WXCastSenderServer] BSD Video Mirror socket listening on 0.0.0.0:%d", port)
+
+            DispatchQueue.global(qos: .utility).async { [weak self] in
+                while let self = self, self.isRunning, self.bsdListenSocket >= 0 {
+                    var clientAddr = sockaddr_in()
+                    var addrLen = socklen_t(MemoryLayout<sockaddr_in>.size)
+                    let clientFd = withUnsafeMutablePointer(to: &clientAddr) {
+                        $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                            accept(self.bsdListenSocket, $0, &addrLen)
+                        }
+                    }
+
+                    guard clientFd >= 0 else { break }
+
+                    var nd: Int32 = 1
+                    setsockopt(clientFd, IPPROTO_TCP, TCP_NODELAY, &nd, socklen_t(MemoryLayout<Int32>.size))
+
+                    self.bsdSocketLock.lock()
+                    self.bsdClientSockets.append(clientFd)
+                    self.bsdSocketLock.unlock()
+
+                    NSLog("[WXCastSenderServer] Desktop connected to BSD socket on port %d (fd: %d)", port, clientFd)
+                    DispatchQueue.main.async {
+                        self.delegate?.serverClientConnected(endpoint: "BSD-Socket:\(clientFd)")
+                        self.delegate?.serverDidRequestKeyframeRefresh()
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - Video Dispatcher (Port 25334)
+
+    public func sendVideoData(_ data: Data) {
+        // 1. Dispatch via NWConnection clients
+        serverQueue.async { [weak self] in
+            guard let self = self else { return }
+            for client in self.mirrorClients {
+                client.send(content: data, completion: .idempotent)
+            }
+        }
+
+        // 2. Dispatch via BSD sockets
+        bsdSocketLock.lock()
+        let clientFds = bsdClientSockets
+        bsdSocketLock.unlock()
+
+        if !clientFds.isEmpty {
+            data.withUnsafeBytes { rawBuf in
+                guard let basePtr = rawBuf.baseAddress else { return }
+                var deadFds: [Int32] = []
+                for fd in clientFds {
+                    let sent = send(fd, basePtr, data.count, 0)
+                    if sent <= 0 {
+                        deadFds.append(fd)
+                    }
+                }
+                if !deadFds.isEmpty {
+                    self.bsdSocketLock.lock()
+                    self.bsdClientSockets.removeAll { deadFds.contains($0) }
+                    self.bsdSocketLock.unlock()
+                    deadFds.forEach { close($0) }
+                }
+            }
+        }
     }
 
     // MARK: - HTTP Upgrade & Protocol Parsing

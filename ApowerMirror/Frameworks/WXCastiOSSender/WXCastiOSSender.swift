@@ -46,11 +46,14 @@ public final class WXCastiOSSender: WXCastSenderServerDelegate {
         self.mirrorPort = mirrorPort
         self.isMirroring = true
 
-        // The Main App binds ONLY to channelPort (25333) for control/signaling.
-        // mirrorPort (25334) is bound exclusively by the Extension (SampleHandler) for video/audio.
-        server.start(channelPort: channelPort)
+        // The Main App binds BOTH channelPort (25333) and mirrorPort (25334)
+        server.start(channelPort: channelPort, mirrorPort: mirrorPort)
         result?(true)
         NSLog("[WXCastiOSSender] Service started -> Channel: %d, Mirror: %d", channelPort, mirrorPort)
+    }
+
+    public func sendVideoData(_ data: Data) {
+        server.sendVideoData(data)
     }
 
     public func stopMirrorService() {
@@ -88,6 +91,7 @@ public final class WXCastiOSSender: WXCastSenderServerDelegate {
         NSLog("[WXCastiOSSender] Received control command: %@", command)
         switch command {
         case "cmd_Recast_req":
+            ScreenRecorderManager.shared.requestKeyframe()
             delegate?.castSenderDidRequestIDRKeyframe()
         case "cmd_Close_req":
             stopMirrorService()
@@ -98,6 +102,7 @@ public final class WXCastiOSSender: WXCastSenderServerDelegate {
 
     public func serverDidRequestKeyframeRefresh() {
         NSLog("[WXCastiOSSender] Desktop requested IDR Keyframe refresh")
+        ScreenRecorderManager.shared.requestKeyframe()
         delegate?.castSenderDidRequestIDRKeyframe()
     }
 
