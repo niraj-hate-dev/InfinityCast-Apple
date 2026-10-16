@@ -127,6 +127,10 @@ public final class WXCastSenderServer {
         }
     }
 
+    public var isAnyClientConnected: Bool {
+        return !channelClients.isEmpty || !mirrorClients.isEmpty || !bsdClientSockets.isEmpty
+    }
+
     private func handleChannelConnection(_ connection: NWConnection) {
         connection.stateUpdateHandler = { [weak self, weak connection] state in
             guard let self = self, let conn = connection else { return }
@@ -143,7 +147,9 @@ public final class WXCastSenderServer {
                 self.serverQueue.async {
                     self.channelClients.removeAll { $0 === conn }
                     let endpoint = String(describing: conn.endpoint)
-                    self.delegate?.serverClientDisconnected(endpoint: endpoint)
+                    if !self.isAnyClientConnected {
+                        self.delegate?.serverClientDisconnected(endpoint: endpoint)
+                    }
                 }
             default:
                 break
@@ -400,7 +406,20 @@ public final class WXCastSenderServer {
             } else if trimmed == "cmd_Close_req" {
                 delegate?.serverDidReceiveCommand("cmd_Close_req", data: nil)
             } else if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                let action = json["Action"] as? String ?? ""
+                let action = json["Action"] as? String ?? json["cmd"] as? String ?? ""
+                if action == "PING" {
+                    let isCaptured = ScreenRecorderManager.shared.isCapturing || UIScreen.main.isCaptured
+                    let pongPayload: [String: Any] = [
+                        "cmd": "PONG",
+                        "status": "online",
+                        "name": UIDevice.current.name,
+                        "model": UIDevice.current.model,
+                        "isCaptured": isCaptured
+                    ]
+                    if let pongData = try? JSONSerialization.data(withJSONObject: pongPayload) {
+                        connection.send(content: pongData + "\n".data(using: .utf8)!, completion: .idempotent)
+                    }
+                }
                 delegate?.serverDidReceiveCommand(action, data: json)
             }
         }

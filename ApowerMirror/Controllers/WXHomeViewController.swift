@@ -489,6 +489,7 @@ open class WXHomeViewController: UIViewController, ScreenRecorderManagerDelegate
         DispatchQueue.main.async { [weak self] in
             self?.lastErrorMessage = nil
             self?.updateStatusCards()
+            WXCastiOSSender.shared.sendStartCastPayload()
         }
     }
 
@@ -498,6 +499,7 @@ open class WXHomeViewController: UIViewController, ScreenRecorderManagerDelegate
                 self?.lastErrorMessage = error.localizedDescription
             }
             self?.updateStatusCards()
+            WXCastiOSSender.shared.sendStartCastPayload()
         }
     }
 

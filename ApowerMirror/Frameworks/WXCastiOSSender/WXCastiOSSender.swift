@@ -110,6 +110,7 @@ public final class WXCastiOSSender: WXCastSenderServerDelegate {
 
     /// 1. StartCast Handshake Payload
     public func sendStartCastPayload() {
+        let isCaptured = ScreenRecorderManager.shared.isCapturing || UIScreen.main.isCaptured
         let payload: [String: Any] = [
             "Action": "StartCast",
             "Model": UIDevice.current.model,
@@ -118,6 +119,7 @@ public final class WXCastiOSSender: WXCastSenderServerDelegate {
             "Port": Int(mirrorPort),
             "DeviceType": 1,
             "UseH265": false,
+            "isCaptured": isCaptured,
             "Msg": ""
         ]
 
@@ -133,6 +135,7 @@ public final class WXCastiOSSender: WXCastSenderServerDelegate {
         let dateFormatter = DateFormatter()
         dateFormatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
         let dateStr = dateFormatter.string(from: Date())
+        let isCaptured = ScreenRecorderManager.shared.isCapturing || UIScreen.main.isCaptured
 
         let payload: [String: Any] = [
             "Action": "SendCustomMsg",
@@ -144,7 +147,8 @@ public final class WXCastiOSSender: WXCastSenderServerDelegate {
             "MANUFACTURER": "Apple",
             "PORT": Int(channelPort),
             "MIRROR_PORT": Int(mirrorPort),
-            "SERVER_DATE": dateStr
+            "SERVER_DATE": dateStr,
+            "isCaptured": isCaptured
         ]
 
         if let jsonData = try? JSONSerialization.data(withJSONObject: payload),
