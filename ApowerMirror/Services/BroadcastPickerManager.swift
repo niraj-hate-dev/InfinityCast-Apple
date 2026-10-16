@@ -42,7 +42,7 @@ public final class BroadcastPickerManager {
         }
         let picker = RPSystemBroadcastPickerView(frame: CGRect(x: 0, y: 0, width: 44, height: 44))
         picker.preferredExtension = extensionBundleId
-        picker.showsMicrophoneButton = true
+        picker.showsMicrophoneButton = false
         picker.autoresizingMask = [.flexibleTopMargin, .flexibleLeftMargin]
         
         // Keep in view hierarchy with minimal opacity so touch events can be synthesized

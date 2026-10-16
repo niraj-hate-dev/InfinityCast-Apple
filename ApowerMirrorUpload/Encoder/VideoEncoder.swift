@@ -196,10 +196,9 @@ public final class VideoEncoder {
 
         // Determine if keyframe (IDR)
         var isKeyFrame = false
-        if let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false),
-           CFArrayGetCount(attachments) > 0 {
-            let dict = unsafeBitCast(CFArrayGetValueAtIndex(attachments, 0), to: CFDictionary.self)
-            let notSync = CFDictionaryContainsKey(dict, unsafeBitCast(kCMSampleAttachmentKey_NotSync, to: UnsafeRawPointer.self))
+        if let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false) as? [[CFString: Any]],
+           let first = attachments.first {
+            let notSync = (first[kCMSampleAttachmentKey_NotSync] as? Bool) ?? false
             isKeyFrame = !notSync
         }
 

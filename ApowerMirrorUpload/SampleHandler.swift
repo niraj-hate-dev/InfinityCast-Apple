@@ -14,7 +14,6 @@ import CoreMedia
 import Network
 import Darwin
 
-@objc(SampleHandler)
 @objcMembers
 public class SampleHandler: RPBroadcastSampleHandler {
 

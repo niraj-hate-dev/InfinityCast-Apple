@@ -56,9 +56,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate, MMWormholeManagerDelegate
     private func configureBackgroundAudioSession() {
         do {
             let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playback, mode: .moviePlayback, options: [.mixWithOthers, .allowBluetooth])
-            try session.setActive(true)
-            NSLog("[AppDelegate] AVAudioSession set to .playback (background mode active)")
+            try session.setCategory(.playback, options: [.mixWithOthers])
+            // Do NOT call session.setActive(true) prematurely; this avoids collision with ReplayKit capture pipeline
+            NSLog("[AppDelegate] AVAudioSession category set to .playback with .mixWithOthers (clean ReplayKit compatibility)")
         } catch {
             NSLog("[AppDelegate] Failed to configure AVAudioSession: %@", error.localizedDescription)
         }
