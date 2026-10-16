@@ -47,11 +47,11 @@ public class SampleHandler: RPBroadcastSampleHandler {
     private var isBroadcasting = false
 
     // MARK: - Lifecycle
-    override init() {
+    public override init() {
         super.init()
     }
 
-    override func broadcastStarted(withSetupInfo setupInfo: [String : NSObject]?) {
+    public override func broadcastStarted(withSetupInfo setupInfo: [String : NSObject]?) {
         // CRITICAL: MUST call super to finish the internal ReplayKit XPC handshake with replayd!
         // Without this call, replayd times out and the recording circle stays GRAY!
         super.broadcastStarted(withSetupInfo: setupInfo)
@@ -90,19 +90,19 @@ public class SampleHandler: RPBroadcastSampleHandler {
         startLocalTcpServer(port: streamingPort)
     }
 
-    override func broadcastPaused() {
+    public override func broadcastPaused() {
         super.broadcastPaused()
         notifyMainApp(event: "PauseVideo")
         NSLog("[AppleCastExtension] broadcastPaused invoked")
     }
 
-    override func broadcastResumed() {
+    public override func broadcastResumed() {
         super.broadcastResumed()
         notifyMainApp(event: "ResumeVideo")
         NSLog("[AppleCastExtension] broadcastResumed invoked")
     }
 
-    override func broadcastFinished() {
+    public override func broadcastFinished() {
         super.broadcastFinished()
         NSLog("[AppleCastExtension] >>> broadcastFinished invoked - shutting down")
         isBroadcasting = false
@@ -114,7 +114,7 @@ public class SampleHandler: RPBroadcastSampleHandler {
     }
 
     // MARK: - Frame Processing Pipeline
-    override func processSampleBuffer(_ sampleBuffer: CMSampleBuffer, with sampleBufferType: RPSampleBufferType) {
+    public override func processSampleBuffer(_ sampleBuffer: CMSampleBuffer, with sampleBufferType: RPSampleBufferType) {
         guard isBroadcasting else { return }
 
         switch sampleBufferType {
