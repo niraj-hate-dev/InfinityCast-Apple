@@ -35,5 +35,7 @@
 	<string>Copyright © 2026 AppleCast / ApowerMirror. All rights reserved.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Microphone audio access is required to capture and stream commentary alongside system audio.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>ApowerMirror needs access to your local Network to connect with device around you</string>
 </dict>
 </plist>

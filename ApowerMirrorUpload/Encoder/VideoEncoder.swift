@@ -194,7 +194,8 @@ public final class VideoEncoder {
 
         // Determine if keyframe (IDR)
         var isKeyFrame = false
-        if let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false) {
+        if let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false),
+           CFArrayGetCount(attachments) > 0 {
             let dict = unsafeBitCast(CFArrayGetValueAtIndex(attachments, 0), to: CFDictionary.self)
             let notSync = CFDictionaryContainsKey(dict, unsafeBitCast(kCMSampleAttachmentKey_NotSync, to: UnsafeRawPointer.self))
             isKeyFrame = !notSync
@@ -263,6 +264,8 @@ public final class VideoEncoder {
             var naluLength: UInt32 = 0
             memcpy(&naluLength, pointer + bufferOffset, avccHeaderLength)
             naluLength = CFSwapInt32BigToHost(naluLength)
+
+            guard naluLength > 0 else { break }
 
             bufferOffset += avccHeaderLength
 

@@ -155,9 +155,13 @@ public class SampleHandler: RPBroadcastSampleHandler {
             do {
                 let tcpOptions = NWProtocolTCP.Options()
                 tcpOptions.noDelay = true // Disable Nagle's algorithm for zero latency
+                tcpOptions.enableKeepalive = true
                 let params = NWParameters(tls: nil, tcp: tcpOptions)
+                params.allowLocalEndpointReuse = true
+                params.includePeerToPeer = true
 
-                let listener = try NWListener(using: params, on: NWEndpoint.Port(rawValue: port)!)
+                guard let endpointPort = NWEndpoint.Port(rawValue: port) else { return }
+                let listener = try NWListener(using: params, on: endpointPort)
 
                 listener.newConnectionHandler = { [weak self] connection in
                     self?.handleClientConnection(connection)

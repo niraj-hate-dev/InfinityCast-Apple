@@ -135,73 +135,84 @@ public final class AudioEncoder {
 
     // MARK: - Conversion Loop
 
-    private struct ConverterUserData {
-        var pcmData: Data
-        var channels: UInt32
+    private class ConverterContext {
+        let sourceData: UnsafeRawPointer
+        let totalBytes: Int
+        var bytesConsumed: Int
+        let channels: UInt32
+
+        init(sourceData: UnsafeRawPointer, totalBytes: Int, channels: UInt32) {
+            self.sourceData = sourceData
+            self.totalBytes = totalBytes
+            self.bytesConsumed = 0
+            self.channels = channels
+        }
     }
 
     private func convertPcmToAac() {
         guard let converter = audioConverter else { return }
 
-        let bytesPerInputFrame = channels * 2 // 16-bit PCM = 2 bytes per sample
+        let bytesPerInputFrame = Int(channels * 2) // 16-bit PCM = 2 bytes per sample
         let bytesNeededPerAacPacket = 1024 * bytesPerInputFrame
 
-        while pcmBuffer.count >= Int(bytesNeededPerAacPacket) {
-            let chunk = pcmBuffer.prefix(Int(bytesNeededPerAacPacket))
-            pcmBuffer.removeFirst(Int(bytesNeededPerAacPacket))
-
-            var userData = ConverterUserData(pcmData: chunk, channels: channels)
+        while pcmBuffer.count >= bytesNeededPerAacPacket {
+            let chunk = Data(pcmBuffer.prefix(bytesNeededPerAacPacket))
+            pcmBuffer.removeFirst(bytesNeededPerAacPacket)
 
             var ioOutputDataPacketSize: UInt32 = 1
+            var outBuffer = [UInt8](repeating: 0, count: 2048)
             var outAudioBufferList = AudioBufferList()
             outAudioBufferList.mNumberBuffers = 1
-
-            let outBufferSize = 2048
-            let outBuffer = UnsafeMutableRawPointer.allocate(byteCount: outBufferSize, alignment: 16)
-            defer { outBuffer.deallocate() }
-
             outAudioBufferList.mBuffers.mNumberChannels = channels
-            outAudioBufferList.mBuffers.mDataByteSize = UInt32(outBufferSize)
-            outAudioBufferList.mBuffers.mData = outBuffer
+            outAudioBufferList.mBuffers.mDataByteSize = 2048
 
-            let callback: AudioConverterComplexInputDataProc = { (
-                _,
-                ioNumberDataPackets,
-                ioData,
-                _,
-                inUserData
-            ) -> OSStatus in
-                guard let userDataPtr = inUserData?.assumingMemoryBound(to: ConverterUserData.self) else {
-                    ioNumberDataPackets.pointee = 0
-                    return -1
+            let status = outBuffer.withUnsafeMutableBytes { outRawBuf -> OSStatus in
+                outAudioBufferList.mBuffers.mData = outRawBuf.baseAddress
+
+                return chunk.withUnsafeBytes { chunkRawBuf -> OSStatus in
+                    guard let chunkPtr = chunkRawBuf.baseAddress else { return -1 }
+                    let context = ConverterContext(sourceData: chunkPtr, totalBytes: bytesNeededPerAacPacket, channels: self.channels)
+
+                    let callback: AudioConverterComplexInputDataProc = { (
+                        _,
+                        ioNumberDataPackets,
+                        ioData,
+                        _,
+                        inUserData
+                    ) -> OSStatus in
+                        guard let ctxPtr = inUserData else {
+                            ioNumberDataPackets.pointee = 0
+                            return -1
+                        }
+                        let ctx = Unmanaged<ConverterContext>.fromOpaque(ctxPtr).takeUnretainedValue()
+
+                        let remaining = ctx.totalBytes - ctx.bytesConsumed
+                        if remaining <= 0 {
+                            ioNumberDataPackets.pointee = 0
+                            return noErr
+                        }
+
+                        ioData.pointee.mNumberBuffers = 1
+                        ioData.pointee.mBuffers.mNumberChannels = ctx.channels
+                        ioData.pointee.mBuffers.mDataByteSize = UInt32(remaining)
+                        ioData.pointee.mBuffers.mData = UnsafeMutableRawPointer(mutating: ctx.sourceData.advanced(by: ctx.bytesConsumed))
+
+                        let bytesPerSample = Int(ctx.channels * 2)
+                        ioNumberDataPackets.pointee = UInt32(remaining / bytesPerSample)
+                        ctx.bytesConsumed += remaining
+                        return noErr
+                    }
+
+                    return AudioConverterFillComplexBuffer(
+                        converter,
+                        callback,
+                        Unmanaged.passUnretained(context).toOpaque(),
+                        &ioOutputDataPacketSize,
+                        &outAudioBufferList,
+                        nil
+                    )
                 }
-
-                let byteCount = userDataPtr.pointee.pcmData.count
-                if byteCount == 0 {
-                    ioNumberDataPackets.pointee = 0
-                    return noErr
-                }
-
-                ioData.pointee.mNumberBuffers = 1
-                ioData.pointee.mBuffers.mNumberChannels = userDataPtr.pointee.channels
-                ioData.pointee.mBuffers.mDataByteSize = UInt32(byteCount)
-
-                // Hand pointer to buffer
-                let rawPtr = UnsafeMutableRawPointer(mutating: (userDataPtr.pointee.pcmData as NSData).bytes)
-                ioData.pointee.mBuffers.mData = rawPtr
-
-                ioNumberDataPackets.pointee = UInt32(byteCount / Int(userDataPtr.pointee.channels * 2))
-                return noErr
             }
-
-            let status = AudioConverterFillComplexBuffer(
-                converter,
-                callback,
-                &userData,
-                &ioOutputDataPacketSize,
-                &outAudioBufferList,
-                nil
-            )
 
             if status == noErr && ioOutputDataPacketSize > 0 {
                 let aacSize = Int(outAudioBufferList.mBuffers.mDataByteSize)
