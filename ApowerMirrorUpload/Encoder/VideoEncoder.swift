@@ -57,37 +57,39 @@ public final class VideoEncoder {
 
     public func encode(sampleBuffer: CMSampleBuffer, orientation: CGImagePropertyOrientation) {
         encoderQueue.async { [weak self] in
-            guard let self = self else { return }
+            autoreleasepool {
+                guard let self = self else { return }
 
-            guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+                guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
 
-            let rawWidth = Int32(CVPixelBufferGetWidth(pixelBuffer))
-            let rawHeight = Int32(CVPixelBufferGetHeight(pixelBuffer))
+                let rawWidth = Int32(CVPixelBufferGetWidth(pixelBuffer))
+                let rawHeight = Int32(CVPixelBufferGetHeight(pixelBuffer))
 
-            // Re-create compression session if orientation or dimensions changed
-            if self.compressionSession == nil || orientation != self.currentOrientation {
-                self.currentOrientation = orientation
-                self.rebuildCompressionSession(sourceWidth: rawWidth, sourceHeight: rawHeight, orientation: orientation)
-            }
+                // Re-create compression session if orientation or dimensions changed
+                if self.compressionSession == nil || orientation != self.currentOrientation {
+                    self.currentOrientation = orientation
+                    self.rebuildCompressionSession(sourceWidth: rawWidth, sourceHeight: rawHeight, orientation: orientation)
+                }
 
-            guard let session = self.compressionSession else { return }
+                guard let session = self.compressionSession else { return }
 
-            let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
-            let duration = CMSampleBufferGetDuration(sampleBuffer)
+                let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+                let duration = CMSampleBufferGetDuration(sampleBuffer)
 
-            var flags: VTEncodeInfoFlags = []
-            let status = VTCompressionSessionEncodeFrame(
-                session,
-                imageBuffer: pixelBuffer,
-                presentationTimeStamp: pts,
-                duration: duration,
-                frameProperties: nil,
-                sourceFrameRefcon: nil,
-                infoFlagsOut: &flags
-            )
+                var flags: VTEncodeInfoFlags = []
+                let status = VTCompressionSessionEncodeFrame(
+                    session,
+                    imageBuffer: pixelBuffer,
+                    presentationTimeStamp: pts,
+                    duration: duration,
+                    frameProperties: nil,
+                    sourceFrameRefcon: nil,
+                    infoFlagsOut: &flags
+                )
 
-            if status != noErr {
-                NSLog("[VideoEncoder] VTCompressionSessionEncodeFrame failed with status: %d", status)
+                if status != noErr {
+                    NSLog("[VideoEncoder] VTCompressionSessionEncodeFrame failed with status: %d", status)
+                }
             }
         }
     }

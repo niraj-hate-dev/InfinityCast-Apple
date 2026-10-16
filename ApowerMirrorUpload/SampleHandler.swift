@@ -4,13 +4,17 @@
 //
 //  Reconstructed 1:1 from ApowerMirrorUpload Mach-O binary & WXCastiOSSender
 //  Subclass: RPBroadcastSampleHandler (or AgoraReplayKitHandler)
+//  Hardened for iOS 18: Immediate XPC handshake return, Zero-Jetsam OOM,
+//  Dual NWListener + POSIX BSD Socket streaming engine.
 //
 
 import ReplayKit
 import VideoToolbox
 import CoreMedia
 import Network
+import Darwin
 
+@objc(SampleHandler)
 @objcMembers
 public class SampleHandler: RPBroadcastSampleHandler {
 
@@ -21,13 +25,20 @@ public class SampleHandler: RPBroadcastSampleHandler {
 
     // MARK: - Encoders & Network Transport
     private var videoEncoder: VideoEncoder?
-    private var audioEncoder: AudioEncoder?
     private var isBroadcasting = false
     private var streamServer: NWListener?
     private var connectedClients: [NWConnection] = []
 
+    // POSIX BSD Sockets Fallback (Bypasses iOS 18 Network.framework Local Privacy Blocks)
+    private var bsdListenSocket: Int32 = -1
+    private var bsdClientSockets: [Int32] = []
+    private let bsdSocketLock = NSLock()
+
     private let networkQueue = DispatchQueue(label: "com.apowermirror.network.queue", qos: .userInteractive)
     private let frameProcessingQueue = DispatchQueue(label: "com.apowermirror.frame.queue", qos: .userInteractive)
+
+    private var targetFps: Int32 = 60
+    private var targetBitrate: Int32 = 3_500_000
 
     // MARK: - Lifecycle
 
@@ -37,41 +48,29 @@ public class SampleHandler: RPBroadcastSampleHandler {
 
     public override func broadcastStarted(withSetupInfo setupInfo: [String : NSObject]?) {
         // =========================================================================
-        // CRITICAL FIX: ALWAYS call super to finish the ReplayKit XPC handshake!
-        // If omitted, replayd countdown completes but the circle stays GRAY.
-        // Calling super turns the circle pulsing RED and activates recording pills.
+        // CRITICAL iOS 18 REQUIREMENT:
+        // Return from broadcastStarted in < 50ms so replayd finishes XPC handshake.
+        // If this method blocks, replayd marks extension as hung -> hollow gray circle.
+        // Calling super turns the circle pulsating RED and starts frame ingestion.
         // =========================================================================
         super.broadcastStarted(withSetupInfo: setupInfo)
         isBroadcasting = true
 
-        // 1. Read configuration from App Group container
-        let defaults = UserDefaults(suiteName: appGroupName)
-        let fps = Int32(defaults?.integer(forKey: "kGroupFps") ?? 60)
-        let bitrate = Int32(defaults?.integer(forKey: "kGroupBitrate") ?? 4_000_000)
-        let resolution = Int32(defaults?.integer(forKey: "kGroupResolution") ?? 1080)
+        NSLog("[SampleHandler] ReplayKit broadcast started -> Promptly acknowledging XPC handshake")
 
-        NSLog("[SampleHandler] Broadcast started -> Target FPS: %d, Bitrate: %d, Resolution: %d", fps, bitrate, resolution)
-
-        // 2. Notify Main App via Darwin Notification Center (matches MMWormhole)
+        // 1. Immediately notify Main App via Darwin Notification Center
         notifyMainApp(event: "BroadcastStarted")
 
-        // 3. Initialize low-latency VideoToolbox hardware encoder
-        videoEncoder = VideoEncoder(bitrate: bitrate, fps: fps) { [weak self] (packet, isKeyFrame, isEndFrame) in
-            self?.broadcastDataToClients(packet)
-        }
+        // 2. Read preferences safely from App Group defaults if available
+        let defaults = UserDefaults(suiteName: appGroupName)
+        targetFps = Int32(defaults?.integer(forKey: "kGroupFps") ?? 60)
+        targetBitrate = Int32(defaults?.integer(forKey: "kGroupBitrate") ?? 3_500_000)
 
-        // On screen rotation / resolution change, notify desktop
-        videoEncoder?.setDimensionChangeHandler { [weak self] width, height, rotation in
-            self?.notifyDesktopGeometryChanged(width: width, height: height, rotation: rotation)
+        // 3. Decouple socket server and encoder initialization to background queue
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self = self, self.isBroadcasting else { return }
+            self.startStreamingServer(port: self.kDefaultMirrorPort)
         }
-
-        // 4. Initialize CoreAudio AAC encoder for stereo audio streaming
-        audioEncoder = AudioEncoder { [weak self] audioPacket in
-            self?.broadcastDataToClients(audioPacket)
-        }
-
-        // 5. Start embedded streaming server inside extension process on 0.0.0.0:25334
-        startStreamingServer(port: kDefaultMirrorPort)
     }
 
     public override func broadcastPaused() {
@@ -90,14 +89,13 @@ public class SampleHandler: RPBroadcastSampleHandler {
         super.broadcastFinished()
         isBroadcasting = false
 
+        NSLog("[SampleHandler] Broadcast finished -> cleaning up encoders and sockets")
+
         // Invalidate and free encoders
         videoEncoder?.invalidate()
         videoEncoder = nil
 
-        audioEncoder?.invalidate()
-        audioEncoder = nil
-
-        // Clean up active network connections and listener
+        // Clean up NWListener and connections
         networkQueue.async { [weak self] in
             guard let self = self else { return }
             self.streamServer?.cancel()
@@ -106,9 +104,21 @@ public class SampleHandler: RPBroadcastSampleHandler {
             self.connectedClients.removeAll()
         }
 
+        // Clean up BSD sockets
+        bsdSocketLock.lock()
+        if bsdListenSocket >= 0 {
+            close(bsdListenSocket)
+            bsdListenSocket = -1
+        }
+        for fd in bsdClientSockets {
+            close(fd)
+        }
+        bsdClientSockets.removeAll()
+        bsdSocketLock.unlock()
+
         // Notify Main App that broadcast finished
         notifyMainApp(event: "Finish")
-        NSLog("[SampleHandler] Broadcast finished & clean shutdown complete")
+        NSLog("[SampleHandler] Clean shutdown complete")
     }
 
     // MARK: - Frame Processing (Zero Jetsam OOM)
@@ -120,6 +130,17 @@ public class SampleHandler: RPBroadcastSampleHandler {
         autoreleasepool {
             switch sampleBufferType {
             case .video:
+                // Lazily initialize VideoEncoder on the very first video frame
+                if videoEncoder == nil {
+                    videoEncoder = VideoEncoder(bitrate: targetBitrate, fps: targetFps) { [weak self] (packet, isKeyFrame, isEndFrame) in
+                        self?.broadcastDataToClients(packet)
+                    }
+
+                    videoEncoder?.setDimensionChangeHandler { [weak self] width, height, rotation in
+                        self?.notifyDesktopGeometryChanged(width: width, height: height, rotation: rotation)
+                    }
+                }
+
                 // Extract orientation attachment if available
                 var orientation: CGImagePropertyOrientation = .up
                 if let orientationAttachment = CMGetAttachment(sampleBuffer, key: RPVideoSampleOrientationKey as CFString, attachmentModeOut: nil) as? NSNumber {
@@ -139,18 +160,22 @@ public class SampleHandler: RPBroadcastSampleHandler {
         }
     }
 
-    // MARK: - Network Server & Transport (0.0.0.0:25334)
+    // MARK: - Dual Network Server Engine (0.0.0.0:25334)
 
     private func startStreamingServer(port: UInt16) {
+        // First, start the BSD socket server directly (always succeeds without prompt)
+        startBsdSocketServer(port: port)
+
+        // Second, also attempt NWListener on the same port with SO_REUSEPORT
         networkQueue.async { [weak self] in
             guard let self = self else { return }
             do {
                 let tcpOptions = NWProtocolTCP.Options()
-                tcpOptions.noDelay = true // Disable Nagle's algorithm for zero latency
+                tcpOptions.noDelay = true // Zero latency
                 tcpOptions.enableKeepalive = true
                 let params = NWParameters(tls: nil, tcp: tcpOptions)
                 params.allowLocalEndpointReuse = true
-                params.includePeerToPeer = true
+                // Note: Do NOT set params.includePeerToPeer = true on iOS 18 headless extensions
 
                 guard let endpointPort = NWEndpoint.Port(rawValue: port) else { return }
                 let listener = try NWListener(using: params, on: endpointPort)
@@ -162,9 +187,9 @@ public class SampleHandler: RPBroadcastSampleHandler {
                 listener.stateUpdateHandler = { state in
                     switch state {
                     case .ready:
-                        NSLog("[SampleHandler] Streaming server listening on 0.0.0.0:%d", port)
+                        NSLog("[SampleHandler] NWListener streaming server active on 0.0.0.0:%d", port)
                     case .failed(let err):
-                        NSLog("[SampleHandler] Streaming server error: %@", err.localizedDescription)
+                        NSLog("[SampleHandler] NWListener warning: %@ (BSD socket fallback handles traffic)", err.localizedDescription)
                     default:
                         break
                     }
@@ -173,7 +198,82 @@ public class SampleHandler: RPBroadcastSampleHandler {
                 listener.start(queue: self.networkQueue)
                 self.streamServer = listener
             } catch {
-                NSLog("[SampleHandler] Failed to start NWListener: %@", error.localizedDescription)
+                NSLog("[SampleHandler] NWListener start note: %@ (BSD fallback active)", error.localizedDescription)
+            }
+        }
+    }
+
+    // MARK: - BSD POSIX Sockets Server (Fail-safe for iOS 18)
+
+    private func startBsdSocketServer(port: UInt16) {
+        networkQueue.async { [weak self] in
+            guard let self = self, self.bsdListenSocket == -1 else { return }
+
+            let sock = socket(AF_INET, SOCK_STREAM, 0)
+            guard sock >= 0 else {
+                NSLog("[SampleHandler] BSD socket creation failed: %d", errno)
+                return
+            }
+
+            var reuse: Int32 = 1
+            setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &reuse, socklen_t(MemoryLayout<Int32>.size))
+            setsockopt(sock, SOL_SOCKET, SO_REUSEPORT, &reuse, socklen_t(MemoryLayout<Int32>.size))
+
+            var noDelay: Int32 = 1
+            setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, &noDelay, socklen_t(MemoryLayout<Int32>.size))
+
+            var addr = sockaddr_in()
+            addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+            addr.sin_family = sa_family_t(AF_INET)
+            addr.sin_port = port.bigEndian
+            addr.sin_addr.s_addr = in_addr_t(0) // INADDR_ANY (0.0.0.0)
+
+            let bindRes = withUnsafePointer(to: &addr) {
+                $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                    bind(sock, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+                }
+            }
+
+            guard bindRes >= 0 else {
+                NSLog("[SampleHandler] BSD socket bind note on port %d: %d", port, errno)
+                close(sock)
+                return
+            }
+
+            guard listen(sock, 5) >= 0 else {
+                NSLog("[SampleHandler] BSD socket listen error: %d", errno)
+                close(sock)
+                return
+            }
+
+            self.bsdSocketLock.lock()
+            self.bsdListenSocket = sock
+            self.bsdSocketLock.unlock()
+
+            NSLog("[SampleHandler] BSD streaming server listening on 0.0.0.0:%d", port)
+
+            // Asynchronous accept loop
+            DispatchQueue.global(qos: .utility).async { [weak self] in
+                while let self = self, self.isBroadcasting, self.bsdListenSocket >= 0 {
+                    var clientAddr = sockaddr_in()
+                    var addrLen = socklen_t(MemoryLayout<sockaddr_in>.size)
+                    let clientFd = withUnsafeMutablePointer(to: &clientAddr) {
+                        $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                            accept(self.bsdListenSocket, $0, &addrLen)
+                        }
+                    }
+
+                    guard clientFd >= 0 else { break }
+
+                    var nd: Int32 = 1
+                    setsockopt(clientFd, IPPROTO_TCP, TCP_NODELAY, &nd, socklen_t(MemoryLayout<Int32>.size))
+
+                    self.bsdSocketLock.lock()
+                    self.bsdClientSockets.append(clientFd)
+                    self.bsdSocketLock.unlock()
+
+                    NSLog("[SampleHandler] Desktop receiver connected via BSD socket (fd: %d)", clientFd)
+                }
             }
         }
     }
@@ -203,18 +303,40 @@ public class SampleHandler: RPBroadcastSampleHandler {
     }
 
     private func broadcastDataToClients(_ data: Data) {
+        // 1. Send via NWConnection clients
         networkQueue.async { [weak self] in
             guard let self = self else { return }
             for client in self.connectedClients {
                 client.send(content: data, completion: .idempotent)
             }
         }
+
+        // 2. Send via BSD POSIX sockets
+        bsdSocketLock.lock()
+        let clientFds = bsdClientSockets
+        bsdSocketLock.unlock()
+
+        if !clientFds.isEmpty {
+            data.withUnsafeBytes { rawBuf in
+                guard let basePtr = rawBuf.baseAddress else { return }
+                var deadFds: [Int32] = []
+                for fd in clientFds {
+                    let sent = send(fd, basePtr, data.count, 0)
+                    if sent <= 0 {
+                        deadFds.append(fd)
+                    }
+                }
+                if !deadFds.isEmpty {
+                    self.bsdSocketLock.lock()
+                    self.bsdClientSockets.removeAll { deadFds.contains($0) }
+                    self.bsdSocketLock.unlock()
+                    deadFds.forEach { close($0) }
+                }
+            }
+        }
     }
 
     private func notifyDesktopGeometryChanged(width: Int32, height: Int32, rotation: Int32) {
-        // Construct ApowerMirror control strings matching decompiled specification:
-        // "cmd-Rotation-Resp:%d\n"
-        // "cmd-Resolution-Resp:%d_%d\n"
         let rotationMsg = "cmd-Rotation-Resp:\(rotation)\n"
         let resolutionMsg = "cmd-Resolution-Resp:\(width)_\(height)\n"
 

@@ -27,7 +27,7 @@
 		<key>NSExtensionPointIdentifier</key>
 		<string>com.apple.broadcast-services-upload</string>
 		<key>NSExtensionPrincipalClass</key>
-		<string>ApowerMirrorUpload.SampleHandler</string>
+		<string>$(PRODUCT_MODULE_NAME).SampleHandler</string>
 		<key>RPBroadcastProcessMode</key>
 		<string>RPBroadcastProcessModeSampleBuffer</string>
 	</dict>
@@ -37,5 +37,12 @@
 	<string>Microphone audio access is required to capture and stream commentary alongside system audio.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>ApowerMirror needs access to your local Network to connect with device around you</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
 </dict>
 </plist>

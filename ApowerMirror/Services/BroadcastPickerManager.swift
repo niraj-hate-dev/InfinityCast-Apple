@@ -19,7 +19,12 @@ public final class BroadcastPickerManager {
 
     // MARK: - Properties
     public weak var delegate: BroadcastPickerManagerDelegate?
-    private let extensionBundleId = "com.apowersoft.ApowerMirror.ApowerMirrorUpload"
+    private var extensionBundleId: String {
+        if let mainId = Bundle.main.bundleIdentifier, !mainId.isEmpty {
+            return "\(mainId).ApowerMirrorUpload"
+        }
+        return "com.apowersoft.ApowerMirror.ApowerMirrorUpload"
+    }
     private var pickerView: RPSystemBroadcastPickerView?
 
     // MARK: - Initialization
@@ -32,15 +37,19 @@ public final class BroadcastPickerManager {
 
     /// Creates and configures the RPSystemBroadcastPickerView
     public func preparePickerView(in view: UIView) {
+        if let existing = pickerView, existing.superview != nil {
+            existing.removeFromSuperview()
+        }
         let picker = RPSystemBroadcastPickerView(frame: CGRect(x: 0, y: 0, width: 44, height: 44))
         picker.preferredExtension = extensionBundleId
         picker.showsMicrophoneButton = true
         picker.autoresizingMask = [.flexibleTopMargin, .flexibleLeftMargin]
         
-        // Hide visually while keeping in view hierarchy so touch events can be synthesized
-        picker.alpha = 0.01
+        // Keep in view hierarchy with minimal opacity so touch events can be synthesized
+        picker.alpha = 0.02
         view.addSubview(picker)
         self.pickerView = picker
+        NSLog("[BroadcastPickerManager] Prepared RPSystemBroadcastPickerView with extension: %@", extensionBundleId)
     }
 
     /// Programmatically triggers the ReplayKit broadcast picker dialog modal
@@ -50,12 +59,13 @@ public final class BroadcastPickerManager {
         }
 
         guard let picker = pickerView else { return }
+        picker.preferredExtension = extensionBundleId
 
         // Find the internal UIButton inside RPSystemBroadcastPickerView
         for subview in picker.subviews {
             if let button = subview as? UIButton {
                 button.sendActions(for: .touchUpInside)
-                NSLog("[BroadcastPickerManager] Programmatically triggered RPSystemBroadcastPickerView modal")
+                NSLog("[BroadcastPickerManager] Programmatically triggered RPSystemBroadcastPickerView modal for %@", extensionBundleId)
                 return
             }
         }

@@ -274,6 +274,13 @@ open class WXHomeViewController: UIViewController, BroadcastPickerManagerDelegat
     // MARK: - Direct Action
 
     @objc public func handleDirectMirrorAction() {
+        if UIScreen.main.isCaptured {
+            NSLog("[WXHomeViewController] User tapped STOP SCREEN MIRROR -> presenting stop dialog")
+            MMWormholeManager.shared.sendStopMirror()
+            BroadcastPickerManager.shared.presentBroadcastPicker()
+            return
+        }
+
         broadcastRequestedTimestamp = Date()
         NSLog("[WXHomeViewController] User tapped START SCREEN MIRROR -> Launching ReplayKit Picker")
 
@@ -282,7 +289,7 @@ open class WXHomeViewController: UIViewController, BroadcastPickerManagerDelegat
 
         // Give immediate user feedback
         replayKitTitleLabel?.text = "ReplayKit: Starting Broadcast..."
-        replayKitDetailLabel?.text = "Waiting for 3-2-1 countdown. Ensure ApowerMirrorUpload is checked."
+        replayKitDetailLabel?.text = "Waiting for 3-2-1 countdown. Ensure ApowerMirrorUpload is selected."
         replayKitDotView?.backgroundColor = UIColor.systemOrange
 
         // Check after 6 seconds: if still not captured, show diagnostic hint
@@ -370,9 +377,9 @@ open class WXHomeViewController: UIViewController, BroadcastPickerManagerDelegat
         } else {
             // Screen recording INACTIVE or STOPPED
             stopDurationTimer()
-            replayKitDotView?.backgroundColor = UIColor.systemGray
-            replayKitTitleLabel?.text = "ReplayKit: Screen Recording INACTIVE"
-            replayKitDetailLabel?.text = "Tap 'M' above, select ApowerMirrorUpload, and tap Start Broadcast."
+            replayKitDotView?.backgroundColor = UIColor.systemRed
+            replayKitTitleLabel?.text = "ReplayKit: Not Active / Stopped"
+            replayKitDetailLabel?.text = "Tap 'M' START above, select ApowerMirrorUpload, and tap Start Broadcast."
 
             scanBtn?.backgroundColor = UIColor(red: 0.15, green: 0.50, blue: 0.98, alpha: 1.0)
             scanBtnSubLabel?.text = "START"
