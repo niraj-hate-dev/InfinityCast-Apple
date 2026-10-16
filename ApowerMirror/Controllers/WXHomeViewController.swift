@@ -164,7 +164,7 @@ open class WXHomeViewController: UIViewController {
         self.scanLbl = sLbl
 
         // Tutorial Link Button at bottom
-        let tutBtn = WXLinkButton(type: .system)
+        let tutBtn = WXLinkButton()
         tutBtn.translatesAutoresizingMaskIntoConstraints = false
         tutBtn.setTitle("How to use ApowerMirror?", for: .normal)
         tutBtn.addTarget(self, action: #selector(showTutorialButtonClick(_:)), for: .touchUpInside)

@@ -8,6 +8,7 @@
 
 import Foundation
 import Network
+import Darwin
 
 public final class NetworkDetector {
 
@@ -55,12 +56,12 @@ public final class NetworkDetector {
         var ptr = ifaddr
         while ptr != nil {
             defer { ptr = ptr?.pointee.ifa_next }
-            guard let interface = ptr?.pointee else { continue }
-            let addrFamily = interface.ifa_addr.pointee.sa_family
+            guard let interface = ptr?.pointee, let addr = interface.ifa_addr else { continue }
+            let addrFamily = addr.pointee.sa_family
             if addrFamily == UInt8(AF_INET) {
                 let name = String(cString: interface.ifa_name)
                 var hostname = [CChar](repeating: 0, count: Int(NI_MAXHOST))
-                getnameinfo(interface.ifa_addr, socklen_t(interface.ifa_addr.pointee.sa_len),
+                getnameinfo(addr, socklen_t(addr.pointee.sa_len),
                             &hostname, socklen_t(hostname.count),
                             nil, 0, NI_NUMERICHOST)
                 let ip = String(cString: hostname)

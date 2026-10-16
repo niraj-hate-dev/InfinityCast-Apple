@@ -23,10 +23,6 @@ open class WXLinkButton: UIButton {
         }
     }
 
-    public convenience init(type: UIButton.ButtonType = .system) {
-        self.init(frame: .zero)
-    }
-
     public convenience init() {
         self.init(frame: .zero)
     }

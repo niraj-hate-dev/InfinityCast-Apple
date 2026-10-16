@@ -39,7 +39,20 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
-            AD_HOC_CODE_SIGNING_ALLOWED=YES 2>&1 | tee xcodebuild.log || (echo "=== COMPILATION ERRORS ===" && grep -E "(error:|fatal error:)" xcodebuild.log && exit 1)
+            AD_HOC_CODE_SIGNING_ALLOWED=YES 2>&1 | tee xcodebuild.log || {
+              echo "=== BUILD LOG FAILURE TAIL ==="
+              tail -n 250 xcodebuild.log
+              echo "=== GREP ERRORS ==="
+              grep -in "error:" xcodebuild.log || true
+              exit 1
+            }
+
+      - name: Upload Build Log on Failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcodebuild-compilation-log
+          path: xcodebuild.log
 
       - name: Package Unsigned IPA
         run: |
