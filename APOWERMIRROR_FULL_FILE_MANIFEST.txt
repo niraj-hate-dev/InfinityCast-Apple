@@ -1,0 +1,1230 @@
+TOTAL INVENTORY ITEMS: 1228
+================================================================================
+[DIR]           ApowerMirror.app\
+5612 bytes      ApowerMirror.app\AboutController.nib
+56060 bytes     ApowerMirror.app\AirMore+.png
+5619 bytes      ApowerMirror.app\AirplayScanController.nib
+12333728 bytes  ApowerMirror.app\ApowerMirror
+6253 bytes      ApowerMirror.app\AppIcon60x60@2x.png
+7760 bytes      ApowerMirror.app\AppIcon76x76@2x~ipad.png
+7954696 bytes   ApowerMirror.app\Assets.car
+305 bytes       ApowerMirror.app\BDAirPlay
+8326 bytes      ApowerMirror.app\CloudSafeAlertController.nib
+9759 bytes      ApowerMirror.app\CloudTipAlertController.nib
+[DIR]           ApowerMirror.app\FBAudienceNetwork.bundle\
+781 bytes       ApowerMirror.app\FBAudienceNetwork.bundle\Info.plist
+1955 bytes      ApowerMirror.app\FBAudienceNetwork.bundle\PrivacyInfo.xcprivacy
+[DIR]           ApowerMirror.app\Frameworks\
+[DIR]           ApowerMirror.app\Frameworks\AFNetworking.framework\
+485184 bytes    ApowerMirror.app\Frameworks\AFNetworking.framework\AFNetworking
+793 bytes       ApowerMirror.app\Frameworks\AFNetworking.framework\Info.plist
+[DIR]           ApowerMirror.app\Frameworks\AFNetworking.framework\SC_Info\
+1072 bytes      ApowerMirror.app\Frameworks\AFNetworking.framework\SC_Info\AFNetworking.sinf
+2172 bytes      ApowerMirror.app\Frameworks\AFNetworking.framework\SC_Info\AFNetworking.supf
+2276 bytes      ApowerMirror.app\Frameworks\AFNetworking.framework\SC_Info\AFNetworking.supp
+80 bytes        ApowerMirror.app\Frameworks\AFNetworking.framework\SC_Info\AFNetworking.supx
+[DIR]           ApowerMirror.app\Frameworks\AFNetworking.framework\_CodeSignature\
+2110 bytes      ApowerMirror.app\Frameworks\AFNetworking.framework\_CodeSignature\CodeResources
+[DIR]           ApowerMirror.app\Frameworks\AdjustSdk.framework\
+[DIR]           ApowerMirror.app\Frameworks\AdjustSdk.framework\Adjust.bundle\
+756 bytes       ApowerMirror.app\Frameworks\AdjustSdk.framework\Adjust.bundle\Info.plist
+2038 bytes      ApowerMirror.app\Frameworks\AdjustSdk.framework\Adjust.bundle\PrivacyInfo.xcprivacy
+845440 bytes    ApowerMirror.app\Frameworks\AdjustSdk.framework\AdjustSdk
+787 bytes       ApowerMirror.app\Frameworks\AdjustSdk.framework\Info.plist
+[DIR]           ApowerMirror.app\Frameworks\AdjustSdk.framework\SC_Info\
+1072 bytes      ApowerMirror.app\Frameworks\AdjustSdk.framework\SC_Info\AdjustSdk.sinf
+3580 bytes      ApowerMirror.app\Frameworks\AdjustSdk.framework\SC_Info\AdjustSdk.supf
+3684 bytes      ApowerMirror.app\Frameworks\AdjustSdk.framework\SC_Info\AdjustSdk.supp
+80 bytes        ApowerMirror.app\Frameworks\AdjustSdk.framework\SC_Info\AdjustSdk.supx
+[DIR]           ApowerMirror.app\Frameworks\AdjustSdk.framework\_CodeSignature\
+2746 bytes      ApowerMirror.app\Frameworks\AdjustSdk.framework\_CodeSignature\CodeResources
+[DIR]           ApowerMirror.app\Frameworks\AdjustSigSdk.framework\
+648256 bytes    ApowerMirror.app\Frameworks\AdjustSigSdk.framework\AdjustSigSdk
+780 bytes       ApowerMirror.app\Frameworks\AdjustSigSdk.framework\Info.plist
+1149 bytes      ApowerMirror.app\Frameworks\AdjustSigSdk.framework\PrivacyInfo.xcprivacy
+[DIR]           ApowerMirror.app\Frameworks\AdjustSigSdk.framework\SC_Info\
+1072 bytes      ApowerMirror.app\Frameworks\AdjustSigSdk.framework\SC_Info\AdjustSigSdk.sinf
+5244 bytes      ApowerMirror.app\Frameworks\AdjustSigSdk.framework\SC_Info\AdjustSigSdk.supf
+5476 bytes      ApowerMirror.app\Frameworks\AdjustSigSdk.framework\SC_Info\AdjustSigSdk.supp
+80 bytes        ApowerMirror.app\Frameworks\AdjustSigSdk.framework\SC_Info\AdjustSigSdk.supx
+[DIR]           ApowerMirror.app\Frameworks\AdjustSigSdk.framework\_CodeSignature\
+2418 bytes      ApowerMirror.app\Frameworks\AdjustSigSdk.framework\_CodeSignature\CodeResources
+[DIR]           ApowerMirror.app\Frameworks\AgoraReplayKitExtension.framework\
+221264 bytes    ApowerMirror.app\Frameworks\AgoraReplayKitExtension.framework\AgoraReplayKitExtension
+996 bytes       ApowerMirror.app\Frameworks\AgoraReplayKitExtension.framework\Info.plist
+[DIR]           ApowerMirror.app\Frameworks\AgoraReplayKitExtension.framework\SC_Info\
+1072 bytes      ApowerMirror.app\Frameworks\AgoraReplayKitExtension.framework\SC_Info\AgoraReplayKitExtension.sinf
+2044 bytes      ApowerMirror.app\Frameworks\AgoraReplayKitExtension.framework\SC_Info\AgoraReplayKitExtension.supf
+2148 bytes      ApowerMirror.app\Frameworks\AgoraReplayKitExtension.framework\SC_Info\AgoraReplayKitExtension.supp
+80 bytes        ApowerMirror.app\Frameworks\AgoraReplayKitExtension.framework\SC_Info\AgoraReplayKitExtension.supx
+[DIR]           ApowerMirror.app\Frameworks\AgoraReplayKitExtension.framework\_CodeSignature\
+2132 bytes      ApowerMirror.app\Frameworks\AgoraReplayKitExtension.framework\_CodeSignature\CodeResources
+[DIR]           ApowerMirror.app\Frameworks\AgoraRtcKit.framework\
+20228192 bytes  ApowerMirror.app\Frameworks\AgoraRtcKit.framework\AgoraRtcKit
+960 bytes       ApowerMirror.app\Frameworks\AgoraRtcKit.framework\Info.plist
+983 bytes       ApowerMirror.app\Frameworks\AgoraRtcKit.framework\PrivacyInfo.xcprivacy
+[DIR]           ApowerMirror.app\Frameworks\AgoraRtcKit.framework\SC_Info\
+1072 bytes      ApowerMirror.app\Frameworks\AgoraRtcKit.framework\SC_Info\AgoraRtcKit.sinf
+139260 bytes    ApowerMirror.app\Frameworks\AgoraRtcKit.framework\SC_Info\AgoraRtcKit.supf
+139364 bytes    ApowerMirror.app\Frameworks\AgoraRtcKit.framework\SC_Info\AgoraRtcKit.supp
+80 bytes        ApowerMirror.app\Frameworks\AgoraRtcKit.framework\SC_Info\AgoraRtcKit.supx
+[DIR]           ApowerMirror.app\Frameworks\AgoraRtcKit.framework\_CodeSignature\
+2416 bytes      ApowerMirror.app\Frameworks\AgoraRtcKit.framework\_CodeSignature\CodeResources
+[DIR]           ApowerMirror.app\Frameworks\AgoraSoundTouch.framework\
+70192 bytes     ApowerMirror.app\Frameworks\AgoraSoundTouch.framework\AgoraSoundTouch
+972 bytes       ApowerMirror.app\Frameworks\AgoraSoundTouch.framework\Info.plist
+[DIR]           ApowerMirror.app\Frameworks\AgoraSoundTouch.framework\SC_Info\
+1072 bytes      ApowerMirror.app\Frameworks\AgoraSoundTouch.framework\SC_Info\AgoraSoundTouch.sinf
+1020 bytes      ApowerMirror.app\Frameworks\AgoraSoundTouch.framework\SC_Info\AgoraSoundTouch.supf
+1124 bytes      ApowerMirror.app\Frameworks\AgoraSoundTouch.framework\SC_Info\AgoraSoundTouch.supp
+80 bytes        ApowerMirror.app\Frameworks\AgoraSoundTouch.framework\SC_Info\AgoraSoundTouch.supx
+[DIR]           ApowerMirror.app\Frameworks\AgoraSoundTouch.framework\_CodeSignature\
+2116 bytes      ApowerMirror.app\Frameworks\AgoraSoundTouch.framework\_CodeSignature\CodeResources
+[DIR]           ApowerMirror.app\Frameworks\Agorafdkaac.framework\
+475024 bytes    ApowerMirror.app\Frameworks\Agorafdkaac.framework\Agorafdkaac
+960 bytes       ApowerMirror.app\Frameworks\Agorafdkaac.framework\Info.plist
+[DIR]           ApowerMirror.app\Frameworks\Agorafdkaac.framework\SC_Info\
+1072 bytes      ApowerMirror.app\Frameworks\Agorafdkaac.framework\SC_Info\Agorafdkaac.sinf
+4092 bytes      ApowerMirror.app\Frameworks\Agorafdkaac.framework\SC_Info\Agorafdkaac.supf
+4196 bytes      ApowerMirror.app\Frameworks\Agorafdkaac.framework\SC_Info\Agorafdkaac.supp
+80 bytes        ApowerMirror.app\Frameworks\Agorafdkaac.framework\SC_Info\Agorafdkaac.supx
+[DIR]           ApowerMirror.app\Frameworks\Agorafdkaac.framework\_CodeSignature\
+2108 bytes      ApowerMirror.app\Frameworks\Agorafdkaac.framework\_CodeSignature\CodeResources
+[DIR]           ApowerMirror.app\Frameworks\Agoraffmpeg.framework\
+6033792 bytes   ApowerMirror.app\Frameworks\Agoraffmpeg.framework\Agoraffmpeg
+960 bytes       ApowerMirror.app\Frameworks\Agoraffmpeg.framework\Info.plist
+[DIR]           ApowerMirror.app\Frameworks\Agoraffmpeg.framework\SC_Info\
+1072 bytes      ApowerMirror.app\Frameworks\Agoraffmpeg.framework\SC_Info\Agoraffmpeg.sinf
+43900 bytes     ApowerMirror.app\Frameworks\Agoraffmpeg.framework\SC_Info\Agoraffmpeg.supf
+44004 bytes     ApowerMirror.app\Frameworks\Agoraffmpeg.framework\SC_Info\Agoraffmpeg.supp
+80 bytes        ApowerMirror.app\Frameworks\Agoraffmpeg.framework\SC_Info\Agoraffmpeg.supx
+[DIR]           ApowerMirror.app\Frameworks\Agoraffmpeg.framework\_CodeSignature\
+2108 bytes      ApowerMirror.app\Frameworks\Agoraffmpeg.framework\_CodeSignature\CodeResources
+[DIR]           ApowerMirror.app\Frameworks\Alamofire.framework\
+2884048 bytes   ApowerMirror.app\Frameworks\Alamofire.framework\Alamofire
+[DIR]           ApowerMirror.app\Frameworks\Alamofire.framework\Alamofire.bundle\
+763 bytes       ApowerMirror.app\Frameworks\Alamofire.framework\Alamofire.bundle\Info.plist
+600 bytes       ApowerMirror.app\Frameworks\Alamofire.framework\Alamofire.bundle\PrivacyInfo.xcprivacy
+788 bytes       ApowerMirror.app\Frameworks\Alamofire.framework\Info.plist
+[DIR]           ApowerMirror.app\Frameworks\Alamofire.framework\SC_Info\
+1072 bytes      ApowerMirror.app\Frameworks\Alamofire.framework\SC_Info\Alamofire.sinf
+9468 bytes      ApowerMirror.app\Frameworks\Alamofire.framework\SC_Info\Alamofire.supf
+9572 bytes      ApowerMirror.app\Frameworks\Alamofire.framework\SC_Info\Alamofire.supp
+80 bytes        ApowerMirror.app\Frameworks\Alamofire.framework\SC_Info\Alamofire.supx
+[DIR]           ApowerMirror.app\Frameworks\Alamofire.framework\_CodeSignature\
+2758 bytes      ApowerMirror.app\Frameworks\Alamofire.framework\_CodeSignature\CodeResources
+[DIR]           ApowerMirror.app\Frameworks\AliyunOSSiOS.framework\
+1015200 bytes   ApowerMirror.app\Frameworks\AliyunOSSiOS.framework\AliyunOSSiOS
+[DIR]           ApowerMirror.app\Frameworks\AliyunOSSiOS.framework\AliyunOSSiOS_Privacy.bundle\
+787 bytes       ApowerMirror.app\Frameworks\AliyunOSSiOS.framework\AliyunOSSiOS_Privacy.bundle\Info.plist
+964 bytes       ApowerMirror.app\Frameworks\AliyunOSSiOS.framework\AliyunOSSiOS_Privacy.bundle\PrivacyInfo.xcprivacy
+794 bytes       ApowerMirror.app\Frameworks\AliyunOSSiOS.framework\Info.plist
+[DIR]           ApowerMirror.app\Frameworks\AliyunOSSiOS.framework\SC_Info\
+1072 bytes      ApowerMirror.app\Frameworks\AliyunOSSiOS.framework\SC_Info\AliyunOSSiOS.sinf
+3708 bytes      ApowerMirror.app\Frameworks\AliyunOSSiOS.framework\SC_Info\AliyunOSSiOS.supf
+3812 bytes      ApowerMirror.app\Frameworks\AliyunOSSiOS.framework\SC_Info\AliyunOSSiOS.supp
+80 bytes        ApowerMirror.app\Frameworks\AliyunOSSiOS.framework\SC_Info\AliyunOSSiOS.supx
+[DIR]           ApowerMirror.app\Frameworks\AliyunOSSiOS.framework\_CodeSignature\
+2808 bytes      ApowerMirror.app\Frameworks\AliyunOSSiOS.framework\_CodeSignature\CodeResources
+[DIR]           ApowerMirror.app\Frameworks\AppAuth.framework\
+319840 bytes    ApowerMirror.app\Frameworks\AppAuth.framework\AppAuth
+[DIR]           ApowerMirror.app\Frameworks\AppAuth.framework\AppAuthCore_Privacy.bundle\
+784 bytes       ApowerMirror.app\Frameworks\AppAuth.framework\AppAuthCore_Privacy.bundle\Info.plist
+391 bytes       ApowerMirror.app\Frameworks\AppAuth.framework\AppAuthCore_Privacy.bundle\PrivacyInfo.xcprivacy
+783 bytes       ApowerMirror.app\Frameworks\AppAuth.framework\Info.plist
+[DIR]           ApowerMirror.app\Frameworks\AppAuth.framework\SC_Info\
+1072 bytes      ApowerMirror.app\Frameworks\AppAuth.framework\SC_Info\AppAuth.sinf
+1660 bytes      ApowerMirror.app\Frameworks\AppAuth.framework\SC_Info\AppAuth.supf
+1764 bytes      ApowerMirror.app\Frameworks\AppAuth.framework\SC_Info\AppAuth.supp
+80 bytes        ApowerMirror.app\Frameworks\AppAuth.framework\SC_Info\AppAuth.supx
+[DIR]           ApowerMirror.app\Frameworks\AppAuth.framework\_CodeSignature\
+2794 bytes      ApowerMirror.app\Frameworks\AppAuth.framework\_CodeSignature\CodeResources
+[DIR]           ApowerMirror.app\Frameworks\CryptoSwift.framework\
+1346688 bytes   ApowerMirror.app\Frameworks\CryptoSwift.framework\CryptoSwift
+[DIR]           ApowerMirror.app\Frameworks\CryptoSwift.framework\CryptoSwift.bundle\
+766 bytes       ApowerMirror.app\Frameworks\CryptoSwift.framework\CryptoSwift.bundle\Info.plist
+373 bytes       ApowerMirror.app\Frameworks\CryptoSwift.framework\CryptoSwift.bundle\PrivacyInfo.xcprivacy
+791 bytes       ApowerMirror.app\Frameworks\CryptoSwift.framework\Info.plist
+[DIR]           ApowerMirror.app\Frameworks\CryptoSwift.framework\SC_Info\
+1072 bytes      ApowerMirror.app\Frameworks\CryptoSwift.framework\SC_Info\CryptoSwift.sinf
+4476 bytes      ApowerMirror.app\Frameworks\CryptoSwift.framework\SC_Info\CryptoSwift.supf
+4580 bytes      ApowerMirror.app\Frameworks\CryptoSwift.framework\SC_Info\CryptoSwift.supp
+80 bytes        ApowerMirror.app\Frameworks\CryptoSwift.framework\SC_Info\CryptoSwift.supx
+[DIR]           ApowerMirror.app\Frameworks\CryptoSwift.framework\_CodeSignature\
+2770 bytes      ApowerMirror.app\Frameworks\CryptoSwift.framework\_CodeSignature\CodeResources
+[DIR]           ApowerMirror.app\Frameworks\FBAEMKit.framework\
+615776 bytes    ApowerMirror.app\Frameworks\FBAEMKit.framework\FBAEMKit
+791 bytes       ApowerMirror.app\Frameworks\FBAEMKit.framework\Info.plist
+551 bytes       ApowerMirror.app\Frameworks\FBAEMKit.framework\PrivacyInfo.xcprivacy
+[DIR]           ApowerMirror.app\Frameworks\FBAEMKit.framework\SC_Info\
+1072 bytes      ApowerMirror.app\Frameworks\FBAEMKit.framework\SC_Info\FBAEMKit.sinf
+2684 bytes      ApowerMirror.app\Frameworks\FBAEMKit.framework\SC_Info\FBAEMKit.supf
+2788 bytes      ApowerMirror.app\Frameworks\FBAEMKit.framework\SC_Info\FBAEMKit.supp
+80 bytes        ApowerMirror.app\Frameworks\FBAEMKit.framework\SC_Info\FBAEMKit.supx
+[DIR]           ApowerMirror.app\Frameworks\FBAEMKit.framework\_CodeSignature\
+2410 bytes      ApowerMirror.app\Frameworks\FBAEMKit.framework\_CodeSignature\CodeResources
+[DIR]           ApowerMirror.app\Frameworks\FBLPromises.framework\
+192320 bytes    ApowerMirror.app\Frameworks\FBLPromises.framework\FBLPromises
+[DIR]           ApowerMirror.app\Frameworks\FBLPromises.framework\FBLPromises_Privacy.bundle\
+784 bytes       ApowerMirror.app\Frameworks\FBLPromises.framework\FBLPromises_Privacy.bundle\Info.plist
+373 bytes       ApowerMirror.app\Frameworks\FBLPromises.framework\FBLPromises_Privacy.bundle\PrivacyInfo.xcprivacy
+791 bytes       ApowerMirror.app\Frameworks\FBLPromises.framework\Info.plist
+[DIR]           ApowerMirror.app\Frameworks\FBLPromises.framework\SC_Info\
+1072 bytes      ApowerMirror.app\Frameworks\FBLPromises.framework\SC_Info\FBLPromises.sinf
+1276 bytes      ApowerMirror.app\Frameworks\FBLPromises.framework\SC_Info\FBLPromises.supf
+1380 bytes      ApowerMirror.app\Frameworks\FBLPromises.framework\SC_Info\FBLPromises.supp
+80 bytes        ApowerMirror.app\Frameworks\FBLPromises.framework\SC_Info\FBLPromises.supx
+[DIR]           ApowerMirror.app\Frameworks\FBLPromises.framework\_CodeSignature\
+2802 bytes      ApowerMirror.app\Frameworks\FBLPromises.framework\_CodeSignature\CodeResources
+[DIR]           ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\
+3437984 bytes   ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FBSDKCoreKit
+[DIR]           ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\
+[DIR]           ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\
+[DIR]           ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\af.lproj\
+4793 bytes      ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\af.lproj\FacebookSDK.strings
+[DIR]           ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\ar.lproj\
+5374 bytes      ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\ar.lproj\FacebookSDK.strings
+[DIR]           ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\bn.lproj\
+6746 bytes      ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\bn.lproj\FacebookSDK.strings
+[DIR]           ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\cs.lproj\
+4874 bytes      ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\cs.lproj\FacebookSDK.strings
+[DIR]           ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\da.lproj\
+4742 bytes      ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\da.lproj\FacebookSDK.strings
+[DIR]           ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\de.lproj\
+4943 bytes      ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\de.lproj\FacebookSDK.strings
+[DIR]           ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\el.lproj\
+5916 bytes      ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\el.lproj\FacebookSDK.strings
+[DIR]           ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\en.lproj\
+8672 bytes      ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\en.lproj\FacebookSDK.strings
+[DIR]           ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\en_GB.lproj\
+4293 bytes      ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\en_GB.lproj\FacebookSDK.strings
+[DIR]           ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\es.lproj\
+4887 bytes      ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\es.lproj\FacebookSDK.strings
+[DIR]           ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\es_ES.lproj\
+4905 bytes      ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\es_ES.lproj\FacebookSDK.strings
+[DIR]           ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\fi.lproj\
+4873 bytes      ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\fi.lproj\FacebookSDK.strings
+[DIR]           ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\fil.lproj\
+4912 bytes      ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\fil.lproj\FacebookSDK.strings
+[DIR]           ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\fr.lproj\
+4998 bytes      ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\fr.lproj\FacebookSDK.strings
+[DIR]           ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\gu.lproj\
+6497 bytes      ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\gu.lproj\FacebookSDK.strings
+[DIR]           ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\he.lproj\
+5055 bytes      ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\he.lproj\FacebookSDK.strings
+[DIR]           ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\hi.lproj\
+6528 bytes      ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\hi.lproj\FacebookSDK.strings
+[DIR]           ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\hr.lproj\
+4730 bytes      ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\hr.lproj\FacebookSDK.strings
+[DIR]           ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\hu.lproj\
+5011 bytes      ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\hu.lproj\FacebookSDK.strings
+[DIR]           ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\id.lproj\
+4714 bytes      ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\id.lproj\FacebookSDK.strings
+[DIR]           ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\it.lproj\
+4793 bytes      ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\it.lproj\FacebookSDK.strings
+[DIR]           ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\ja.lproj\
+5182 bytes      ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\ja.lproj\FacebookSDK.strings
+[DIR]           ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\kn.lproj\
+5695 bytes      ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\kn.lproj\FacebookSDK.strings
+[DIR]           ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\ko.lproj\
+4912 bytes      ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\ko.lproj\FacebookSDK.strings
+[DIR]           ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\ml.lproj\
+7100 bytes      ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\ml.lproj\FacebookSDK.strings
+[DIR]           ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\mr.lproj\
+6504 bytes      ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\mr.lproj\FacebookSDK.strings
+[DIR]           ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\ms.lproj\
+4772 bytes      ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\ms.lproj\FacebookSDK.strings
+[DIR]           ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\nb.lproj\
+4695 bytes      ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\nb.lproj\FacebookSDK.strings
+[DIR]           ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\nl.lproj\
+4783 bytes      ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\nl.lproj\FacebookSDK.strings
+[DIR]           ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\pa.lproj\
+6610 bytes      ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\pa.lproj\FacebookSDK.strings
+[DIR]           ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\pl.lproj\
+4860 bytes      ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\pl.lproj\FacebookSDK.strings
+[DIR]           ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\pt.lproj\
+4824 bytes      ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\pt.lproj\FacebookSDK.strings
+[DIR]           ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\pt_PT.lproj\
+4921 bytes      ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\pt_PT.lproj\FacebookSDK.strings
+[DIR]           ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\ru.lproj\
+5466 bytes      ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\ru.lproj\FacebookSDK.strings
+[DIR]           ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\sk.lproj\
+4893 bytes      ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\sk.lproj\FacebookSDK.strings
+[DIR]           ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\sv.lproj\
+4721 bytes      ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\sv.lproj\FacebookSDK.strings
+[DIR]           ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\ta.lproj\
+6760 bytes      ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\ta.lproj\FacebookSDK.strings
+[DIR]           ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\te.lproj\
+6743 bytes      ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\te.lproj\FacebookSDK.strings
+[DIR]           ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\th.lproj\
+6509 bytes      ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\th.lproj\FacebookSDK.strings
+[DIR]           ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\tr.lproj\
+4784 bytes      ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\tr.lproj\FacebookSDK.strings
+[DIR]           ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\vi.lproj\
+5169 bytes      ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\vi.lproj\FacebookSDK.strings
+[DIR]           ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\zh.lproj\
+4617 bytes      ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\zh.lproj\FacebookSDK.strings
+[DIR]           ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\zh_Hant_HK.lproj\
+4631 bytes      ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\zh_Hant_HK.lproj\FacebookSDK.strings
+[DIR]           ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\zh_Hant_TW.lproj\
+4675 bytes      ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\FacebookSDKStrings.bundle\Resources\zh_Hant_TW.lproj\FacebookSDK.strings
+799 bytes       ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\Info.plist
+1923 bytes      ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\PrivacyInfo.xcprivacy
+[DIR]           ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\SC_Info\
+1072 bytes      ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\SC_Info\FBSDKCoreKit.sinf
+10620 bytes     ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\SC_Info\FBSDKCoreKit.supf
+10724 bytes     ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\SC_Info\FBSDKCoreKit.supp
+80 bytes        ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\SC_Info\FBSDKCoreKit.supx
+[DIR]           ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\_CodeSignature\
+24250 bytes     ApowerMirror.app\Frameworks\FBSDKCoreKit.framework\_CodeSignature\CodeResources
+[DIR]           ApowerMirror.app\Frameworks\FBSDKCoreKit_Basics.framework\
+162672 bytes    ApowerMirror.app\Frameworks\FBSDKCoreKit_Basics.framework\FBSDKCoreKit_Basics
+814 bytes       ApowerMirror.app\Frameworks\FBSDKCoreKit_Basics.framework\Info.plist
+937 bytes       ApowerMirror.app\Frameworks\FBSDKCoreKit_Basics.framework\PrivacyInfo.xcprivacy
+[DIR]           ApowerMirror.app\Frameworks\FBSDKCoreKit_Basics.framework\SC_Info\
+1072 bytes      ApowerMirror.app\Frameworks\FBSDKCoreKit_Basics.framework\SC_Info\FBSDKCoreKit_Basics.sinf
+1276 bytes      ApowerMirror.app\Frameworks\FBSDKCoreKit_Basics.framework\SC_Info\FBSDKCoreKit_Basics.supf
+1380 bytes      ApowerMirror.app\Frameworks\FBSDKCoreKit_Basics.framework\SC_Info\FBSDKCoreKit_Basics.supp
+80 bytes        ApowerMirror.app\Frameworks\FBSDKCoreKit_Basics.framework\SC_Info\FBSDKCoreKit_Basics.supx
+[DIR]           ApowerMirror.app\Frameworks\FBSDKCoreKit_Basics.framework\_CodeSignature\
+2432 bytes      ApowerMirror.app\Frameworks\FBSDKCoreKit_Basics.framework\_CodeSignature\CodeResources
+[DIR]           ApowerMirror.app\Frameworks\FBSDKLoginKit.framework\
+969728 bytes    ApowerMirror.app\Frameworks\FBSDKLoginKit.framework\FBSDKLoginKit
+801 bytes       ApowerMirror.app\Frameworks\FBSDKLoginKit.framework\Info.plist
+2780 bytes      ApowerMirror.app\Frameworks\FBSDKLoginKit.framework\PrivacyInfo.xcprivacy
+[DIR]           ApowerMirror.app\Frameworks\FBSDKLoginKit.framework\SC_Info\
+1072 bytes      ApowerMirror.app\Frameworks\FBSDKLoginKit.framework\SC_Info\FBSDKLoginKit.sinf
+3452 bytes      ApowerMirror.app\Frameworks\FBSDKLoginKit.framework\SC_Info\FBSDKLoginKit.supf
+3684 bytes      ApowerMirror.app\Frameworks\FBSDKLoginKit.framework\SC_Info\FBSDKLoginKit.supp
+80 bytes        ApowerMirror.app\Frameworks\FBSDKLoginKit.framework\SC_Info\FBSDKLoginKit.supx
+[DIR]           ApowerMirror.app\Frameworks\FBSDKLoginKit.framework\_CodeSignature\
+2420 bytes      ApowerMirror.app\Frameworks\FBSDKLoginKit.framework\_CodeSignature\CodeResources
+[DIR]           ApowerMirror.app\Frameworks\FBSDKShareKit.framework\
+853328 bytes    ApowerMirror.app\Frameworks\FBSDKShareKit.framework\FBSDKShareKit
+801 bytes       ApowerMirror.app\Frameworks\FBSDKShareKit.framework\Info.plist
+1650 bytes      ApowerMirror.app\Frameworks\FBSDKShareKit.framework\PrivacyInfo.xcprivacy
+[DIR]           ApowerMirror.app\Frameworks\FBSDKShareKit.framework\SC_Info\
+1072 bytes      ApowerMirror.app\Frameworks\FBSDKShareKit.framework\SC_Info\FBSDKShareKit.sinf
+2940 bytes      ApowerMirror.app\Frameworks\FBSDKShareKit.framework\SC_Info\FBSDKShareKit.supf
+3172 bytes      ApowerMirror.app\Frameworks\FBSDKShareKit.framework\SC_Info\FBSDKShareKit.supp
+80 bytes        ApowerMirror.app\Frameworks\FBSDKShareKit.framework\SC_Info\FBSDKShareKit.supx
+[DIR]           ApowerMirror.app\Frameworks\FBSDKShareKit.framework\_CodeSignature\
+2420 bytes      ApowerMirror.app\Frameworks\FBSDKShareKit.framework\_CodeSignature\CodeResources
+[DIR]           ApowerMirror.app\Frameworks\FirebaseABTesting.framework\
+131664 bytes    ApowerMirror.app\Frameworks\FirebaseABTesting.framework\FirebaseABTesting
+[DIR]           ApowerMirror.app\Frameworks\FirebaseABTesting.framework\FirebaseABTesting_Privacy.bundle\
+797 bytes       ApowerMirror.app\Frameworks\FirebaseABTesting.framework\FirebaseABTesting_Privacy.bundle\Info.plist
+478 bytes       ApowerMirror.app\Frameworks\FirebaseABTesting.framework\FirebaseABTesting_Privacy.bundle\PrivacyInfo.xcprivacy
+806 bytes       ApowerMirror.app\Frameworks\FirebaseABTesting.framework\Info.plist
+[DIR]           ApowerMirror.app\Frameworks\FirebaseABTesting.framework\SC_Info\
+1072 bytes      ApowerMirror.app\Frameworks\FirebaseABTesting.framework\SC_Info\FirebaseABTesting.sinf
+1148 bytes      ApowerMirror.app\Frameworks\FirebaseABTesting.framework\SC_Info\FirebaseABTesting.supf
+1252 bytes      ApowerMirror.app\Frameworks\FirebaseABTesting.framework\SC_Info\FirebaseABTesting.supp
+80 bytes        ApowerMirror.app\Frameworks\FirebaseABTesting.framework\SC_Info\FirebaseABTesting.supx
+[DIR]           ApowerMirror.app\Frameworks\FirebaseABTesting.framework\_CodeSignature\
+2838 bytes      ApowerMirror.app\Frameworks\FirebaseABTesting.framework\_CodeSignature\CodeResources
+[DIR]           ApowerMirror.app\Frameworks\FirebaseCore.framework\
+206192 bytes    ApowerMirror.app\Frameworks\FirebaseCore.framework\FirebaseCore
+[DIR]           ApowerMirror.app\Frameworks\FirebaseCore.framework\FirebaseCore_Privacy.bundle\
+787 bytes       ApowerMirror.app\Frameworks\FirebaseCore.framework\FirebaseCore_Privacy.bundle\Info.plist
+855 bytes       ApowerMirror.app\Frameworks\FirebaseCore.framework\FirebaseCore_Privacy.bundle\PrivacyInfo.xcprivacy
+794 bytes       ApowerMirror.app\Frameworks\FirebaseCore.framework\Info.plist
+[DIR]           ApowerMirror.app\Frameworks\FirebaseCore.framework\SC_Info\
+1072 bytes      ApowerMirror.app\Frameworks\FirebaseCore.framework\SC_Info\FirebaseCore.sinf
+1404 bytes      ApowerMirror.app\Frameworks\FirebaseCore.framework\SC_Info\FirebaseCore.supf
+1508 bytes      ApowerMirror.app\Frameworks\FirebaseCore.framework\SC_Info\FirebaseCore.supp
+80 bytes        ApowerMirror.app\Frameworks\FirebaseCore.framework\SC_Info\FirebaseCore.supx
+[DIR]           ApowerMirror.app\Frameworks\FirebaseCore.framework\_CodeSignature\
+2808 bytes      ApowerMirror.app\Frameworks\FirebaseCore.framework\_CodeSignature\CodeResources
+[DIR]           ApowerMirror.app\Frameworks\FirebaseCoreExtension.framework\
+88016 bytes     ApowerMirror.app\Frameworks\FirebaseCoreExtension.framework\FirebaseCoreExtension
+[DIR]           ApowerMirror.app\Frameworks\FirebaseCoreExtension.framework\FirebaseCoreExtension_Privacy.bundle\
+805 bytes       ApowerMirror.app\Frameworks\FirebaseCoreExtension.framework\FirebaseCoreExtension_Privacy.bundle\Info.plist
+478 bytes       ApowerMirror.app\Frameworks\FirebaseCoreExtension.framework\FirebaseCoreExtension_Privacy.bundle\PrivacyInfo.xcprivacy
+814 bytes       ApowerMirror.app\Frameworks\FirebaseCoreExtension.framework\Info.plist
+[DIR]           ApowerMirror.app\Frameworks\FirebaseCoreExtension.framework\SC_Info\
+1072 bytes      ApowerMirror.app\Frameworks\FirebaseCoreExtension.framework\SC_Info\FirebaseCoreExtension.sinf
+1020 bytes      ApowerMirror.app\Frameworks\FirebaseCoreExtension.framework\SC_Info\FirebaseCoreExtension.supf
+1124 bytes      ApowerMirror.app\Frameworks\FirebaseCoreExtension.framework\SC_Info\FirebaseCoreExtension.supp
+80 bytes        ApowerMirror.app\Frameworks\FirebaseCoreExtension.framework\SC_Info\FirebaseCoreExtension.supx
+[DIR]           ApowerMirror.app\Frameworks\FirebaseCoreExtension.framework\_CodeSignature\
+2862 bytes      ApowerMirror.app\Frameworks\FirebaseCoreExtension.framework\_CodeSignature\CodeResources
+[DIR]           ApowerMirror.app\Frameworks\FirebaseCoreInternal.framework\
+368032 bytes    ApowerMirror.app\Frameworks\FirebaseCoreInternal.framework\FirebaseCoreInternal
+[DIR]           ApowerMirror.app\Frameworks\FirebaseCoreInternal.framework\FirebaseCoreInternal_Privacy.bundle\
+803 bytes       ApowerMirror.app\Frameworks\FirebaseCoreInternal.framework\FirebaseCoreInternal_Privacy.bundle\Info.plist
+855 bytes       ApowerMirror.app\Frameworks\FirebaseCoreInternal.framework\FirebaseCoreInternal_Privacy.bundle\PrivacyInfo.xcprivacy
+812 bytes       ApowerMirror.app\Frameworks\FirebaseCoreInternal.framework\Info.plist
+[DIR]           ApowerMirror.app\Frameworks\FirebaseCoreInternal.framework\SC_Info\
+1072 bytes      ApowerMirror.app\Frameworks\FirebaseCoreInternal.framework\SC_Info\FirebaseCoreInternal.sinf
+1660 bytes      ApowerMirror.app\Frameworks\FirebaseCoreInternal.framework\SC_Info\FirebaseCoreInternal.supf
+1764 bytes      ApowerMirror.app\Frameworks\FirebaseCoreInternal.framework\SC_Info\FirebaseCoreInternal.supp
+80 bytes        ApowerMirror.app\Frameworks\FirebaseCoreInternal.framework\SC_Info\FirebaseCoreInternal.supx
+[DIR]           ApowerMirror.app\Frameworks\FirebaseCoreInternal.framework\_CodeSignature\
+2856 bytes      ApowerMirror.app\Frameworks\FirebaseCoreInternal.framework\_CodeSignature\CodeResources
+[DIR]           ApowerMirror.app\Frameworks\FirebaseCrashlytics.framework\
+852592 bytes    ApowerMirror.app\Frameworks\FirebaseCrashlytics.framework\FirebaseCrashlytics
+[DIR]           ApowerMirror.app\Frameworks\FirebaseCrashlytics.framework\FirebaseCrashlytics_Privacy.bundle\
+801 bytes       ApowerMirror.app\Frameworks\FirebaseCrashlytics.framework\FirebaseCrashlytics_Privacy.bundle\Info.plist
+1383 bytes      ApowerMirror.app\Frameworks\FirebaseCrashlytics.framework\FirebaseCrashlytics_Privacy.bundle\PrivacyInfo.xcprivacy
+810 bytes       ApowerMirror.app\Frameworks\FirebaseCrashlytics.framework\Info.plist
+[DIR]           ApowerMirror.app\Frameworks\FirebaseCrashlytics.framework\SC_Info\
+1072 bytes      ApowerMirror.app\Frameworks\FirebaseCrashlytics.framework\SC_Info\FirebaseCrashlytics.sinf
+3196 bytes      ApowerMirror.app\Frameworks\FirebaseCrashlytics.framework\SC_Info\FirebaseCrashlytics.supf
+3300 bytes      ApowerMirror.app\Frameworks\FirebaseCrashlytics.framework\SC_Info\FirebaseCrashlytics.supp
+80 bytes        ApowerMirror.app\Frameworks\FirebaseCrashlytics.framework\SC_Info\FirebaseCrashlytics.supx
+[DIR]           ApowerMirror.app\Frameworks\FirebaseCrashlytics.framework\_CodeSignature\
+2850 bytes      ApowerMirror.app\Frameworks\FirebaseCrashlytics.framework\_CodeSignature\CodeResources
+[DIR]           ApowerMirror.app\Frameworks\FirebaseInstallations.framework\
+278768 bytes    ApowerMirror.app\Frameworks\FirebaseInstallations.framework\FirebaseInstallations
+[DIR]           ApowerMirror.app\Frameworks\FirebaseInstallations.framework\FirebaseInstallations_Privacy.bundle\
+805 bytes       ApowerMirror.app\Frameworks\FirebaseInstallations.framework\FirebaseInstallations_Privacy.bundle\Info.plist
+1105 bytes      ApowerMirror.app\Frameworks\FirebaseInstallations.framework\FirebaseInstallations_Privacy.bundle\PrivacyInfo.xcprivacy
+814 bytes       ApowerMirror.app\Frameworks\FirebaseInstallations.framework\Info.plist
+[DIR]           ApowerMirror.app\Frameworks\FirebaseInstallations.framework\SC_Info\
+1072 bytes      ApowerMirror.app\Frameworks\FirebaseInstallations.framework\SC_Info\FirebaseInstallations.sinf
+1532 bytes      ApowerMirror.app\Frameworks\FirebaseInstallations.framework\SC_Info\FirebaseInstallations.supf
+1636 bytes      ApowerMirror.app\Frameworks\FirebaseInstallations.framework\SC_Info\FirebaseInstallations.supp
+80 bytes        ApowerMirror.app\Frameworks\FirebaseInstallations.framework\SC_Info\FirebaseInstallations.supx
+[DIR]           ApowerMirror.app\Frameworks\FirebaseInstallations.framework\_CodeSignature\
+2862 bytes      ApowerMirror.app\Frameworks\FirebaseInstallations.framework\_CodeSignature\CodeResources
+[DIR]           ApowerMirror.app\Frameworks\FirebasePerformance.framework\
+535040 bytes    ApowerMirror.app\Frameworks\FirebasePerformance.framework\FirebasePerformance
+810 bytes       ApowerMirror.app\Frameworks\FirebasePerformance.framework\Info.plist
+[DIR]           ApowerMirror.app\Frameworks\FirebasePerformance.framework\SC_Info\
+1072 bytes      ApowerMirror.app\Frameworks\FirebasePerformance.framework\SC_Info\FirebasePerformance.sinf
+2300 bytes      ApowerMirror.app\Frameworks\FirebasePerformance.framework\SC_Info\FirebasePerformance.supf
+2404 bytes      ApowerMirror.app\Frameworks\FirebasePerformance.framework\SC_Info\FirebasePerformance.supp
+80 bytes        ApowerMirror.app\Frameworks\FirebasePerformance.framework\SC_Info\FirebasePerformance.supx
+[DIR]           ApowerMirror.app\Frameworks\FirebasePerformance.framework\_CodeSignature\
+2124 bytes      ApowerMirror.app\Frameworks\FirebasePerformance.framework\_CodeSignature\CodeResources
+[DIR]           ApowerMirror.app\Frameworks\FirebaseRemoteConfig.framework\
+508128 bytes    ApowerMirror.app\Frameworks\FirebaseRemoteConfig.framework\FirebaseRemoteConfig
+[DIR]           ApowerMirror.app\Frameworks\FirebaseRemoteConfig.framework\FirebaseRemoteConfig_Privacy.bundle\
+803 bytes       ApowerMirror.app\Frameworks\FirebaseRemoteConfig.framework\FirebaseRemoteConfig_Privacy.bundle\Info.plist
+1482 bytes      ApowerMirror.app\Frameworks\FirebaseRemoteConfig.framework\FirebaseRemoteConfig_Privacy.bundle\PrivacyInfo.xcprivacy
+812 bytes       ApowerMirror.app\Frameworks\FirebaseRemoteConfig.framework\Info.plist
+[DIR]           ApowerMirror.app\Frameworks\FirebaseRemoteConfig.framework\SC_Info\
+1072 bytes      ApowerMirror.app\Frameworks\FirebaseRemoteConfig.framework\SC_Info\FirebaseRemoteConfig.sinf
+2300 bytes      ApowerMirror.app\Frameworks\FirebaseRemoteConfig.framework\SC_Info\FirebaseRemoteConfig.supf
+2404 bytes      ApowerMirror.app\Frameworks\FirebaseRemoteConfig.framework\SC_Info\FirebaseRemoteConfig.supp
+80 bytes        ApowerMirror.app\Frameworks\FirebaseRemoteConfig.framework\SC_Info\FirebaseRemoteConfig.supx
+[DIR]           ApowerMirror.app\Frameworks\FirebaseRemoteConfig.framework\_CodeSignature\
+2856 bytes      ApowerMirror.app\Frameworks\FirebaseRemoteConfig.framework\_CodeSignature\CodeResources
+[DIR]           ApowerMirror.app\Frameworks\FirebaseRemoteConfigInterop.framework\
+153936 bytes    ApowerMirror.app\Frameworks\FirebaseRemoteConfigInterop.framework\FirebaseRemoteConfigInterop
+827 bytes       ApowerMirror.app\Frameworks\FirebaseRemoteConfigInterop.framework\Info.plist
+[DIR]           ApowerMirror.app\Frameworks\FirebaseRemoteConfigInterop.framework\SC_Info\
+1072 bytes      ApowerMirror.app\Frameworks\FirebaseRemoteConfigInterop.framework\SC_Info\FirebaseRemoteConfigInterop.sinf
+1148 bytes      ApowerMirror.app\Frameworks\FirebaseRemoteConfigInterop.framework\SC_Info\FirebaseRemoteConfigInterop.supf
+1252 bytes      ApowerMirror.app\Frameworks\FirebaseRemoteConfigInterop.framework\SC_Info\FirebaseRemoteConfigInterop.supp
+80 bytes        ApowerMirror.app\Frameworks\FirebaseRemoteConfigInterop.framework\SC_Info\FirebaseRemoteConfigInterop.supx
+[DIR]           ApowerMirror.app\Frameworks\FirebaseRemoteConfigInterop.framework\_CodeSignature\
+2140 bytes      ApowerMirror.app\Frameworks\FirebaseRemoteConfigInterop.framework\_CodeSignature\CodeResources
+[DIR]           ApowerMirror.app\Frameworks\FirebaseSessions.framework\
+365888 bytes    ApowerMirror.app\Frameworks\FirebaseSessions.framework\FirebaseSessions
+804 bytes       ApowerMirror.app\Frameworks\FirebaseSessions.framework\Info.plist
+[DIR]           ApowerMirror.app\Frameworks\FirebaseSessions.framework\SC_Info\
+1072 bytes      ApowerMirror.app\Frameworks\FirebaseSessions.framework\SC_Info\FirebaseSessions.sinf
+1660 bytes      ApowerMirror.app\Frameworks\FirebaseSessions.framework\SC_Info\FirebaseSessions.supf
+1764 bytes      ApowerMirror.app\Frameworks\FirebaseSessions.framework\SC_Info\FirebaseSessions.supp
+80 bytes        ApowerMirror.app\Frameworks\FirebaseSessions.framework\SC_Info\FirebaseSessions.supx
+[DIR]           ApowerMirror.app\Frameworks\FirebaseSessions.framework\_CodeSignature\
+2118 bytes      ApowerMirror.app\Frameworks\FirebaseSessions.framework\_CodeSignature\CodeResources
+[DIR]           ApowerMirror.app\Frameworks\FirebaseSharedSwift.framework\
+543152 bytes    ApowerMirror.app\Frameworks\FirebaseSharedSwift.framework\FirebaseSharedSwift
+811 bytes       ApowerMirror.app\Frameworks\FirebaseSharedSwift.framework\Info.plist
+[DIR]           ApowerMirror.app\Frameworks\FirebaseSharedSwift.framework\SC_Info\
+1072 bytes      ApowerMirror.app\Frameworks\FirebaseSharedSwift.framework\SC_Info\FirebaseSharedSwift.sinf
+2300 bytes      ApowerMirror.app\Frameworks\FirebaseSharedSwift.framework\SC_Info\FirebaseSharedSwift.supf
+2404 bytes      ApowerMirror.app\Frameworks\FirebaseSharedSwift.framework\SC_Info\FirebaseSharedSwift.supp
+80 bytes        ApowerMirror.app\Frameworks\FirebaseSharedSwift.framework\SC_Info\FirebaseSharedSwift.supx
+[DIR]           ApowerMirror.app\Frameworks\FirebaseSharedSwift.framework\_CodeSignature\
+2124 bytes      ApowerMirror.app\Frameworks\FirebaseSharedSwift.framework\_CodeSignature\CodeResources
+[DIR]           ApowerMirror.app\Frameworks\GTMAppAuth.framework\
+139648 bytes    ApowerMirror.app\Frameworks\GTMAppAuth.framework\GTMAppAuth
+789 bytes       ApowerMirror.app\Frameworks\GTMAppAuth.framework\Info.plist
+[DIR]           ApowerMirror.app\Frameworks\GTMAppAuth.framework\SC_Info\
+1072 bytes      ApowerMirror.app\Frameworks\GTMAppAuth.framework\SC_Info\GTMAppAuth.sinf
+1148 bytes      ApowerMirror.app\Frameworks\GTMAppAuth.framework\SC_Info\GTMAppAuth.supf
+1252 bytes      ApowerMirror.app\Frameworks\GTMAppAuth.framework\SC_Info\GTMAppAuth.supp
+80 bytes        ApowerMirror.app\Frameworks\GTMAppAuth.framework\SC_Info\GTMAppAuth.supx
+[DIR]           ApowerMirror.app\Frameworks\GTMAppAuth.framework\_CodeSignature\
+2106 bytes      ApowerMirror.app\Frameworks\GTMAppAuth.framework\_CodeSignature\CodeResources
+[DIR]           ApowerMirror.app\Frameworks\GTMSessionFetcher.framework\
+395568 bytes    ApowerMirror.app\Frameworks\GTMSessionFetcher.framework\GTMSessionFetcher
+805 bytes       ApowerMirror.app\Frameworks\GTMSessionFetcher.framework\Info.plist
+[DIR]           ApowerMirror.app\Frameworks\GTMSessionFetcher.framework\SC_Info\
+1072 bytes      ApowerMirror.app\Frameworks\GTMSessionFetcher.framework\SC_Info\GTMSessionFetcher.sinf
+2044 bytes      ApowerMirror.app\Frameworks\GTMSessionFetcher.framework\SC_Info\GTMSessionFetcher.supf
+2148 bytes      ApowerMirror.app\Frameworks\GTMSessionFetcher.framework\SC_Info\GTMSessionFetcher.supp
+80 bytes        ApowerMirror.app\Frameworks\GTMSessionFetcher.framework\SC_Info\GTMSessionFetcher.supx
+[DIR]           ApowerMirror.app\Frameworks\GTMSessionFetcher.framework\_CodeSignature\
+2120 bytes      ApowerMirror.app\Frameworks\GTMSessionFetcher.framework\_CodeSignature\CodeResources
+[DIR]           ApowerMirror.app\Frameworks\GoogleDataTransport.framework\
+386624 bytes    ApowerMirror.app\Frameworks\GoogleDataTransport.framework\GoogleDataTransport
+[DIR]           ApowerMirror.app\Frameworks\GoogleDataTransport.framework\GoogleDataTransport_Privacy.bundle\
+801 bytes       ApowerMirror.app\Frameworks\GoogleDataTransport.framework\GoogleDataTransport_Privacy.bundle\Info.plist
+1105 bytes      ApowerMirror.app\Frameworks\GoogleDataTransport.framework\GoogleDataTransport_Privacy.bundle\PrivacyInfo.xcprivacy
+810 bytes       ApowerMirror.app\Frameworks\GoogleDataTransport.framework\Info.plist
+[DIR]           ApowerMirror.app\Frameworks\GoogleDataTransport.framework\SC_Info\
+1072 bytes      ApowerMirror.app\Frameworks\GoogleDataTransport.framework\SC_Info\GoogleDataTransport.sinf
+1916 bytes      ApowerMirror.app\Frameworks\GoogleDataTransport.framework\SC_Info\GoogleDataTransport.supf
+2020 bytes      ApowerMirror.app\Frameworks\GoogleDataTransport.framework\SC_Info\GoogleDataTransport.supp
+80 bytes        ApowerMirror.app\Frameworks\GoogleDataTransport.framework\SC_Info\GoogleDataTransport.supx
+[DIR]           ApowerMirror.app\Frameworks\GoogleDataTransport.framework\_CodeSignature\
+2850 bytes      ApowerMirror.app\Frameworks\GoogleDataTransport.framework\_CodeSignature\CodeResources
+[DIR]           ApowerMirror.app\Frameworks\GoogleSignIn.framework\
+267776 bytes    ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn
+[DIR]           ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\
+768 bytes       ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\Info.plist
+127744 bytes    ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\Roboto-Bold.ttf
+[DIR]           ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\ar.lproj\
+1759 bytes      ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\ar.lproj\GoogleSignIn.strings
+[DIR]           ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\ca.lproj\
+1669 bytes      ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\ca.lproj\GoogleSignIn.strings
+[DIR]           ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\cs.lproj\
+1615 bytes      ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\cs.lproj\GoogleSignIn.strings
+[DIR]           ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\da.lproj\
+1611 bytes      ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\da.lproj\GoogleSignIn.strings
+[DIR]           ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\de.lproj\
+1703 bytes      ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\de.lproj\GoogleSignIn.strings
+[DIR]           ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\el.lproj\
+2103 bytes      ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\el.lproj\GoogleSignIn.strings
+[DIR]           ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\en.lproj\
+1547 bytes      ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\en.lproj\GoogleSignIn.strings
+[DIR]           ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\en_GB.lproj\
+1547 bytes      ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\en_GB.lproj\GoogleSignIn.strings
+[DIR]           ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\es.lproj\
+1678 bytes      ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\es.lproj\GoogleSignIn.strings
+[DIR]           ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\es_MX.lproj\
+1607 bytes      ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\es_MX.lproj\GoogleSignIn.strings
+[DIR]           ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\fi.lproj\
+1640 bytes      ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\fi.lproj\GoogleSignIn.strings
+[DIR]           ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\fr.lproj\
+1676 bytes      ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\fr.lproj\GoogleSignIn.strings
+[DIR]           ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\fr_CA.lproj\
+1657 bytes      ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\fr_CA.lproj\GoogleSignIn.strings
+643 bytes       ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\google.png
+1166 bytes      ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\google@2x.png
+1773 bytes      ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\google@3x.png
+[DIR]           ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\he.lproj\
+1780 bytes      ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\he.lproj\GoogleSignIn.strings
+[DIR]           ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\hi.lproj\
+2286 bytes      ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\hi.lproj\GoogleSignIn.strings
+[DIR]           ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\hr.lproj\
+1621 bytes      ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\hr.lproj\GoogleSignIn.strings
+[DIR]           ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\hu.lproj\
+1663 bytes      ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\hu.lproj\GoogleSignIn.strings
+[DIR]           ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\id.lproj\
+1553 bytes      ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\id.lproj\GoogleSignIn.strings
+[DIR]           ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\it.lproj\
+1570 bytes      ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\it.lproj\GoogleSignIn.strings
+[DIR]           ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\ja.lproj\
+1711 bytes      ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\ja.lproj\GoogleSignIn.strings
+[DIR]           ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\ko.lproj\
+1634 bytes      ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\ko.lproj\GoogleSignIn.strings
+[DIR]           ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\ms.lproj\
+1565 bytes      ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\ms.lproj\GoogleSignIn.strings
+[DIR]           ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\nb.lproj\
+1593 bytes      ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\nb.lproj\GoogleSignIn.strings
+[DIR]           ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\nl.lproj\
+1606 bytes      ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\nl.lproj\GoogleSignIn.strings
+[DIR]           ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\pl.lproj\
+1578 bytes      ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\pl.lproj\GoogleSignIn.strings
+[DIR]           ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\pt.lproj\
+1608 bytes      ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\pt.lproj\GoogleSignIn.strings
+[DIR]           ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\pt_BR.lproj\
+1608 bytes      ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\pt_BR.lproj\GoogleSignIn.strings
+[DIR]           ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\pt_PT.lproj\
+1646 bytes      ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\pt_PT.lproj\GoogleSignIn.strings
+[DIR]           ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\ro.lproj\
+1598 bytes      ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\ro.lproj\GoogleSignIn.strings
+[DIR]           ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\ru.lproj\
+1954 bytes      ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\ru.lproj\GoogleSignIn.strings
+[DIR]           ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\sk.lproj\
+1665 bytes      ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\sk.lproj\GoogleSignIn.strings
+[DIR]           ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\sv.lproj\
+1579 bytes      ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\sv.lproj\GoogleSignIn.strings
+[DIR]           ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\th.lproj\
+2133 bytes      ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\th.lproj\GoogleSignIn.strings
+[DIR]           ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\tr.lproj\
+1596 bytes      ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\tr.lproj\GoogleSignIn.strings
+[DIR]           ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\uk.lproj\
+1864 bytes      ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\uk.lproj\GoogleSignIn.strings
+[DIR]           ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\vi.lproj\
+1717 bytes      ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\vi.lproj\GoogleSignIn.strings
+[DIR]           ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\zh_CN.lproj\
+1489 bytes      ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\zh_CN.lproj\GoogleSignIn.strings
+[DIR]           ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\zh_TW.lproj\
+1525 bytes      ApowerMirror.app\Frameworks\GoogleSignIn.framework\GoogleSignIn.bundle\zh_TW.lproj\GoogleSignIn.strings
+793 bytes       ApowerMirror.app\Frameworks\GoogleSignIn.framework\Info.plist
+[DIR]           ApowerMirror.app\Frameworks\GoogleSignIn.framework\SC_Info\
+1072 bytes      ApowerMirror.app\Frameworks\GoogleSignIn.framework\SC_Info\GoogleSignIn.sinf
+1532 bytes      ApowerMirror.app\Frameworks\GoogleSignIn.framework\SC_Info\GoogleSignIn.supf
+1636 bytes      ApowerMirror.app\Frameworks\GoogleSignIn.framework\SC_Info\GoogleSignIn.supp
+80 bytes        ApowerMirror.app\Frameworks\GoogleSignIn.framework\SC_Info\GoogleSignIn.supx
+[DIR]           ApowerMirror.app\Frameworks\GoogleSignIn.framework\_CodeSignature\
+21442 bytes     ApowerMirror.app\Frameworks\GoogleSignIn.framework\_CodeSignature\CodeResources
+[DIR]           ApowerMirror.app\Frameworks\GoogleUtilities.framework\
+309472 bytes    ApowerMirror.app\Frameworks\GoogleUtilities.framework\GoogleUtilities
+[DIR]           ApowerMirror.app\Frameworks\GoogleUtilities.framework\GoogleUtilities_Privacy.bundle\
+792 bytes       ApowerMirror.app\Frameworks\GoogleUtilities.framework\GoogleUtilities_Privacy.bundle\Info.plist
+1233 bytes      ApowerMirror.app\Frameworks\GoogleUtilities.framework\GoogleUtilities_Privacy.bundle\PrivacyInfo.xcprivacy
+801 bytes       ApowerMirror.app\Frameworks\GoogleUtilities.framework\Info.plist
+[DIR]           ApowerMirror.app\Frameworks\GoogleUtilities.framework\SC_Info\
+1072 bytes      ApowerMirror.app\Frameworks\GoogleUtilities.framework\SC_Info\GoogleUtilities.sinf
+1660 bytes      ApowerMirror.app\Frameworks\GoogleUtilities.framework\SC_Info\GoogleUtilities.supf
+1764 bytes      ApowerMirror.app\Frameworks\GoogleUtilities.framework\SC_Info\GoogleUtilities.supp
+80 bytes        ApowerMirror.app\Frameworks\GoogleUtilities.framework\SC_Info\GoogleUtilities.supx
+[DIR]           ApowerMirror.app\Frameworks\GoogleUtilities.framework\_CodeSignature\
+2826 bytes      ApowerMirror.app\Frameworks\GoogleUtilities.framework\_CodeSignature\CodeResources
+[DIR]           ApowerMirror.app\Frameworks\HMSegmentedControl.framework\
+160768 bytes    ApowerMirror.app\Frameworks\HMSegmentedControl.framework\HMSegmentedControl
+807 bytes       ApowerMirror.app\Frameworks\HMSegmentedControl.framework\Info.plist
+[DIR]           ApowerMirror.app\Frameworks\HMSegmentedControl.framework\SC_Info\
+1072 bytes      ApowerMirror.app\Frameworks\HMSegmentedControl.framework\SC_Info\HMSegmentedControl.sinf
+1276 bytes      ApowerMirror.app\Frameworks\HMSegmentedControl.framework\SC_Info\HMSegmentedControl.supf
+1380 bytes      ApowerMirror.app\Frameworks\HMSegmentedControl.framework\SC_Info\HMSegmentedControl.supp
+80 bytes        ApowerMirror.app\Frameworks\HMSegmentedControl.framework\SC_Info\HMSegmentedControl.supx
+[DIR]           ApowerMirror.app\Frameworks\HMSegmentedControl.framework\_CodeSignature\
+2122 bytes      ApowerMirror.app\Frameworks\HMSegmentedControl.framework\_CodeSignature\CodeResources
+[DIR]           ApowerMirror.app\Frameworks\MJExtension.framework\
+791 bytes       ApowerMirror.app\Frameworks\MJExtension.framework\Info.plist
+170848 bytes    ApowerMirror.app\Frameworks\MJExtension.framework\MJExtension
+[DIR]           ApowerMirror.app\Frameworks\MJExtension.framework\MJExtension.bundle\
+766 bytes       ApowerMirror.app\Frameworks\MJExtension.framework\MJExtension.bundle\Info.plist
+373 bytes       ApowerMirror.app\Frameworks\MJExtension.framework\MJExtension.bundle\PrivacyInfo.xcprivacy
+[DIR]           ApowerMirror.app\Frameworks\MJExtension.framework\SC_Info\
+1072 bytes      ApowerMirror.app\Frameworks\MJExtension.framework\SC_Info\MJExtension.sinf
+1276 bytes      ApowerMirror.app\Frameworks\MJExtension.framework\SC_Info\MJExtension.supf
+1380 bytes      ApowerMirror.app\Frameworks\MJExtension.framework\SC_Info\MJExtension.supp
+80 bytes        ApowerMirror.app\Frameworks\MJExtension.framework\SC_Info\MJExtension.supx
+[DIR]           ApowerMirror.app\Frameworks\MJExtension.framework\_CodeSignature\
+2770 bytes      ApowerMirror.app\Frameworks\MJExtension.framework\_CodeSignature\CodeResources
+[DIR]           ApowerMirror.app\Frameworks\MJRefresh.framework\
+787 bytes       ApowerMirror.app\Frameworks\MJRefresh.framework\Info.plist
+269344 bytes    ApowerMirror.app\Frameworks\MJRefresh.framework\MJRefresh
+[DIR]           ApowerMirror.app\Frameworks\MJRefresh.framework\MJRefresh.Privacy.bundle\
+780 bytes       ApowerMirror.app\Frameworks\MJRefresh.framework\MJRefresh.Privacy.bundle\Info.plist
+598 bytes       ApowerMirror.app\Frameworks\MJRefresh.framework\MJRefresh.Privacy.bundle\PrivacyInfo.xcprivacy
+[DIR]           ApowerMirror.app\Frameworks\MJRefresh.framework\MJRefresh.bundle\
+1033 bytes      ApowerMirror.app\Frameworks\MJRefresh.framework\MJRefresh.bundle\arrow@2x.png
+[DIR]           ApowerMirror.app\Frameworks\MJRefresh.framework\MJRefresh.bundle\en.lproj\
+1374 bytes      ApowerMirror.app\Frameworks\MJRefresh.framework\MJRefresh.bundle\en.lproj\Localizable.strings
+[DIR]           ApowerMirror.app\Frameworks\MJRefresh.framework\MJRefresh.bundle\ko.lproj\
+771 bytes       ApowerMirror.app\Frameworks\MJRefresh.framework\MJRefresh.bundle\ko.lproj\Localizable.strings
+[DIR]           ApowerMirror.app\Frameworks\MJRefresh.framework\MJRefresh.bundle\ru.lproj\
+1502 bytes      ApowerMirror.app\Frameworks\MJRefresh.framework\MJRefresh.bundle\ru.lproj\Localizable.strings
+2322 bytes      ApowerMirror.app\Frameworks\MJRefresh.framework\MJRefresh.bundle\trail_arrow@2x.png
+[DIR]           ApowerMirror.app\Frameworks\MJRefresh.framework\MJRefresh.bundle\uk.lproj\
+1534 bytes      ApowerMirror.app\Frameworks\MJRefresh.framework\MJRefresh.bundle\uk.lproj\Localizable.strings
+[DIR]           ApowerMirror.app\Frameworks\MJRefresh.framework\MJRefresh.bundle\zh-Hans.lproj\
+1368 bytes      ApowerMirror.app\Frameworks\MJRefresh.framework\MJRefresh.bundle\zh-Hans.lproj\Localizable.strings
+[DIR]           ApowerMirror.app\Frameworks\MJRefresh.framework\MJRefresh.bundle\zh-Hant.lproj\
+891 bytes       ApowerMirror.app\Frameworks\MJRefresh.framework\MJRefresh.bundle\zh-Hant.lproj\Localizable.strings
+[DIR]           ApowerMirror.app\Frameworks\MJRefresh.framework\SC_Info\
+1072 bytes      ApowerMirror.app\Frameworks\MJRefresh.framework\SC_Info\MJRefresh.sinf
+1532 bytes      ApowerMirror.app\Frameworks\MJRefresh.framework\SC_Info\MJRefresh.supf
+1636 bytes      ApowerMirror.app\Frameworks\MJRefresh.framework\SC_Info\MJRefresh.supp
+80 bytes        ApowerMirror.app\Frameworks\MJRefresh.framework\SC_Info\MJRefresh.supx
+[DIR]           ApowerMirror.app\Frameworks\MJRefresh.framework\_CodeSignature\
+6196 bytes      ApowerMirror.app\Frameworks\MJRefresh.framework\_CodeSignature\CodeResources
+[DIR]           ApowerMirror.app\Frameworks\MMWormhole.framework\
+789 bytes       ApowerMirror.app\Frameworks\MMWormhole.framework\Info.plist
+135776 bytes    ApowerMirror.app\Frameworks\MMWormhole.framework\MMWormhole
+[DIR]           ApowerMirror.app\Frameworks\MMWormhole.framework\SC_Info\
+1072 bytes      ApowerMirror.app\Frameworks\MMWormhole.framework\SC_Info\MMWormhole.sinf
+1148 bytes      ApowerMirror.app\Frameworks\MMWormhole.framework\SC_Info\MMWormhole.supf
+1252 bytes      ApowerMirror.app\Frameworks\MMWormhole.framework\SC_Info\MMWormhole.supp
+80 bytes        ApowerMirror.app\Frameworks\MMWormhole.framework\SC_Info\MMWormhole.supx
+[DIR]           ApowerMirror.app\Frameworks\MMWormhole.framework\_CodeSignature\
+2106 bytes      ApowerMirror.app\Frameworks\MMWormhole.framework\_CodeSignature\CodeResources
+[DIR]           ApowerMirror.app\Frameworks\Masonry.framework\
+783 bytes       ApowerMirror.app\Frameworks\Masonry.framework\Info.plist
+180400 bytes    ApowerMirror.app\Frameworks\Masonry.framework\Masonry
+[DIR]           ApowerMirror.app\Frameworks\Masonry.framework\SC_Info\
+1072 bytes      ApowerMirror.app\Frameworks\Masonry.framework\SC_Info\Masonry.sinf
+1276 bytes      ApowerMirror.app\Frameworks\Masonry.framework\SC_Info\Masonry.supf
+1380 bytes      ApowerMirror.app\Frameworks\Masonry.framework\SC_Info\Masonry.supp
+80 bytes        ApowerMirror.app\Frameworks\Masonry.framework\SC_Info\Masonry.supx
+[DIR]           ApowerMirror.app\Frameworks\Masonry.framework\_CodeSignature\
+2100 bytes      ApowerMirror.app\Frameworks\Masonry.framework\_CodeSignature\CodeResources
+[DIR]           ApowerMirror.app\Frameworks\Promises.framework\
+785 bytes       ApowerMirror.app\Frameworks\Promises.framework\Info.plist
+229408 bytes    ApowerMirror.app\Frameworks\Promises.framework\Promises
+[DIR]           ApowerMirror.app\Frameworks\Promises.framework\Promises_Privacy.bundle\
+778 bytes       ApowerMirror.app\Frameworks\Promises.framework\Promises_Privacy.bundle\Info.plist
+373 bytes       ApowerMirror.app\Frameworks\Promises.framework\Promises_Privacy.bundle\PrivacyInfo.xcprivacy
+[DIR]           ApowerMirror.app\Frameworks\Promises.framework\SC_Info\
+1072 bytes      ApowerMirror.app\Frameworks\Promises.framework\SC_Info\Promises.sinf
+1404 bytes      ApowerMirror.app\Frameworks\Promises.framework\SC_Info\Promises.supf
+1508 bytes      ApowerMirror.app\Frameworks\Promises.framework\SC_Info\Promises.supp
+80 bytes        ApowerMirror.app\Frameworks\Promises.framework\SC_Info\Promises.supx
+[DIR]           ApowerMirror.app\Frameworks\Promises.framework\_CodeSignature\
+2784 bytes      ApowerMirror.app\Frameworks\Promises.framework\_CodeSignature\CodeResources
+[DIR]           ApowerMirror.app\Frameworks\QMUIKit.framework\
+783 bytes       ApowerMirror.app\Frameworks\QMUIKit.framework\Info.plist
+3639552 bytes   ApowerMirror.app\Frameworks\QMUIKit.framework\QMUIKit
+[DIR]           ApowerMirror.app\Frameworks\QMUIKit.framework\QMUIKit.bundle\
+758 bytes       ApowerMirror.app\Frameworks\QMUIKit.framework\QMUIKit.bundle\Info.plist
+598 bytes       ApowerMirror.app\Frameworks\QMUIKit.framework\QMUIKit.bundle\PrivacyInfo.xcprivacy
+[DIR]           ApowerMirror.app\Frameworks\QMUIKit.framework\QMUIResources.bundle\
+194136 bytes    ApowerMirror.app\Frameworks\QMUIKit.framework\QMUIResources.bundle\Assets.car
+770 bytes       ApowerMirror.app\Frameworks\QMUIKit.framework\QMUIResources.bundle\Info.plist
+[DIR]           ApowerMirror.app\Frameworks\QMUIKit.framework\SC_Info\
+1072 bytes      ApowerMirror.app\Frameworks\QMUIKit.framework\SC_Info\QMUIKit.sinf
+12796 bytes     ApowerMirror.app\Frameworks\QMUIKit.framework\SC_Info\QMUIKit.supf
+12900 bytes     ApowerMirror.app\Frameworks\QMUIKit.framework\SC_Info\QMUIKit.supp
+80 bytes        ApowerMirror.app\Frameworks\QMUIKit.framework\SC_Info\QMUIKit.supx
+[DIR]           ApowerMirror.app\Frameworks\QMUIKit.framework\_CodeSignature\
+3386 bytes      ApowerMirror.app\Frameworks\QMUIKit.framework\_CodeSignature\CodeResources
+[DIR]           ApowerMirror.app\Frameworks\SDCycleScrollView.framework\
+806 bytes       ApowerMirror.app\Frameworks\SDCycleScrollView.framework\Info.plist
+[DIR]           ApowerMirror.app\Frameworks\SDCycleScrollView.framework\SC_Info\
+1072 bytes      ApowerMirror.app\Frameworks\SDCycleScrollView.framework\SC_Info\SDCycleScrollView.sinf
+1276 bytes      ApowerMirror.app\Frameworks\SDCycleScrollView.framework\SC_Info\SDCycleScrollView.supf
+1380 bytes      ApowerMirror.app\Frameworks\SDCycleScrollView.framework\SC_Info\SDCycleScrollView.supp
+80 bytes        ApowerMirror.app\Frameworks\SDCycleScrollView.framework\SC_Info\SDCycleScrollView.supx
+174384 bytes    ApowerMirror.app\Frameworks\SDCycleScrollView.framework\SDCycleScrollView
+[DIR]           ApowerMirror.app\Frameworks\SDCycleScrollView.framework\_CodeSignature\
+2120 bytes      ApowerMirror.app\Frameworks\SDCycleScrollView.framework\_CodeSignature\CodeResources
+[DIR]           ApowerMirror.app\Frameworks\SDWebImage.framework\
+790 bytes       ApowerMirror.app\Frameworks\SDWebImage.framework\Info.plist
+[DIR]           ApowerMirror.app\Frameworks\SDWebImage.framework\SC_Info\
+1072 bytes      ApowerMirror.app\Frameworks\SDWebImage.framework\SC_Info\SDWebImage.sinf
+3324 bytes      ApowerMirror.app\Frameworks\SDWebImage.framework\SC_Info\SDWebImage.supf
+3428 bytes      ApowerMirror.app\Frameworks\SDWebImage.framework\SC_Info\SDWebImage.supp
+80 bytes        ApowerMirror.app\Frameworks\SDWebImage.framework\SC_Info\SDWebImage.supx
+906432 bytes    ApowerMirror.app\Frameworks\SDWebImage.framework\SDWebImage
+[DIR]           ApowerMirror.app\Frameworks\SDWebImage.framework\SDWebImage.bundle\
+765 bytes       ApowerMirror.app\Frameworks\SDWebImage.framework\SDWebImage.bundle\Info.plist
+599 bytes       ApowerMirror.app\Frameworks\SDWebImage.framework\SDWebImage.bundle\PrivacyInfo.xcprivacy
+[DIR]           ApowerMirror.app\Frameworks\SDWebImage.framework\_CodeSignature\
+2764 bytes      ApowerMirror.app\Frameworks\SDWebImage.framework\_CodeSignature\CodeResources
+[DIR]           ApowerMirror.app\Frameworks\SQLite.framework\
+782 bytes       ApowerMirror.app\Frameworks\SQLite.framework\Info.plist
+[DIR]           ApowerMirror.app\Frameworks\SQLite.framework\SC_Info\
+1072 bytes      ApowerMirror.app\Frameworks\SQLite.framework\SC_Info\SQLite.sinf
+4604 bytes      ApowerMirror.app\Frameworks\SQLite.framework\SC_Info\SQLite.supf
+4708 bytes      ApowerMirror.app\Frameworks\SQLite.framework\SC_Info\SQLite.supp
+80 bytes        ApowerMirror.app\Frameworks\SQLite.framework\SC_Info\SQLite.supx
+1253136 bytes   ApowerMirror.app\Frameworks\SQLite.framework\SQLite
+[DIR]           ApowerMirror.app\Frameworks\SQLite.framework\_CodeSignature\
+2098 bytes      ApowerMirror.app\Frameworks\SQLite.framework\_CodeSignature\CodeResources
+[DIR]           ApowerMirror.app\Frameworks\SSZipArchive.framework\
+793 bytes       ApowerMirror.app\Frameworks\SSZipArchive.framework\Info.plist
+[DIR]           ApowerMirror.app\Frameworks\SSZipArchive.framework\SC_Info\
+1072 bytes      ApowerMirror.app\Frameworks\SSZipArchive.framework\SC_Info\SSZipArchive.sinf
+1532 bytes      ApowerMirror.app\Frameworks\SSZipArchive.framework\SC_Info\SSZipArchive.supf
+1636 bytes      ApowerMirror.app\Frameworks\SSZipArchive.framework\SC_Info\SSZipArchive.supp
+80 bytes        ApowerMirror.app\Frameworks\SSZipArchive.framework\SC_Info\SSZipArchive.supx
+236432 bytes    ApowerMirror.app\Frameworks\SSZipArchive.framework\SSZipArchive
+[DIR]           ApowerMirror.app\Frameworks\SSZipArchive.framework\_CodeSignature\
+2110 bytes      ApowerMirror.app\Frameworks\SSZipArchive.framework\_CodeSignature\CodeResources
+[DIR]           ApowerMirror.app\Frameworks\SnapKit.framework\
+783 bytes       ApowerMirror.app\Frameworks\SnapKit.framework\Info.plist
+[DIR]           ApowerMirror.app\Frameworks\SnapKit.framework\SC_Info\
+1072 bytes      ApowerMirror.app\Frameworks\SnapKit.framework\SC_Info\SnapKit.sinf
+1532 bytes      ApowerMirror.app\Frameworks\SnapKit.framework\SC_Info\SnapKit.supf
+1636 bytes      ApowerMirror.app\Frameworks\SnapKit.framework\SC_Info\SnapKit.supp
+80 bytes        ApowerMirror.app\Frameworks\SnapKit.framework\SC_Info\SnapKit.supx
+366064 bytes    ApowerMirror.app\Frameworks\SnapKit.framework\SnapKit
+[DIR]           ApowerMirror.app\Frameworks\SnapKit.framework\SnapKit_Privacy.bundle\
+776 bytes       ApowerMirror.app\Frameworks\SnapKit.framework\SnapKit_Privacy.bundle\Info.plist
+373 bytes       ApowerMirror.app\Frameworks\SnapKit.framework\SnapKit_Privacy.bundle\PrivacyInfo.xcprivacy
+[DIR]           ApowerMirror.app\Frameworks\SnapKit.framework\_CodeSignature\
+2778 bytes      ApowerMirror.app\Frameworks\SnapKit.framework\_CodeSignature\CodeResources
+[DIR]           ApowerMirror.app\Frameworks\SocketRocket.framework\
+793 bytes       ApowerMirror.app\Frameworks\SocketRocket.framework\Info.plist
+[DIR]           ApowerMirror.app\Frameworks\SocketRocket.framework\SC_Info\
+1072 bytes      ApowerMirror.app\Frameworks\SocketRocket.framework\SC_Info\SocketRocket.sinf
+1404 bytes      ApowerMirror.app\Frameworks\SocketRocket.framework\SC_Info\SocketRocket.supf
+1508 bytes      ApowerMirror.app\Frameworks\SocketRocket.framework\SC_Info\SocketRocket.supp
+80 bytes        ApowerMirror.app\Frameworks\SocketRocket.framework\SC_Info\SocketRocket.supx
+218016 bytes    ApowerMirror.app\Frameworks\SocketRocket.framework\SocketRocket
+[DIR]           ApowerMirror.app\Frameworks\SocketRocket.framework\_CodeSignature\
+2110 bytes      ApowerMirror.app\Frameworks\SocketRocket.framework\_CodeSignature\CodeResources
+[DIR]           ApowerMirror.app\Frameworks\SwiftUIIntrospect.framework\
+806 bytes       ApowerMirror.app\Frameworks\SwiftUIIntrospect.framework\Info.plist
+[DIR]           ApowerMirror.app\Frameworks\SwiftUIIntrospect.framework\SC_Info\
+1072 bytes      ApowerMirror.app\Frameworks\SwiftUIIntrospect.framework\SC_Info\SwiftUIIntrospect.sinf
+2812 bytes      ApowerMirror.app\Frameworks\SwiftUIIntrospect.framework\SC_Info\SwiftUIIntrospect.supf
+2916 bytes      ApowerMirror.app\Frameworks\SwiftUIIntrospect.framework\SC_Info\SwiftUIIntrospect.supp
+80 bytes        ApowerMirror.app\Frameworks\SwiftUIIntrospect.framework\SC_Info\SwiftUIIntrospect.supx
+1387056 bytes   ApowerMirror.app\Frameworks\SwiftUIIntrospect.framework\SwiftUIIntrospect
+[DIR]           ApowerMirror.app\Frameworks\SwiftUIIntrospect.framework\_CodeSignature\
+2120 bytes      ApowerMirror.app\Frameworks\SwiftUIIntrospect.framework\_CodeSignature\CodeResources
+[DIR]           ApowerMirror.app\Frameworks\SwiftyStoreKit.framework\
+798 bytes       ApowerMirror.app\Frameworks\SwiftyStoreKit.framework\Info.plist
+[DIR]           ApowerMirror.app\Frameworks\SwiftyStoreKit.framework\SC_Info\
+1072 bytes      ApowerMirror.app\Frameworks\SwiftyStoreKit.framework\SC_Info\SwiftyStoreKit.sinf
+2172 bytes      ApowerMirror.app\Frameworks\SwiftyStoreKit.framework\SC_Info\SwiftyStoreKit.supf
+2276 bytes      ApowerMirror.app\Frameworks\SwiftyStoreKit.framework\SC_Info\SwiftyStoreKit.supp
+80 bytes        ApowerMirror.app\Frameworks\SwiftyStoreKit.framework\SC_Info\SwiftyStoreKit.supx
+499296 bytes    ApowerMirror.app\Frameworks\SwiftyStoreKit.framework\SwiftyStoreKit
+[DIR]           ApowerMirror.app\Frameworks\SwiftyStoreKit.framework\_CodeSignature\
+2114 bytes      ApowerMirror.app\Frameworks\SwiftyStoreKit.framework\_CodeSignature\CodeResources
+[DIR]           ApowerMirror.app\Frameworks\WXAirplaySender.framework\
+801 bytes       ApowerMirror.app\Frameworks\WXAirplaySender.framework\Info.plist
+[DIR]           ApowerMirror.app\Frameworks\WXAirplaySender.framework\SC_Info\
+1072 bytes      ApowerMirror.app\Frameworks\WXAirplaySender.framework\SC_Info\WXAirplaySender.sinf
+1020 bytes      ApowerMirror.app\Frameworks\WXAirplaySender.framework\SC_Info\WXAirplaySender.supf
+1124 bytes      ApowerMirror.app\Frameworks\WXAirplaySender.framework\SC_Info\WXAirplaySender.supp
+80 bytes        ApowerMirror.app\Frameworks\WXAirplaySender.framework\SC_Info\WXAirplaySender.supx
+101104 bytes    ApowerMirror.app\Frameworks\WXAirplaySender.framework\WXAirplaySender
+[DIR]           ApowerMirror.app\Frameworks\WXAirplaySender.framework\_CodeSignature\
+2116 bytes      ApowerMirror.app\Frameworks\WXAirplaySender.framework\_CodeSignature\CodeResources
+[DIR]           ApowerMirror.app\Frameworks\WXCastFFMpeg.framework\
+793 bytes       ApowerMirror.app\Frameworks\WXCastFFMpeg.framework\Info.plist
+[DIR]           ApowerMirror.app\Frameworks\WXCastFFMpeg.framework\SC_Info\
+1072 bytes      ApowerMirror.app\Frameworks\WXCastFFMpeg.framework\SC_Info\WXCastFFMpeg.sinf
+89724 bytes     ApowerMirror.app\Frameworks\WXCastFFMpeg.framework\SC_Info\WXCastFFMpeg.supf
+89828 bytes     ApowerMirror.app\Frameworks\WXCastFFMpeg.framework\SC_Info\WXCastFFMpeg.supp
+80 bytes        ApowerMirror.app\Frameworks\WXCastFFMpeg.framework\SC_Info\WXCastFFMpeg.supx
+12937776 bytes  ApowerMirror.app\Frameworks\WXCastFFMpeg.framework\WXCastFFMpeg
+[DIR]           ApowerMirror.app\Frameworks\WXCastFFMpeg.framework\_CodeSignature\
+2110 bytes      ApowerMirror.app\Frameworks\WXCastFFMpeg.framework\_CodeSignature\CodeResources
+[DIR]           ApowerMirror.app\Frameworks\WXCastiOSReceiver.framework\
+805 bytes       ApowerMirror.app\Frameworks\WXCastiOSReceiver.framework\Info.plist
+[DIR]           ApowerMirror.app\Frameworks\WXCastiOSReceiver.framework\SC_Info\
+1072 bytes      ApowerMirror.app\Frameworks\WXCastiOSReceiver.framework\SC_Info\WXCastiOSReceiver.sinf
+3708 bytes      ApowerMirror.app\Frameworks\WXCastiOSReceiver.framework\SC_Info\WXCastiOSReceiver.supf
+3812 bytes      ApowerMirror.app\Frameworks\WXCastiOSReceiver.framework\SC_Info\WXCastiOSReceiver.supp
+80 bytes        ApowerMirror.app\Frameworks\WXCastiOSReceiver.framework\SC_Info\WXCastiOSReceiver.supx
+705872 bytes    ApowerMirror.app\Frameworks\WXCastiOSReceiver.framework\WXCastiOSReceiver
+[DIR]           ApowerMirror.app\Frameworks\WXCastiOSReceiver.framework\_CodeSignature\
+2120 bytes      ApowerMirror.app\Frameworks\WXCastiOSReceiver.framework\_CodeSignature\CodeResources
+[DIR]           ApowerMirror.app\Frameworks\WXCastiOSSender.framework\
+801 bytes       ApowerMirror.app\Frameworks\WXCastiOSSender.framework\Info.plist
+[DIR]           ApowerMirror.app\Frameworks\WXCastiOSSender.framework\SC_Info\
+1072 bytes      ApowerMirror.app\Frameworks\WXCastiOSSender.framework\SC_Info\WXCastiOSSender.sinf
+2940 bytes      ApowerMirror.app\Frameworks\WXCastiOSSender.framework\SC_Info\WXCastiOSSender.supf
+3044 bytes      ApowerMirror.app\Frameworks\WXCastiOSSender.framework\SC_Info\WXCastiOSSender.supp
+80 bytes        ApowerMirror.app\Frameworks\WXCastiOSSender.framework\SC_Info\WXCastiOSSender.supx
+599328 bytes    ApowerMirror.app\Frameworks\WXCastiOSSender.framework\WXCastiOSSender
+[DIR]           ApowerMirror.app\Frameworks\WXCastiOSSender.framework\_CodeSignature\
+2116 bytes      ApowerMirror.app\Frameworks\WXCastiOSSender.framework\_CodeSignature\CodeResources
+[DIR]           ApowerMirror.app\Frameworks\WXMirrorCore.framework\
+793 bytes       ApowerMirror.app\Frameworks\WXMirrorCore.framework\Info.plist
+[DIR]           ApowerMirror.app\Frameworks\WXMirrorCore.framework\SC_Info\
+1072 bytes      ApowerMirror.app\Frameworks\WXMirrorCore.framework\SC_Info\WXMirrorCore.sinf
+3324 bytes      ApowerMirror.app\Frameworks\WXMirrorCore.framework\SC_Info\WXMirrorCore.supf
+3428 bytes      ApowerMirror.app\Frameworks\WXMirrorCore.framework\SC_Info\WXMirrorCore.supp
+80 bytes        ApowerMirror.app\Frameworks\WXMirrorCore.framework\SC_Info\WXMirrorCore.supx
+762768 bytes    ApowerMirror.app\Frameworks\WXMirrorCore.framework\WXMirrorCore
+[DIR]           ApowerMirror.app\Frameworks\WXMirrorCore.framework\_CodeSignature\
+2110 bytes      ApowerMirror.app\Frameworks\WXMirrorCore.framework\_CodeSignature\CodeResources
+[DIR]           ApowerMirror.app\Frameworks\WXMirrorVNC.framework\
+760 bytes       ApowerMirror.app\Frameworks\WXMirrorVNC.framework\Info.plist
+[DIR]           ApowerMirror.app\Frameworks\WXMirrorVNC.framework\SC_Info\
+1072 bytes      ApowerMirror.app\Frameworks\WXMirrorVNC.framework\SC_Info\WXMirrorVNC.sinf
+1916 bytes      ApowerMirror.app\Frameworks\WXMirrorVNC.framework\SC_Info\WXMirrorVNC.supf
+2020 bytes      ApowerMirror.app\Frameworks\WXMirrorVNC.framework\SC_Info\WXMirrorVNC.supp
+80 bytes        ApowerMirror.app\Frameworks\WXMirrorVNC.framework\SC_Info\WXMirrorVNC.supx
+343552 bytes    ApowerMirror.app\Frameworks\WXMirrorVNC.framework\WXMirrorVNC
+[DIR]           ApowerMirror.app\Frameworks\WXMirrorVNC.framework\_CodeSignature\
+2108 bytes      ApowerMirror.app\Frameworks\WXMirrorVNC.framework\_CodeSignature\CodeResources
+[DIR]           ApowerMirror.app\Frameworks\aosl.framework\
+939 bytes       ApowerMirror.app\Frameworks\aosl.framework\Info.plist
+[DIR]           ApowerMirror.app\Frameworks\aosl.framework\SC_Info\
+1072 bytes      ApowerMirror.app\Frameworks\aosl.framework\SC_Info\aosl.sinf
+2812 bytes      ApowerMirror.app\Frameworks\aosl.framework\SC_Info\aosl.supf
+2916 bytes      ApowerMirror.app\Frameworks\aosl.framework\SC_Info\aosl.supp
+80 bytes        ApowerMirror.app\Frameworks\aosl.framework\SC_Info\aosl.supx
+[DIR]           ApowerMirror.app\Frameworks\aosl.framework\_CodeSignature\
+2094 bytes      ApowerMirror.app\Frameworks\aosl.framework\_CodeSignature\CodeResources
+360112 bytes    ApowerMirror.app\Frameworks\aosl.framework\aosl
+[DIR]           ApowerMirror.app\Frameworks\gpupixel.framework\
+762 bytes       ApowerMirror.app\Frameworks\gpupixel.framework\Info.plist
+[DIR]           ApowerMirror.app\Frameworks\gpupixel.framework\SC_Info\
+1072 bytes      ApowerMirror.app\Frameworks\gpupixel.framework\SC_Info\gpupixel.sinf
+15228 bytes     ApowerMirror.app\Frameworks\gpupixel.framework\SC_Info\gpupixel.supf
+15332 bytes     ApowerMirror.app\Frameworks\gpupixel.framework\SC_Info\gpupixel.supp
+80 bytes        ApowerMirror.app\Frameworks\gpupixel.framework\SC_Info\gpupixel.supx
+[DIR]           ApowerMirror.app\Frameworks\gpupixel.framework\_CodeSignature\
+4428 bytes      ApowerMirror.app\Frameworks\gpupixel.framework\_CodeSignature\CodeResources
+19593 bytes     ApowerMirror.app\Frameworks\gpupixel.framework\blusher.png
+2934936 bytes   ApowerMirror.app\Frameworks\gpupixel.framework\face_mobile[1.0.0].vnnmodel
+5956864 bytes   ApowerMirror.app\Frameworks\gpupixel.framework\gpupixel
+180735 bytes    ApowerMirror.app\Frameworks\gpupixel.framework\lookup_custom.png
+168 bytes       ApowerMirror.app\Frameworks\gpupixel.framework\lookup_gray.png
+461835 bytes    ApowerMirror.app\Frameworks\gpupixel.framework\lookup_light.png
+6980 bytes      ApowerMirror.app\Frameworks\gpupixel.framework\lookup_origin.png
+3261 bytes      ApowerMirror.app\Frameworks\gpupixel.framework\lookup_skin.png
+4611 bytes      ApowerMirror.app\Frameworks\gpupixel.framework\mouth.png
+417072 bytes    ApowerMirror.app\Frameworks\libswift_Concurrency.dylib
+[DIR]           ApowerMirror.app\Frameworks\nanopb.framework\
+785 bytes       ApowerMirror.app\Frameworks\nanopb.framework\Info.plist
+[DIR]           ApowerMirror.app\Frameworks\nanopb.framework\SC_Info\
+1072 bytes      ApowerMirror.app\Frameworks\nanopb.framework\SC_Info\nanopb.sinf
+1020 bytes      ApowerMirror.app\Frameworks\nanopb.framework\SC_Info\nanopb.supf
+1124 bytes      ApowerMirror.app\Frameworks\nanopb.framework\SC_Info\nanopb.supp
+80 bytes        ApowerMirror.app\Frameworks\nanopb.framework\SC_Info\nanopb.supx
+[DIR]           ApowerMirror.app\Frameworks\nanopb.framework\_CodeSignature\
+2772 bytes      ApowerMirror.app\Frameworks\nanopb.framework\_CodeSignature\CodeResources
+96928 bytes     ApowerMirror.app\Frameworks\nanopb.framework\nanopb
+[DIR]           ApowerMirror.app\Frameworks\nanopb.framework\nanopb_Privacy.bundle\
+776 bytes       ApowerMirror.app\Frameworks\nanopb.framework\nanopb_Privacy.bundle\Info.plist
+374 bytes       ApowerMirror.app\Frameworks\nanopb.framework\nanopb_Privacy.bundle\PrivacyInfo.xcprivacy
+[DIR]           ApowerMirror.app\Frameworks\vnn_core_ios.framework\
+773 bytes       ApowerMirror.app\Frameworks\vnn_core_ios.framework\Info.plist
+[DIR]           ApowerMirror.app\Frameworks\vnn_core_ios.framework\SC_Info\
+1072 bytes      ApowerMirror.app\Frameworks\vnn_core_ios.framework\SC_Info\vnn_core_ios.sinf
+32636 bytes     ApowerMirror.app\Frameworks\vnn_core_ios.framework\SC_Info\vnn_core_ios.supf
+32740 bytes     ApowerMirror.app\Frameworks\vnn_core_ios.framework\SC_Info\vnn_core_ios.supp
+80 bytes        ApowerMirror.app\Frameworks\vnn_core_ios.framework\SC_Info\vnn_core_ios.supx
+[DIR]           ApowerMirror.app\Frameworks\vnn_core_ios.framework\_CodeSignature\
+2110 bytes      ApowerMirror.app\Frameworks\vnn_core_ios.framework\_CodeSignature\CodeResources
+4424240 bytes   ApowerMirror.app\Frameworks\vnn_core_ios.framework\vnn_core_ios
+[DIR]           ApowerMirror.app\Frameworks\vnn_face_ios.framework\
+773 bytes       ApowerMirror.app\Frameworks\vnn_face_ios.framework\Info.plist
+[DIR]           ApowerMirror.app\Frameworks\vnn_face_ios.framework\SC_Info\
+1072 bytes      ApowerMirror.app\Frameworks\vnn_face_ios.framework\SC_Info\vnn_face_ios.sinf
+3324 bytes      ApowerMirror.app\Frameworks\vnn_face_ios.framework\SC_Info\vnn_face_ios.supf
+3428 bytes      ApowerMirror.app\Frameworks\vnn_face_ios.framework\SC_Info\vnn_face_ios.supp
+80 bytes        ApowerMirror.app\Frameworks\vnn_face_ios.framework\SC_Info\vnn_face_ios.supx
+[DIR]           ApowerMirror.app\Frameworks\vnn_face_ios.framework\_CodeSignature\
+2110 bytes      ApowerMirror.app\Frameworks\vnn_face_ios.framework\_CodeSignature\CodeResources
+386304 bytes    ApowerMirror.app\Frameworks\vnn_face_ios.framework\vnn_face_ios
+[DIR]           ApowerMirror.app\Frameworks\vnn_kit_ios.framework\
+771 bytes       ApowerMirror.app\Frameworks\vnn_kit_ios.framework\Info.plist
+[DIR]           ApowerMirror.app\Frameworks\vnn_kit_ios.framework\SC_Info\
+1072 bytes      ApowerMirror.app\Frameworks\vnn_kit_ios.framework\SC_Info\vnn_kit_ios.sinf
+2428 bytes      ApowerMirror.app\Frameworks\vnn_kit_ios.framework\SC_Info\vnn_kit_ios.supf
+2532 bytes      ApowerMirror.app\Frameworks\vnn_kit_ios.framework\SC_Info\vnn_kit_ios.supp
+80 bytes        ApowerMirror.app\Frameworks\vnn_kit_ios.framework\SC_Info\vnn_kit_ios.supx
+[DIR]           ApowerMirror.app\Frameworks\vnn_kit_ios.framework\_CodeSignature\
+2108 bytes      ApowerMirror.app\Frameworks\vnn_kit_ios.framework\_CodeSignature\CodeResources
+282416 bytes    ApowerMirror.app\Frameworks\vnn_kit_ios.framework\vnn_kit_ios
+783 bytes       ApowerMirror.app\GoogleService-Info.plist
+9695 bytes      ApowerMirror.app\Info.plist
+[DIR]           ApowerMirror.app\Launch Screen.storyboardc\
+3591 bytes      ApowerMirror.app\Launch Screen.storyboardc\01J-lp-oVM-view-Ze5-6b-2t3.nib
+258 bytes       ApowerMirror.app\Launch Screen.storyboardc\Info.plist
+924 bytes       ApowerMirror.app\Launch Screen.storyboardc\UIViewController-01J-lp-oVM.nib
+15533 bytes     ApowerMirror.app\LetsviewSDKController.nib
+5971 bytes      ApowerMirror.app\PCVipLoginAlertVC.nib
+8 bytes         ApowerMirror.app\PkgInfo
+[DIR]           ApowerMirror.app\PlugIns\
+[DIR]           ApowerMirror.app\PlugIns\ApowerMirrorUpload.appex\
+93648 bytes     ApowerMirror.app\PlugIns\ApowerMirrorUpload.appex\ApowerMirrorUpload
+1281 bytes      ApowerMirror.app\PlugIns\ApowerMirrorUpload.appex\Info.plist
+[DIR]           ApowerMirror.app\PlugIns\ApowerMirrorUpload.appex\SC_Info\
+1072 bytes      ApowerMirror.app\PlugIns\ApowerMirrorUpload.appex\SC_Info\ApowerMirrorUpload.sinf
+1020 bytes      ApowerMirror.app\PlugIns\ApowerMirrorUpload.appex\SC_Info\ApowerMirrorUpload.supf
+1124 bytes      ApowerMirror.app\PlugIns\ApowerMirrorUpload.appex\SC_Info\ApowerMirrorUpload.supp
+80 bytes        ApowerMirror.app\PlugIns\ApowerMirrorUpload.appex\SC_Info\ApowerMirrorUpload.supx
+[DIR]           ApowerMirror.app\PlugIns\ApowerMirrorUpload.appex\_CodeSignature\
+2122 bytes      ApowerMirror.app\PlugIns\ApowerMirrorUpload.appex\_CodeSignature\CodeResources
+4839 bytes      ApowerMirror.app\QRCodeReaderViewController.nib
+[DIR]           ApowerMirror.app\SC_Info\
+1072 bytes      ApowerMirror.app\SC_Info\ApowerMirror.sinf
+72316 bytes     ApowerMirror.app\SC_Info\ApowerMirror.supf
+72548 bytes     ApowerMirror.app\SC_Info\ApowerMirror.supp
+80 bytes        ApowerMirror.app\SC_Info\ApowerMirror.supx
+5416 bytes      ApowerMirror.app\SC_Info\Manifest.plist
+5704 bytes      ApowerMirror.app\VipProductCollectionViewCell.nib
+22081 bytes     ApowerMirror.app\VipPurchaseController.nib
+5652 bytes      ApowerMirror.app\WXActivationCodeVC.nib
+2905 bytes      ApowerMirror.app\WXAlietTableViewCell.nib
+7892 bytes      ApowerMirror.app\WXAndroidControlAlertVC.nib
+7999 bytes      ApowerMirror.app\WXAndroidMirrorVC.nib
+6279 bytes      ApowerMirror.app\WXAuthorizationView.nib
+4881 bytes      ApowerMirror.app\WXBrowerCollectionViewCell.nib
+9218 bytes      ApowerMirror.app\WXCloudLinkViewController.nib
+12827 bytes     ApowerMirror.app\WXCloudViewController.nib
+9199 bytes      ApowerMirror.app\WXCodeLinkViewController.nib
+[DIR]           ApowerMirror.app\WXCommonTools.bundle\
+[DIR]           ApowerMirror.app\WXCommonTools.bundle\image\
+1304 bytes      ApowerMirror.app\WXCommonTools.bundle\image\b_repeat_all.png
+1693 bytes      ApowerMirror.app\WXCommonTools.bundle\image\b_repeat_all@2x.png
+2548 bytes      ApowerMirror.app\WXCommonTools.bundle\image\b_repeat_all@3x.png
+855 bytes       ApowerMirror.app\WXCommonTools.bundle\image\b_repeat_song.png
+1779 bytes      ApowerMirror.app\WXCommonTools.bundle\image\b_repeat_song@2x.png
+2679 bytes      ApowerMirror.app\WXCommonTools.bundle\image\b_repeat_song@3x.png
+1271 bytes      ApowerMirror.app\WXCommonTools.bundle\image\b_shuffle.png
+1722 bytes      ApowerMirror.app\WXCommonTools.bundle\image\b_shuffle@2x.png
+2130 bytes      ApowerMirror.app\WXCommonTools.bundle\image\b_shuffle@3x.png
+1239 bytes      ApowerMirror.app\WXCommonTools.bundle\image\backItem.png
+1512 bytes      ApowerMirror.app\WXCommonTools.bundle\image\backItem@2x.png
+2097 bytes      ApowerMirror.app\WXCommonTools.bundle\image\backItem@3x.png
+502519 bytes    ApowerMirror.app\WXCommonTools.bundle\image\default-artwork.png
+18292 bytes     ApowerMirror.app\WXCommonTools.bundle\image\dot.png
+18936 bytes     ApowerMirror.app\WXCommonTools.bundle\image\dot@2x.png
+19823 bytes     ApowerMirror.app\WXCommonTools.bundle\image\dot@3x.png
+2301 bytes      ApowerMirror.app\WXCommonTools.bundle\image\icon-music.png
+1623 bytes      ApowerMirror.app\WXCommonTools.bundle\image\like-select.png
+2374 bytes      ApowerMirror.app\WXCommonTools.bundle\image\like-select@2x.png
+3227 bytes      ApowerMirror.app\WXCommonTools.bundle\image\like-select@3x.png
+1355 bytes      ApowerMirror.app\WXCommonTools.bundle\image\like.png
+1901 bytes      ApowerMirror.app\WXCommonTools.bundle\image\like@2x.png
+2619 bytes      ApowerMirror.app\WXCommonTools.bundle\image\like@3x.png
+1096 bytes      ApowerMirror.app\WXCommonTools.bundle\image\music-arrow-down.png
+1345 bytes      ApowerMirror.app\WXCommonTools.bundle\image\music-arrow-down@2x.png
+1712 bytes      ApowerMirror.app\WXCommonTools.bundle\image\music-arrow-down@3x.png
+1181 bytes      ApowerMirror.app\WXCommonTools.bundle\image\music-next.png
+1045 bytes      ApowerMirror.app\WXCommonTools.bundle\image\music-next@2x.png
+1582 bytes      ApowerMirror.app\WXCommonTools.bundle\image\music-next@3x.png
+860 bytes       ApowerMirror.app\WXCommonTools.bundle\image\music-pause.png
+3151 bytes      ApowerMirror.app\WXCommonTools.bundle\image\music-pause@2x.png
+5294 bytes      ApowerMirror.app\WXCommonTools.bundle\image\music-pause@3x.png
+995 bytes       ApowerMirror.app\WXCommonTools.bundle\image\music-play.png
+3491 bytes      ApowerMirror.app\WXCommonTools.bundle\image\music-play@2x.png
+5950 bytes      ApowerMirror.app\WXCommonTools.bundle\image\music-play@3x.png
+1906 bytes      ApowerMirror.app\WXCommonTools.bundle\image\nextz-ctrl.png
+3108 bytes      ApowerMirror.app\WXCommonTools.bundle\image\nextz-ctrl@2x.png
+4827 bytes      ApowerMirror.app\WXCommonTools.bundle\image\nextz-ctrl@3x.png
+2047 bytes      ApowerMirror.app\WXCommonTools.bundle\image\pause-ctrl.png
+3896 bytes      ApowerMirror.app\WXCommonTools.bundle\image\pause-ctrl@2x.png
+5719 bytes      ApowerMirror.app\WXCommonTools.bundle\image\pause-ctrl@3x.png
+2395 bytes      ApowerMirror.app\WXCommonTools.bundle\image\play-ctrl.png
+4754 bytes      ApowerMirror.app\WXCommonTools.bundle\image\play-ctrl@2x.png
+7001 bytes      ApowerMirror.app\WXCommonTools.bundle\image\play-ctrl@3x.png
+2904 bytes      ApowerMirror.app\WXCommonTools.bundle\image\play.png
+5098 bytes      ApowerMirror.app\WXCommonTools.bundle\image\play@2x.png
+7493 bytes      ApowerMirror.app\WXCommonTools.bundle\image\play@3x.png
+1903 bytes      ApowerMirror.app\WXCommonTools.bundle\image\previous-ctrl.png
+3101 bytes      ApowerMirror.app\WXCommonTools.bundle\image\previous-ctrl@2x.png
+4884 bytes      ApowerMirror.app\WXCommonTools.bundle\image\previous-ctrl@3x.png
+1274 bytes      ApowerMirror.app\WXCommonTools.bundle\image\repeat_all_w.png
+1800 bytes      ApowerMirror.app\WXCommonTools.bundle\image\repeat_all_w@2x.png
+2258 bytes      ApowerMirror.app\WXCommonTools.bundle\image\repeat_all_w@3x.png
+1282 bytes      ApowerMirror.app\WXCommonTools.bundle\image\repeat_song_w.png
+1688 bytes      ApowerMirror.app\WXCommonTools.bundle\image\repeat_song_w@2x.png
+2098 bytes      ApowerMirror.app\WXCommonTools.bundle\image\repeat_song_w@3x.png
+1226 bytes      ApowerMirror.app\WXCommonTools.bundle\image\shuffle_w.png
+1532 bytes      ApowerMirror.app\WXCommonTools.bundle\image\shuffle_w@2x.png
+1910 bytes      ApowerMirror.app\WXCommonTools.bundle\image\shuffle_w@3x.png
+4914 bytes      ApowerMirror.app\WXDeviceViewController.nib
+4275 bytes      ApowerMirror.app\WXDrawBookCollectionViewCell.nib
+16054 bytes     ApowerMirror.app\WXDrawViewController.nib
+4896 bytes      ApowerMirror.app\WXGroupTableViewCell.nib
+2842 bytes      ApowerMirror.app\WXHeaderReusableView.nib
+3311 bytes      ApowerMirror.app\WXHelpHeadView.nib
+6916 bytes      ApowerMirror.app\WXHelpSecondlyCell.nib
+2743 bytes      ApowerMirror.app\WXHelpThirdTableViewCell.nib
+8192 bytes      ApowerMirror.app\WXHomeMirrorHintViewController.nib
+7908 bytes      ApowerMirror.app\WXHomeMirrorViewController.nib
+7387 bytes      ApowerMirror.app\WXHomeViewController.nib
+1740 bytes      ApowerMirror.app\WXImageCollectionCellView.nib
+[DIR]           ApowerMirror.app\WXLoginBundle.bundle\
+770 bytes       ApowerMirror.app\WXLoginBundle.bundle\Info.plist
+1310 bytes      ApowerMirror.app\WXLoginBundle.bundle\apple.tiff
+[DIR]           ApowerMirror.app\WXLoginBundle.bundle\ar.lproj\
+13333 bytes     ApowerMirror.app\WXLoginBundle.bundle\ar.lproj\Localizable.strings
+666 bytes       ApowerMirror.app\WXLoginBundle.bundle\arrowRight.tiff
+893 bytes       ApowerMirror.app\WXLoginBundle.bundle\back.tiff
+662 bytes       ApowerMirror.app\WXLoginBundle.bundle\bind_close.tiff
+87302 bytes     ApowerMirror.app\WXLoginBundle.bundle\btnBg.tiff
+14701 bytes     ApowerMirror.app\WXLoginBundle.bundle\bubble.tiff
+1311 bytes      ApowerMirror.app\WXLoginBundle.bundle\changePassword.tiff
+1154 bytes      ApowerMirror.app\WXLoginBundle.bundle\checkBox.tiff
+574 bytes       ApowerMirror.app\WXLoginBundle.bundle\close.tiff
+[DIR]           ApowerMirror.app\WXLoginBundle.bundle\cs.lproj\
+11438 bytes     ApowerMirror.app\WXLoginBundle.bundle\cs.lproj\Localizable.strings
+[DIR]           ApowerMirror.app\WXLoginBundle.bundle\da.lproj\
+10444 bytes     ApowerMirror.app\WXLoginBundle.bundle\da.lproj\Localizable.strings
+[DIR]           ApowerMirror.app\WXLoginBundle.bundle\de.lproj\
+12691 bytes     ApowerMirror.app\WXLoginBundle.bundle\de.lproj\Localizable.strings
+1490 bytes      ApowerMirror.app\WXLoginBundle.bundle\dingding.tiff
+1405 bytes      ApowerMirror.app\WXLoginBundle.bundle\editPassword.tiff
+[DIR]           ApowerMirror.app\WXLoginBundle.bundle\el.lproj\
+11958 bytes     ApowerMirror.app\WXLoginBundle.bundle\el.lproj\Localizable.strings
+1027 bytes      ApowerMirror.app\WXLoginBundle.bundle\email.tiff
+[DIR]           ApowerMirror.app\WXLoginBundle.bundle\en.lproj\
+9636 bytes      ApowerMirror.app\WXLoginBundle.bundle\en.lproj\Localizable.strings
+[DIR]           ApowerMirror.app\WXLoginBundle.bundle\es.lproj\
+14143 bytes     ApowerMirror.app\WXLoginBundle.bundle\es.lproj\Localizable.strings
+479 bytes       ApowerMirror.app\WXLoginBundle.bundle\facebook.tiff
+[DIR]           ApowerMirror.app\WXLoginBundle.bundle\fi.lproj\
+11111 bytes     ApowerMirror.app\WXLoginBundle.bundle\fi.lproj\Localizable.strings
+429 bytes       ApowerMirror.app\WXLoginBundle.bundle\firstLine.tiff
+[DIR]           ApowerMirror.app\WXLoginBundle.bundle\fr.lproj\
+13804 bytes     ApowerMirror.app\WXLoginBundle.bundle\fr.lproj\Localizable.strings
+1781 bytes      ApowerMirror.app\WXLoginBundle.bundle\google.tiff
+1387 bytes      ApowerMirror.app\WXLoginBundle.bundle\guest.tiff
+[DIR]           ApowerMirror.app\WXLoginBundle.bundle\hu.lproj\
+11935 bytes     ApowerMirror.app\WXLoginBundle.bundle\hu.lproj\Localizable.strings
+[DIR]           ApowerMirror.app\WXLoginBundle.bundle\id.lproj\
+9673 bytes      ApowerMirror.app\WXLoginBundle.bundle\id.lproj\Localizable.strings
+69500 bytes     ApowerMirror.app\WXLoginBundle.bundle\ipadBg.tiff
+[DIR]           ApowerMirror.app\WXLoginBundle.bundle\it.lproj\
+11851 bytes     ApowerMirror.app\WXLoginBundle.bundle\it.lproj\Localizable.strings
+[DIR]           ApowerMirror.app\WXLoginBundle.bundle\ja.lproj\
+9752 bytes      ApowerMirror.app\WXLoginBundle.bundle\ja.lproj\Localizable.strings
+[DIR]           ApowerMirror.app\WXLoginBundle.bundle\ko.lproj\
+9709 bytes      ApowerMirror.app\WXLoginBundle.bundle\ko.lproj\Localizable.strings
+[DIR]           ApowerMirror.app\WXLoginBundle.bundle\nl.lproj\
+9943 bytes      ApowerMirror.app\WXLoginBundle.bundle\nl.lproj\Localizable.strings
+[DIR]           ApowerMirror.app\WXLoginBundle.bundle\nn-NO.lproj\
+10478 bytes     ApowerMirror.app\WXLoginBundle.bundle\nn-NO.lproj\Localizable.strings
+939 bytes       ApowerMirror.app\WXLoginBundle.bundle\phone.tiff
+[DIR]           ApowerMirror.app\WXLoginBundle.bundle\pl.lproj\
+11138 bytes     ApowerMirror.app\WXLoginBundle.bundle\pl.lproj\Localizable.strings
+[DIR]           ApowerMirror.app\WXLoginBundle.bundle\pt-BR.lproj\
+12118 bytes     ApowerMirror.app\WXLoginBundle.bundle\pt-BR.lproj\Localizable.strings
+[DIR]           ApowerMirror.app\WXLoginBundle.bundle\pt-PT.lproj\
+12118 bytes     ApowerMirror.app\WXLoginBundle.bundle\pt-PT.lproj\Localizable.strings
+1170 bytes      ApowerMirror.app\WXLoginBundle.bundle\qq.tiff
+[DIR]           ApowerMirror.app\WXLoginBundle.bundle\ru.lproj\
+14660 bytes     ApowerMirror.app\WXLoginBundle.bundle\ru.lproj\Localizable.strings
+373 bytes       ApowerMirror.app\WXLoginBundle.bundle\secondLine.tiff
+7645 bytes      ApowerMirror.app\WXLoginBundle.bundle\success.tiff
+[DIR]           ApowerMirror.app\WXLoginBundle.bundle\sv-SE.lproj\
+9721 bytes      ApowerMirror.app\WXLoginBundle.bundle\sv-SE.lproj\Localizable.strings
+[DIR]           ApowerMirror.app\WXLoginBundle.bundle\th.lproj\
+12853 bytes     ApowerMirror.app\WXLoginBundle.bundle\th.lproj\Localizable.strings
+289 bytes       ApowerMirror.app\WXLoginBundle.bundle\thirdLine.tiff
+[DIR]           ApowerMirror.app\WXLoginBundle.bundle\tr-TR.lproj\
+11294 bytes     ApowerMirror.app\WXLoginBundle.bundle\tr-TR.lproj\Localizable.strings
+1468 bytes      ApowerMirror.app\WXLoginBundle.bundle\twitter.tiff
+1422 bytes      ApowerMirror.app\WXLoginBundle.bundle\unCheckBox.tiff
+[DIR]           ApowerMirror.app\WXLoginBundle.bundle\vi.lproj\
+11911 bytes     ApowerMirror.app\WXLoginBundle.bundle\vi.lproj\Localizable.strings
+1565 bytes      ApowerMirror.app\WXLoginBundle.bundle\viewCode.tiff
+1241 bytes      ApowerMirror.app\WXLoginBundle.bundle\viewNot.tiff
+1968 bytes      ApowerMirror.app\WXLoginBundle.bundle\wechat.tiff
+1127 bytes      ApowerMirror.app\WXLoginBundle.bundle\wechat_white.tiff
+908 bytes       ApowerMirror.app\WXLoginBundle.bundle\whiteApple.tiff
+[DIR]           ApowerMirror.app\WXLoginBundle.bundle\zh-Hans.lproj\
+7680 bytes      ApowerMirror.app\WXLoginBundle.bundle\zh-Hans.lproj\Localizable.strings
+[DIR]           ApowerMirror.app\WXLoginBundle.bundle\zh-Hant.lproj\
+7774 bytes      ApowerMirror.app\WXLoginBundle.bundle\zh-Hant.lproj\Localizable.strings
+6004 bytes      ApowerMirror.app\WXMirrorViewController.nib
+4666 bytes      ApowerMirror.app\WXMoreCollectionCell.nib
+4897 bytes      ApowerMirror.app\WXMoreCollectionViewCell.nib
+4660 bytes      ApowerMirror.app\WXMusicFilesTableViewCell.nib
+4106 bytes      ApowerMirror.app\WXNoFileHeadView.nib
+3755 bytes      ApowerMirror.app\WXNoFileTableViewCell.nib
+7433 bytes      ApowerMirror.app\WXNotFoundAlertViewController.nib
+7119 bytes      ApowerMirror.app\WXPCMirrorChooseVC.nib
+6811 bytes      ApowerMirror.app\WXPCMirrorSelectVC.nib
+8148 bytes      ApowerMirror.app\WXPCTransferViewController.nib
+5429 bytes      ApowerMirror.app\WXPPTControlVC.nib
+4871 bytes      ApowerMirror.app\WXPPTPlayVC.nib
+8135 bytes      ApowerMirror.app\WXPolicyView.nib
+4738 bytes      ApowerMirror.app\WXPreferenceArrowCell.nib
+4162 bytes      ApowerMirror.app\WXPreferenceCacheCell.nib
+3163 bytes      ApowerMirror.app\WXPreferenceSwitchTableCell.nib
+6545 bytes      ApowerMirror.app\WXPrivacyUpdateView.nib
+7714 bytes      ApowerMirror.app\WXQRLoginAlertController.nib
+5342 bytes      ApowerMirror.app\WXQRLoginController.nib
+7782 bytes      ApowerMirror.app\WXQRScanAlertVC.nib
+7337 bytes      ApowerMirror.app\WXQRScanViewController.nib
+6023 bytes      ApowerMirror.app\WXQRShowViewController.nib
+4770 bytes      ApowerMirror.app\WXRecordGuideVC.nib
+5658 bytes      ApowerMirror.app\WXSearchController.nib
+5585 bytes      ApowerMirror.app\WXSearchDeviceTableViewCell.nib
+5366 bytes      ApowerMirror.app\WXSearchTableFooterView.nib
+4773 bytes      ApowerMirror.app\WXStartViewController.nib
+4006 bytes      ApowerMirror.app\WXSubFilesGroupTableViewCell.nib
+4536 bytes      ApowerMirror.app\WXSubItemFIlesTableViewCell.nib
+9410 bytes      ApowerMirror.app\WXTVGuideVC.nib
+5601 bytes      ApowerMirror.app\WXToolManagerVC.nib
+3378 bytes      ApowerMirror.app\WXToolsCollectionViewCell.nib
+10313 bytes     ApowerMirror.app\WXUserHeaderView.nib
+11921 bytes     ApowerMirror.app\WXVNCGuideView.nib
+4995 bytes      ApowerMirror.app\WXVideoListCellView.nib
+8211 bytes      ApowerMirror.app\WXVideoPlayController.nib
+4832 bytes      ApowerMirror.app\WXVipBuySucessController.nib
+1681 bytes      ApowerMirror.app\WXWKWebViewController.nib
+4778 bytes      ApowerMirror.app\WXWebFootView.nib
+[DIR]           ApowerMirror.app\_CodeSignature\
+261375 bytes    ApowerMirror.app\_CodeSignature\CodeResources
+432152 bytes    ApowerMirror.app\alert.wav
+664 bytes       ApowerMirror.app\b_repeat_all.png
+1233 bytes      ApowerMirror.app\b_repeat_all@2x.png
+1953 bytes      ApowerMirror.app\b_repeat_all@3x.png
+704 bytes       ApowerMirror.app\b_repeat_song.png
+1294 bytes      ApowerMirror.app\b_repeat_song@2x.png
+2047 bytes      ApowerMirror.app\b_repeat_song@3x.png
+700 bytes       ApowerMirror.app\b_shuffle.png
+1383 bytes      ApowerMirror.app\b_shuffle@2x.png
+2197 bytes      ApowerMirror.app\b_shuffle@3x.png
+1902 bytes      ApowerMirror.app\connect-gif.gif
+2281 bytes      ApowerMirror.app\connect-gif@2x.gif
+2643 bytes      ApowerMirror.app\connect-gif@3x.gif
+[DIR]           ApowerMirror.app\cs.lproj\
+53478 bytes     ApowerMirror.app\cs.lproj\Localizable.strings
+[DIR]           ApowerMirror.app\da.lproj\
+47703 bytes     ApowerMirror.app\da.lproj\Localizable.strings
+[DIR]           ApowerMirror.app\de.lproj\
+48612 bytes     ApowerMirror.app\de.lproj\Localizable.strings
+484973 bytes    ApowerMirror.app\default-artwork.png
+3361 bytes      ApowerMirror.app\dot.png
+3902 bytes      ApowerMirror.app\dot@2x.png
+5096 bytes      ApowerMirror.app\dot@3x.png
+[DIR]           ApowerMirror.app\en.lproj\
+738 bytes       ApowerMirror.app\en.lproj\InfoPlist.strings
+33233 bytes     ApowerMirror.app\en.lproj\Localizable.strings
+[DIR]           ApowerMirror.app\es.lproj\
+49744 bytes     ApowerMirror.app\es.lproj\Localizable.strings
+[DIR]           ApowerMirror.app\fi.lproj\
+51325 bytes     ApowerMirror.app\fi.lproj\Localizable.strings
+[DIR]           ApowerMirror.app\fr.lproj\
+53022 bytes     ApowerMirror.app\fr.lproj\Localizable.strings
+1274909 bytes   ApowerMirror.app\guideone.mp4
+1235932 bytes   ApowerMirror.app\guidetwo.mp4
+595 bytes       ApowerMirror.app\icon-music.png
+1296 bytes      ApowerMirror.app\icon-music@2x.png
+1693 bytes      ApowerMirror.app\icon-music@3x.png
+[DIR]           ApowerMirror.app\it.lproj\
+44643 bytes     ApowerMirror.app\it.lproj\Localizable.strings
+[DIR]           ApowerMirror.app\ja.lproj\
+34560 bytes     ApowerMirror.app\ja.lproj\Localizable.strings
+[DIR]           ApowerMirror.app\ko.lproj\
+41391 bytes     ApowerMirror.app\ko.lproj\Localizable.strings
+769 bytes       ApowerMirror.app\like-select.png
+1476 bytes      ApowerMirror.app\like-select@2x.png
+2478 bytes      ApowerMirror.app\like-select@3x.png
+797 bytes       ApowerMirror.app\like.png
+1633 bytes      ApowerMirror.app\like@2x.png
+2709 bytes      ApowerMirror.app\like@3x.png
+5903 bytes      ApowerMirror.app\loading.gif
+10839 bytes     ApowerMirror.app\loading@2x.gif
+16668 bytes     ApowerMirror.app\loading@3x.gif
+206521 bytes    ApowerMirror.app\loading_anima.gif
+2781073 bytes   ApowerMirror.app\mirror_guide_560.gif
+6120324 bytes   ApowerMirror.app\mirror_guide_561.gif
+1816 bytes      ApowerMirror.app\music-Playing.gif
+301 bytes       ApowerMirror.app\music-arrow-down.png
+515 bytes       ApowerMirror.app\music-arrow-down@2x.png
+890 bytes       ApowerMirror.app\music-arrow-down@3x.png
+630 bytes       ApowerMirror.app\music-next.png
+1324 bytes      ApowerMirror.app\music-next@2x.png
+2928 bytes      ApowerMirror.app\music-next@3x.png
+760 bytes       ApowerMirror.app\music-pause.png
+2648 bytes      ApowerMirror.app\music-pause@2x.png
+3639 bytes      ApowerMirror.app\music-pause@3x.png
+915 bytes       ApowerMirror.app\music-play.png
+2827 bytes      ApowerMirror.app\music-play@2x.png
+3953 bytes      ApowerMirror.app\music-play@3x.png
+[DIR]           ApowerMirror.app\nl.lproj\
+41910 bytes     ApowerMirror.app\nl.lproj\Localizable.strings
+[DIR]           ApowerMirror.app\nn-NO.lproj\
+49077 bytes     ApowerMirror.app\nn-NO.lproj\Localizable.strings
+[DIR]           ApowerMirror.app\pl.lproj\
+54764 bytes     ApowerMirror.app\pl.lproj\Localizable.strings
+[DIR]           ApowerMirror.app\pt-BR.lproj\
+48466 bytes     ApowerMirror.app\pt-BR.lproj\Localizable.strings
+[DIR]           ApowerMirror.app\sdk_oauth.bundle\
+4681 bytes      ApowerMirror.app\sdk_oauth.bundle\back@2x.png
+431 bytes       ApowerMirror.app\sdk_oauth.bundle\checkBox_selected@2x.png
+530 bytes       ApowerMirror.app\sdk_oauth.bundle\checkBox_unSelected@2x.png
+2836 bytes      ApowerMirror.app\sdk_oauth.bundle\checked@2x.png
+14968 bytes     ApowerMirror.app\sdk_oauth.bundle\ctc.png
+27554 bytes     ApowerMirror.app\sdk_oauth.bundle\cucc.png
+1995 bytes      ApowerMirror.app\sdk_oauth.bundle\default@2x.png
+514 bytes       ApowerMirror.app\sdk_oauth.bundle\imageClear.png
+2111 bytes      ApowerMirror.app\sdk_oauth.bundle\privacyWebBackBtnImage@2x.png
+[DIR]           ApowerMirror.app\sv-SE.lproj\
+49590 bytes     ApowerMirror.app\sv-SE.lproj\Localizable.strings
+[DIR]           ApowerMirror.app\tr-TR.lproj\
+54779 bytes     ApowerMirror.app\tr-TR.lproj\Localizable.strings
+[DIR]           ApowerMirror.app\zh-Hans.lproj\
+565 bytes       ApowerMirror.app\zh-Hans.lproj\InfoPlist.strings
+28005 bytes     ApowerMirror.app\zh-Hans.lproj\Localizable.strings
+[DIR]           ApowerMirror.app\zh-Hant.lproj\
+28887 bytes     ApowerMirror.app\zh-Hant.lproj\Localizable.strings
+9 bytes         decrypt.day
