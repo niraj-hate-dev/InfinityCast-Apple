@@ -4,17 +4,23 @@ import Network
 import Darwin
 
 /// ReplayKit 2 Screen Broadcast Extension (Transmitter Core)
-/// Captures iOS display surfaces, compresses via VideoToolbox hardware encoder (Zero B-Frames),
-/// monitors Mach kernel memory to prevent Jetsam 50MB OOM kills, and streams RFC 2326 Interleaved RTP
-/// packets over local loopback TCP socket tunneled via usbmuxd.
-class SampleHandler: RPBroadcastSampleHandler {
+/// Reconstructed 1:1 from ApowerMirror WXCastiOSSender Architecture.
+///
+/// Features:
+/// 1. Proper RPBroadcastSampleHandler XPC lifecycle (calls super.broadcastStarted to complete handshake with replayd).
+/// 2. Zero-dependency Darwin Notifications across process boundaries (MMWormhole equivalent).
+/// 3. Macroblock 16-pixel alignment ((x + 15) & ~15) and dynamic downscaling (<= 1920) to strictly prevent 50MB Jetsam kills.
+/// 4. Direct BSD socket server on INADDR_ANY (0.0.0.0:15333) for usbmuxd virtual TCP tunnel.
+/// 5. RFC 2326 Interleaved RTP framing ($ + channel 0 + 16-bit length) + H.264 NALUs with SPS/PPS parameter sets.
+@objc(SampleHandler)
+public class SampleHandler: RPBroadcastSampleHandler {
 
     // MARK: - Constants & Architecture Specifications
     private let appGroupName = "group.applecast.mirror"
     private let defaultPort: UInt16 = 15333
     private var streamingPort: UInt16 = 15333
     private var targetFps: Int32 = 60
-    private var targetBitrate: Int32 = 8_000_000 // 8 Mbps (Prevents 50MB Jetsam OOM)
+    private var targetBitrate: Int32 = 4_000_000 // 4 Mbps (safe for 50MB Jetsam)
     private let rtpMagicByte: UInt8 = 0x24       // '$'
     private let rtpChannelVideo: UInt8 = 0x00
     private let rtpPayloadType: UInt8 = 96       // Dynamic H.264
@@ -24,30 +30,42 @@ class SampleHandler: RPBroadcastSampleHandler {
     private var compressionSession: VTCompressionSession?
     private var frameIndex: Int64 = 0
     private var rtpSequenceNumber: UInt16 = 0
+    private var lastRawWidth: Int32 = 0
+    private var lastRawHeight: Int32 = 0
+    private var lastOrientation: CGImagePropertyOrientation = .up
 
     // MARK: - Memory Management & Backpressure State
     private var sharedDefaults: UserDefaults?
     private var isMemoryLocked = false
     private let encodeQueue = DispatchQueue(label: "com.applecast.encoder.queue", qos: .userInteractive)
 
-    // MARK: - Sockets & Concurrency (Network.framework NWListener + BSD fallback)
-    private var nwListener: NWListener?
-    private var nwConnection: NWConnection?
+    // MARK: - Sockets & Concurrency (BSD Server on 0.0.0.0)
     private var serverSocket: Int32 = -1
     private var clientSocket: Int32 = -1
     private let socketLock = NSLock()
     private let networkQueue = DispatchQueue(label: "com.applecast.networkQueue", qos: .userInteractive)
     private var isBroadcasting = false
 
-    // MARK: - Broadcast Lifecycle
+    // MARK: - Lifecycle
+    override init() {
+        super.init()
+    }
+
     override func broadcastStarted(withSetupInfo setupInfo: [String : NSObject]?) {
+        // CRITICAL: MUST call super to finish the internal ReplayKit XPC handshake with replayd!
+        // Without this call, replayd times out and the recording circle stays GRAY!
+        super.broadcastStarted(withSetupInfo: setupInfo)
+
         NSLog("[AppleCastExtension] >>> broadcastStarted invoked by ReplayKit host!")
         isBroadcasting = true
         frameIndex = 0
         rtpSequenceNumber = 0
         isMemoryLocked = false
 
-        // Read configuration from shared App Group UserDefaults (fallback to standard for sideloading)
+        // Post Darwin notification immediately to notify Main App (like MMWormhole in ApowerMirror)
+        notifyMainApp(event: "BroadcastStarted")
+
+        // Read configuration safely from App Group UserDefaults (fallback to standard for sideloading)
         sharedDefaults = UserDefaults(suiteName: appGroupName) ?? UserDefaults.standard
         let targetPortInt = sharedDefaults?.integer(forKey: "wxiosserverport") ?? 0
         streamingPort = targetPortInt > 0 ? UInt16(targetPortInt) : defaultPort
@@ -59,34 +77,40 @@ class SampleHandler: RPBroadcastSampleHandler {
             targetBitrate = Int32(bitrate)
         }
 
-        // Record active lifecycle state for companion host app
+        // Record active lifecycle state
         sharedDefaults?.set("RUNNING", forKey: "extension_status")
         sharedDefaults?.set(Int(streamingPort), forKey: "extension_active_port")
         sharedDefaults?.set(Date().timeIntervalSince1970, forKey: "extension_start_time")
-        sharedDefaults?.set("INITIALIZING", forKey: "extension_socket_state")
+        sharedDefaults?.set("LISTENING", forKey: "extension_socket_state")
         sharedDefaults?.synchronize()
 
         NSLog("[AppleCastExtension] Target streaming port: %d (FPS: %d, Bitrate: %d bps)", streamingPort, targetFps, targetBitrate)
 
-        // Bind BSD TCP server to receive usbmuxd tunnel
+        // Bind BSD TCP server on 0.0.0.0 to receive usbmuxd tunnel
         startLocalTcpServer(port: streamingPort)
     }
 
     override func broadcastPaused() {
+        super.broadcastPaused()
+        notifyMainApp(event: "PauseVideo")
         NSLog("[AppleCastExtension] broadcastPaused invoked")
     }
 
     override func broadcastResumed() {
+        super.broadcastResumed()
+        notifyMainApp(event: "ResumeVideo")
         NSLog("[AppleCastExtension] broadcastResumed invoked")
     }
 
     override func broadcastFinished() {
+        super.broadcastFinished()
         NSLog("[AppleCastExtension] >>> broadcastFinished invoked - shutting down")
         isBroadcasting = false
         sharedDefaults?.set("STOPPED", forKey: "extension_status")
         sharedDefaults?.set("STOPPED", forKey: "extension_socket_state")
         sharedDefaults?.synchronize()
         teardownSession()
+        notifyMainApp(event: "Finish")
     }
 
     // MARK: - Frame Processing Pipeline
@@ -103,6 +127,11 @@ class SampleHandler: RPBroadcastSampleHandler {
                 return // Drop frame under memory pressure
             }
 
+            var frameOrientation: CGImagePropertyOrientation = .up
+            if let orientationAttachment = CMGetAttachment(sampleBuffer, key: RPVideoSampleOrientationKey as CFString, attachmentModeOut: nil) as? NSNumber {
+                frameOrientation = CGImagePropertyOrientation(rawValue: orientationAttachment.uint32Value) ?? .up
+            }
+
             // Encode on dedicated queue with explicit autoreleasepool to drain CoreVideo buffers
             encodeQueue.async { [weak self] in
                 autoreleasepool {
@@ -112,18 +141,11 @@ class SampleHandler: RPBroadcastSampleHandler {
                     }
                     guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
                     let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
-                    self.handleVideoPixelBuffer(pixelBuffer, pts: pts)
+                    self.handleVideoPixelBuffer(pixelBuffer, pts: pts, orientation: frameOrientation)
                 }
             }
 
-        case .audioApp:
-            let voiceMuted = sharedDefaults?.bool(forKey: "kGroupMirrorVoiceSwitch") ?? false
-            if !voiceMuted {
-                // Reserved for audio channel
-            }
-            break
-
-        case .audioMic:
+        case .audioApp, .audioMic:
             break
 
         @unknown default:
@@ -140,12 +162,12 @@ class SampleHandler: RPBroadcastSampleHandler {
                 task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), intPtr, &count)
             }
         }
-        guard kr == KERN_SUCCESS else { return -1 }
-        return Int64(vmInfo.phys_footprint >> 20) // Bytes to Megabytes
+        guard kr == KERN_SUCCESS else { return 0 }
+        return Int64(vmInfo.phys_footprint / (1024 * 1024))
     }
 
     private func scheduleMemoryRecoveryCheck() {
-        DispatchQueue.global().asyncAfter(deadline: .now() + 1.5) { [weak self] in
+        DispatchQueue.global(qos: .background).asyncAfter(deadline: .now() + 0.1) { [weak self] in
             guard let self = self else { return }
             if self.getPhysicalFootprintMB() <= 39 {
                 self.isMemoryLocked = false
@@ -156,9 +178,15 @@ class SampleHandler: RPBroadcastSampleHandler {
     }
 
     // MARK: - VideoToolbox Hardware Compression (Zero-Latency Setup)
-    private func handleVideoPixelBuffer(_ pixelBuffer: CVPixelBuffer, pts: CMTime) {
-        if compressionSession == nil {
-            setupCompressionSession(for: pixelBuffer)
+    private func handleVideoPixelBuffer(_ pixelBuffer: CVPixelBuffer, pts: CMTime, orientation: CGImagePropertyOrientation) {
+        let rawWidth = Int32(CVPixelBufferGetWidth(pixelBuffer))
+        let rawHeight = Int32(CVPixelBufferGetHeight(pixelBuffer))
+
+        if compressionSession == nil || rawWidth != lastRawWidth || rawHeight != lastRawHeight || orientation != lastOrientation {
+            lastRawWidth = rawWidth
+            lastRawHeight = rawHeight
+            lastOrientation = orientation
+            setupCompressionSession(sourceWidth: rawWidth, sourceHeight: rawHeight, orientation: orientation)
         }
 
         guard let session = compressionSession else { return }
@@ -180,40 +208,39 @@ class SampleHandler: RPBroadcastSampleHandler {
         )
     }
 
-    private func setupCompressionSession(for pixelBuffer: CVPixelBuffer) {
-        let rawWidth = Int32(CVPixelBufferGetWidth(pixelBuffer))
-        let rawHeight = Int32(CVPixelBufferGetHeight(pixelBuffer))
+    private func setupCompressionSession(sourceWidth: Int32, sourceHeight: Int32, orientation: CGImagePropertyOrientation) {
+        if let session = compressionSession {
+            VTCompressionSessionInvalidate(session)
+            compressionSession = nil
+        }
 
-        // OpenTok / ReplayKit Jetsam 50MB Safeguard:
-        // Modern iPhones capture at native 3x Retina (e.g. 2556x1179 or 2796x1290).
-        // Encoding at full Retina allocates >40MB of hardware reference frames,
-        // instantly exceeding the 50MB Jetsam kernel limit. Clamping maximum dimension
-        // to 1600 allows VideoToolbox to hardware downscale with zero latency and keeps
-        // memory usage strictly around 20-25MB.
-        let maxDimension: Int32 = 1600
-        var width = rawWidth
-        var height = rawHeight
+        // ApowerMirror Jetsam 50MB Safeguard:
+        // Downscale Retina resolution to prevent Jetsam 50MB crash (clamp max dimension to 1920)
+        var targetW = sourceWidth
+        var targetH = sourceHeight
+        let maxDim: Int32 = 1920
 
-        if max(rawWidth, rawHeight) > maxDimension {
-            if rawWidth > rawHeight {
-                width = maxDimension
-                height = Int32(Double(rawHeight) * Double(maxDimension) / Double(rawWidth))
+        if targetW > maxDim || targetH > maxDim {
+            if targetW > targetH {
+                targetH = Int32((Float(targetH) / Float(targetW)) * Float(maxDim))
+                targetW = maxDim
             } else {
-                height = maxDimension
-                width = Int32(Double(rawWidth) * Double(maxDimension) / Double(rawHeight))
+                targetW = Int32((Float(targetW) / Float(targetH)) * Float(maxDim))
+                targetH = maxDim
             }
         }
-        // H.264 macroblock alignment (must be divisible by 2)
-        width = (width / 2) * 2
-        height = (height / 2) * 2
 
-        NSLog("[AppleCastExtension] Initializing VideoToolbox session: input=%dx%d -> encoded=%dx%d (targetFps: %d, bitrate: %d bps)",
-              rawWidth, rawHeight, width, height, targetFps, targetBitrate)
+        // Macroblock 16-pixel alignment from decompiled ApowerMirror: (x + 15) & ~15
+        let alignedWidth = (targetW + 15) & ~15
+        let alignedHeight = (targetH + 15) & ~15
+
+        NSLog("[AppleCastExtension] Initializing VideoToolbox: input=%dx%d -> aligned=%dx%d (targetFps: %d, bitrate: %d bps)",
+              sourceWidth, sourceHeight, alignedWidth, alignedHeight, targetFps, targetBitrate)
 
         let status = VTCompressionSessionCreate(
             allocator: kCFAllocatorDefault,
-            width: width,
-            height: height,
+            width: alignedWidth,
+            height: alignedHeight,
             codecType: kCMVideoCodecType_H264,
             encoderSpecification: nil,
             imageBufferAttributes: nil,
@@ -224,6 +251,7 @@ class SampleHandler: RPBroadcastSampleHandler {
         )
 
         guard status == noErr, let session = compressionSession else {
+            NSLog("[AppleCastExtension] Failed to create VTCompressionSession: %d", status)
             return
         }
 
@@ -235,11 +263,12 @@ class SampleHandler: RPBroadcastSampleHandler {
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AllowTemporalCompression, value: kCFBooleanTrue)
 
         // 2. Profile Level selection (Main for >=1080p, Baseline for <1080p)
-        let profile = width >= 1920 ? kVTProfileLevel_H264_Main_AutoLevel : kVTProfileLevel_H264_Baseline_AutoLevel
+        let profile = alignedWidth >= 1920 ? kVTProfileLevel_H264_Main_AutoLevel : kVTProfileLevel_H264_Baseline_AutoLevel
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ProfileLevel, value: profile)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_H264EntropyMode, value: kVTH264EntropyMode_CABAC)
 
-        // 3. Bitrate & Burst Limits (DataRateLimits clamps memory buffers during complex scenes)
+        // 3. Bitrate, Burst Limits & Quality factor (0.80 for 1080p matching ApowerMirror)
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_Quality, value: 0.80 as CFNumber)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AverageBitRate, value: targetBitrate as CFNumber)
         let byteLimit = (targetBitrate * 2) / 8 // 2x average bitrate cap per second
         let limits: [CFNumber] = [byteLimit as CFNumber, 1 as CFNumber]
@@ -261,7 +290,7 @@ class SampleHandler: RPBroadcastSampleHandler {
         networkQueue.async { [weak self] in
             guard let self = self, self.isBroadcasting else { return }
 
-            NSLog("[AppleCastExtension] Initializing BSD streaming server on port %d...", port)
+            NSLog("[AppleCastExtension] Initializing BSD streaming server on 0.0.0.0:%d...", port)
 
             let sock = socket(AF_INET, SOCK_STREAM, 0)
             guard sock >= 0 else {
@@ -278,7 +307,7 @@ class SampleHandler: RPBroadcastSampleHandler {
             serverAddr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
             serverAddr.sin_family = sa_family_t(AF_INET)
             serverAddr.sin_port = port.bigEndian
-            serverAddr.sin_addr.s_addr = in_addr_t(0) // Bind to INADDR_ANY to accept usbmuxd 127.0.0.1 loopback
+            serverAddr.sin_addr.s_addr = in_addr_t(0) // Bind to INADDR_ANY (0.0.0.0) to accept usbmuxd 127.0.0.1 tunnel
 
             let bindRes = withUnsafePointer(to: &serverAddr) { ptr in
                 ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { saPtr in
@@ -293,7 +322,7 @@ class SampleHandler: RPBroadcastSampleHandler {
             }
 
             self.serverSocket = sock
-            NSLog("[AppleCastExtension] >>> SUCCESS: BSD streaming server listening on port %d! <<<", port)
+            NSLog("[AppleCastExtension] >>> SUCCESS: BSD streaming server listening on 0.0.0.0:%d! <<<", port)
             self.sharedDefaults?.set("LISTENING", forKey: "extension_socket_state")
             self.sharedDefaults?.synchronize()
 
@@ -323,63 +352,53 @@ class SampleHandler: RPBroadcastSampleHandler {
     // MARK: - RFC 2326 Interleaved RTP Packet Packaging
     fileprivate func sendEncodedSampleBuffer(_ sampleBuffer: CMSampleBuffer) {
         socketLock.lock()
-        let hasClient = (clientSocket >= 0 || nwConnection != nil)
+        let hasActiveClient = (clientSocket >= 0)
         socketLock.unlock()
-        guard hasClient else { return }
 
-        guard let formatDesc = CMSampleBufferGetFormatDescription(sampleBuffer),
-              let blockBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else {
-            return
+        guard hasActiveClient else { return }
+
+        guard let formatDesc = CMSampleBufferGetFormatDescription(sampleBuffer) else { return }
+        let pts = UInt32((CMSampleBufferGetPresentationTimeStamp(sampleBuffer).seconds * 90000.0).truncatingRemainder(dividingBy: Double(UInt32.max)))
+
+        // 1. Send SPS & PPS parameter sets on IDR keyframe or first frame
+        let isKeyFrame = !CFDictionaryContainsKey(
+            unsafeBitCast(CFArrayGetValueAtIndex(CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: true), 0), to: CFDictionary.self),
+            unsafeBitCast(kCMSampleAttachmentKey_NotSync, to: UnsafeRawPointer.self)
+        )
+
+        if isKeyFrame || frameIndex == 1 {
+            sendParameterSets(formatDesc: formatDesc, pts: pts)
         }
 
-        // Check if sample buffer contains an IDR Keyframe
-        let isKeyframe: Bool
-        if let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false) as? [[CFString: Any]],
-           let firstAttachment = attachments.first {
-            isKeyframe = !(firstAttachment[kCMSampleAttachmentKey_NotSync] as? Bool ?? false)
-        } else {
-            isKeyframe = false
-        }
+        // 2. Extract and send NAL units
+        guard let dataBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else { return }
+        var totalLength: Int = 0
+        var dataPointer: UnsafeMutablePointer<CChar>?
+        let status = CMBlockBufferGetDataPointer(dataBuffer, atOffset: 0, lengthAtOffsetOut: nil, totalLengthOut: &totalLength, dataPointerOut: &dataPointer)
+        guard status == noErr, let rawData = dataPointer else { return }
 
-        let ptsSeconds = CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(sampleBuffer))
-        let pts90kHz = UInt32(ptsSeconds * 90000.0)
+        var bufferOffset = 0
+        let avccHeaderLength = 4
 
-        // If IDR keyframe, extract and send SPS and PPS parameter sets first
-        if isKeyframe {
-            sendParameterSets(formatDesc: formatDesc, pts: pts90kHz)
-        }
+        while bufferOffset < totalLength - avccHeaderLength {
+            var naluLength: UInt32 = 0
+            memcpy(&naluLength, rawData + bufferOffset, avccHeaderLength)
+            naluLength = CFSwapInt32BigToHost(naluLength)
+            bufferOffset += avccHeaderLength
 
-        // Extract elementary slice NALUs from AVCC block buffer
-        var bufferOffset: size_t = 0
-        var totalLength: size_t = 0
-        var dataPointer: UnsafeMutablePointer<Int8>?
+            guard naluLength > 0, bufferOffset + Int(naluLength) <= totalLength else { break }
 
-        CMBlockBufferGetDataPointer(blockBuffer, atOffset: 0, lengthAtOffsetOut: nil, totalLengthOut: &totalLength, dataPointerOut: &dataPointer)
-
-        guard let rawBytes = dataPointer else { return }
-
-        while bufferOffset < totalLength - 4 {
-            // Read 4-byte Big-Endian NAL length
-            var naluLengthBE: UInt32 = 0
-            memcpy(&naluLengthBE, rawBytes.advanced(by: bufferOffset), 4)
-            let naluLength = Int(UInt32(bigEndian: naluLengthBE))
-            bufferOffset += 4
-
-            if bufferOffset + naluLength > totalLength {
-                break
-            }
-
-            let naluBytes = rawBytes.advanced(by: bufferOffset)
-            let isLastSlice = (bufferOffset + naluLength >= totalLength)
+            let naluPointer = rawData + bufferOffset
+            let isLastNalu = (bufferOffset + Int(naluLength) >= totalLength)
 
             sendRtpInterleavedPacket(
-                naluPointer: UnsafeRawPointer(naluBytes),
-                naluLength: naluLength,
-                pts: pts90kHz,
-                isMarker: isLastSlice
+                naluPointer: UnsafeRawPointer(naluPointer),
+                naluLength: Int(naluLength),
+                pts: pts,
+                isMarker: isLastNalu
             )
 
-            bufferOffset += naluLength
+            bufferOffset += Int(naluLength)
         }
     }
 
@@ -440,15 +459,12 @@ class SampleHandler: RPBroadcastSampleHandler {
         // Elementary NAL Unit Body
         packetData.append(naluPointer.assumingMemoryBound(to: UInt8.self), count: naluLength)
 
-        // Send over NWConnection or BSD socket
+        // Send over BSD socket
         socketLock.lock()
-        let activeNw = nwConnection
         let activeBsd = clientSocket
         socketLock.unlock()
 
-        if let nw = activeNw {
-            nw.send(content: packetData, completion: .idempotent)
-        } else if activeBsd >= 0 {
+        if activeBsd >= 0 {
             packetData.withUnsafeBytes { rawBuffer in
                 guard let baseAddress = rawBuffer.baseAddress else { return }
                 var sentBytes = 0
@@ -475,10 +491,6 @@ class SampleHandler: RPBroadcastSampleHandler {
         }
 
         socketLock.lock()
-        nwConnection?.cancel()
-        nwConnection = nil
-        nwListener?.cancel()
-        nwListener = nil
         if clientSocket >= 0 {
             shutdown(clientSocket, SHUT_RDWR)
             close(clientSocket)
@@ -490,6 +502,18 @@ class SampleHandler: RPBroadcastSampleHandler {
             serverSocket = -1
         }
         socketLock.unlock()
+    }
+
+    // MARK: - Darwin Notification Helper (MMWormhole Equivalent)
+    private func notifyMainApp(event: String) {
+        let notificationName = "com.applecast.broadcast.\(event)" as CFString
+        CFNotificationCenterPostNotification(
+            CFNotificationCenterGetDarwinNotifyCenter(),
+            CFNotificationName(notificationName),
+            nil,
+            nil,
+            true
+        )
     }
 }
 
@@ -508,8 +532,3 @@ private func compressionCallback(
     let handler = Unmanaged<SampleHandler>.fromOpaque(refCon).takeUnretainedValue()
     handler.sendEncodedSampleBuffer(sampleBuffer)
 }
-
-/// Objective-C runtime alias ensuring that both "AppleCastExtension.SampleHandler"
-/// and "@objc(SampleHandler)" resolve in NSClassFromString / ReplayKit plugin loader.
-@objc(SampleHandler)
-class DirectSampleHandler: SampleHandler {}

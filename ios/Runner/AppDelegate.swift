@@ -17,6 +17,7 @@ import Darwin
   private var isLaptopConnected = false
   private var laptopClientName = ""
   private var laptopLastSeen: Double = 0
+  private var isScreenBroadcastActive = false
 
   override func application(
     _ application: UIApplication,
@@ -39,11 +40,15 @@ import Darwin
     // Start background control & laptop detector listener on port 15332
     startControlServer(port: controlPort)
 
+    // Listen for Darwin IPC notifications from AppleCastExtension (like MMWormhole in ApowerMirror)
+    setupDarwinNotificationObservers()
+
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }
 
   @objc private func screenCaptureChanged() {
     let isCaptured = UIScreen.main.isCaptured
+    self.isScreenBroadcastActive = isCaptured
     NSLog("[AppleCast Host] UIScreen.capturedDidChangeNotification: isCaptured = %@", String(isCaptured))
     DispatchQueue.main.async { [weak self] in
       self?.flutterChannel?.invokeMethod("onScreenCaptureChanged", arguments: ["isCaptured": isCaptured])
@@ -72,7 +77,7 @@ import Darwin
         self.presentBroadcastPicker()
         result(true)
       } else if call.method == "getDetectorStatus" || call.method == "getExtensionStatus" {
-        let isCaptured = UIScreen.main.isCaptured
+        let isCaptured = UIScreen.main.isCaptured || self.isScreenBroadcastActive
         let isCharging = (UIDevice.current.batteryState == .charging || UIDevice.current.batteryState == .full)
         let now = Date().timeIntervalSince1970
         let isRecentlySeen = (self.isLaptopConnected && (now - self.laptopLastSeen < 8.0))
@@ -309,6 +314,37 @@ import Darwin
           break
         }
       }
+    }
+  }
+
+  // MARK: - Darwin Notifications (Cross-process IPC without App Groups)
+  private func setupDarwinNotificationObservers() {
+    let darwinCenter = CFNotificationCenterGetDarwinNotifyCenter()
+    let observer = UnsafeMutableRawPointer(Unmanaged.passUnretained(self).toOpaque())
+    let events = ["BroadcastStarted", "Finish", "PauseVideo", "ResumeVideo"]
+    for event in events {
+      let notificationName = CFNotificationName("com.applecast.broadcast.\(event)" as CFString)
+      CFNotificationCenterAddObserver(
+        darwinCenter,
+        observer,
+        { (_, observer, name, _, _) in
+          guard let observer = observer, let name = name else { return }
+          let appDelegate = Unmanaged<AppDelegate>.fromOpaque(observer).takeUnretainedValue()
+          let rawName = name.rawValue as String
+          let isStarted = rawName.contains("BroadcastStarted") || rawName.contains("ResumeVideo")
+          NSLog("[AppleCast Host] Darwin notification received: %@ -> isRecording: %@", rawName, String(isStarted))
+          appDelegate.isScreenBroadcastActive = isStarted
+          DispatchQueue.main.async {
+            appDelegate.flutterChannel?.invokeMethod("onScreenCaptureChanged", arguments: [
+              "isCaptured": isStarted,
+              "source": "darwin"
+            ])
+          }
+        },
+        notificationName.rawValue,
+        nil,
+        .deliverImmediately
+      )
     }
   }
 }

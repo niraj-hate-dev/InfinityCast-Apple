@@ -133,7 +133,10 @@ class MirrorController extends ChangeNotifier {
     });
   }
 
-  void _handleDeviceListUpdate(List<IosDeviceInfo> devices) {
+  void _handleDeviceListUpdate(List<IosDeviceInfo> rawDevices) {
+    // Strictly filter to physical USB connections (ignore Wi-Fi/Network sync devices)
+    final devices = rawDevices.where((d) => d.connectionType.toUpperCase() == 'USB').toList();
+
     // 1. If device list is completely empty, clear active device and set status to scanning
     if (devices.isEmpty) {
       final activeDevice = _state.selectedDevice;
@@ -146,7 +149,7 @@ class MirrorController extends ChangeNotifier {
 
       _state = _state.copyWith(
         devices: const [],
-        selectedDevice: null,
+        clearSelectedDevice: true,
         status: MirrorConnectionStatus.scanning,
         clearTextureId: true,
         metrics: StreamMetrics.empty,
@@ -401,6 +404,7 @@ class MirrorController extends ChangeNotifier {
               ? MirrorConnectionStatus.connected
               : MirrorConnectionStatus.scanning,
           selectedDevice: hasDevices ? _state.selectedDevice : null,
+          clearSelectedDevice: !hasDevices,
           clearError: true,
         );
         notifyListeners();

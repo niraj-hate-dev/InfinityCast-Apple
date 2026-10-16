@@ -174,6 +174,11 @@ void ScreenMirrorPlugin::EmitDeviceList() {
   flutter::EncodableList list;
 
   for (const auto& d : devices) {
+    // Strictly filter out non-USB devices (e.g. Wi-Fi / Network devices reported by iTunes sync)
+    if (d.connection_type != "USB") {
+      continue;
+    }
+
     flutter::EncodableMap map;
     map[flutter::EncodableValue("deviceId")] = flutter::EncodableValue(static_cast<int64_t>(d.device_id));
     map[flutter::EncodableValue("serialNumber")] = flutter::EncodableValue(d.serial_number);
@@ -260,6 +265,9 @@ void ScreenMirrorPlugin::HandleMethodCall(
     texture_bridge_->Unregister();
     result->Success(flutter::EncodableValue(true));
   } else if (method_name == "startDeviceDiscovery") {
+    if (usbmuxd_client_) {
+      usbmuxd_client_->StopDiscovery();
+    }
     const bool started = usbmuxd_client_->StartDiscovery(
         [this](const UsbmuxDevice& /*dev*/) {
           this->EmitDeviceList();

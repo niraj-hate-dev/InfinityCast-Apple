@@ -24,7 +24,11 @@ std::string ExtractTagValue(const std::string& xml, const std::string& key_name,
   size_t close_pos = xml.find(close_tag, open_pos);
   if (close_pos == std::string::npos) return "";
 
-  return xml.substr(open_pos, close_pos - open_pos);
+  std::string val = xml.substr(open_pos, close_pos - open_pos);
+  size_t first = val.find_first_not_of(" \t\r\n");
+  if (first == std::string::npos) return "";
+  size_t last = val.find_last_not_of(" \t\r\n");
+  return val.substr(first, (last - first + 1));
 }
 
 }  // namespace
@@ -275,14 +279,16 @@ void UsbmuxdClient::DiscoveryWorker() {
       }
     } else if (msg_type == "Detached") {
       const uint32_t dev_id = ParseDetachedDeviceId(packet_xml);
-      if (dev_id != 0) {
-        {
-          std::lock_guard<std::mutex> lock(devices_mutex_);
+      {
+        std::lock_guard<std::mutex> lock(devices_mutex_);
+        if (dev_id != 0) {
           attached_devices_.erase(dev_id);
+        } else if (attached_devices_.size() == 1) {
+          attached_devices_.clear();
         }
-        if (on_detached_) {
-          on_detached_(dev_id);
-        }
+      }
+      if (on_detached_) {
+        on_detached_(dev_id);
       }
     }
   }
@@ -292,19 +298,31 @@ void UsbmuxdClient::ParseAttachedDevice(const std::string& xml, UsbmuxDevice* ou
   if (!out_device) return;
 
   const std::string id_str = ExtractTagValue(xml, "DeviceID", "integer");
-  out_device->device_id = id_str.empty() ? 0 : static_cast<uint32_t>(std::stoul(id_str));
+  try {
+    out_device->device_id = id_str.empty() ? 0 : static_cast<uint32_t>(std::stoul(id_str));
+  } catch (...) {
+    out_device->device_id = 0;
+  }
 
   out_device->serial_number = ExtractTagValue(xml, "SerialNumber", "string");
   out_device->connection_type = ExtractTagValue(xml, "ConnectionType", "string");
   if (out_device->connection_type.empty()) out_device->connection_type = "USB";
 
   const std::string speed_str = ExtractTagValue(xml, "ConnectionSpeed", "integer");
-  out_device->connection_speed = speed_str.empty() ? 480000000 : static_cast<uint32_t>(std::stoul(speed_str));
+  try {
+    out_device->connection_speed = speed_str.empty() ? 480000000 : static_cast<uint32_t>(std::stoul(speed_str));
+  } catch (...) {
+    out_device->connection_speed = 480000000;
+  }
 }
 
 uint32_t UsbmuxdClient::ParseDetachedDeviceId(const std::string& xml) {
   const std::string id_str = ExtractTagValue(xml, "DeviceID", "integer");
-  return id_str.empty() ? 0 : static_cast<uint32_t>(std::stoul(id_str));
+  try {
+    return id_str.empty() ? 0 : static_cast<uint32_t>(std::stoul(id_str));
+  } catch (...) {
+    return 0;
+  }
 }
 
 int UsbmuxdClient::ParseResultCode(const std::string& xml) {

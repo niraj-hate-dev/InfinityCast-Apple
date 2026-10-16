@@ -125,8 +125,8 @@ jobs:
             /usr/libexec/PlistBuddy -c "Set :CFBundleName AppleCastExtension" "$EXT_PLIST" || \
             /usr/libexec/PlistBuddy -c "Add :CFBundleName string AppleCastExtension" "$EXT_PLIST"
 
-            /usr/libexec/PlistBuddy -c "Set :NSExtension:NSExtensionPrincipalClass AppleCastExtension.SampleHandler" "$EXT_PLIST" || \
-            /usr/libexec/PlistBuddy -c "Add :NSExtension:NSExtensionPrincipalClass string AppleCastExtension.SampleHandler" "$EXT_PLIST"
+            /usr/libexec/PlistBuddy -c "Set :NSExtension:NSExtensionPrincipalClass SampleHandler" "$EXT_PLIST" || \
+            /usr/libexec/PlistBuddy -c "Add :NSExtension:NSExtensionPrincipalClass string SampleHandler" "$EXT_PLIST"
 
             echo "=== Verified AppleCastExtension.appex Info.plist ==="
             /usr/libexec/PlistBuddy -c "Print" "$EXT_PLIST"
