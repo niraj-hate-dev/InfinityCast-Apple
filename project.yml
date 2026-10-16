@@ -1,0 +1,51 @@
+name: ApowerMirror
+options:
+  bundleIdPrefix: com.apowersoft
+  deploymentTarget:
+    iOS: "15.0"
+  xcodeVersion: "15.0"
+  createIntermediateGroups: true
+
+targets:
+  ApowerMirror:
+    type: application
+    platform: iOS
+    deploymentTarget: "15.0"
+    sources:
+      - path: ApowerMirror
+        excludes:
+          - "Info.plist"
+    settings:
+      base:
+        PRODUCT_NAME: ApowerMirror
+        PRODUCT_BUNDLE_IDENTIFIER: com.apowersoft.ApowerMirror
+        INFOPLIST_FILE: ApowerMirror/Info.plist
+        SWIFT_VERSION: "5.0"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        CODE_SIGNING_ALLOWED: NO
+        CODE_SIGNING_REQUIRED: NO
+        CODE_SIGN_IDENTITY: ""
+        AD_HOC_CODE_SIGNING_ALLOWED: YES
+    dependencies:
+      - target: ApowerMirrorUpload
+        embed: true
+
+  ApowerMirrorUpload:
+    type: app-extension
+    platform: iOS
+    deploymentTarget: "15.0"
+    sources:
+      - path: ApowerMirrorUpload
+        excludes:
+          - "Info.plist"
+    settings:
+      base:
+        PRODUCT_NAME: ApowerMirrorUpload
+        PRODUCT_BUNDLE_IDENTIFIER: com.apowersoft.ApowerMirror.ApowerMirrorUpload
+        INFOPLIST_FILE: ApowerMirrorUpload/Info.plist
+        SWIFT_VERSION: "5.0"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        CODE_SIGNING_ALLOWED: NO
+        CODE_SIGNING_REQUIRED: NO
+        CODE_SIGN_IDENTITY: ""
+        AD_HOC_CODE_SIGNING_ALLOWED: YES

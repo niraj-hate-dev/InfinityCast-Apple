@@ -1,0 +1,64 @@
+name: Build ApowerMirror Native IPA
+
+on:
+  push:
+    branches: [ niraj, main ]
+  pull_request:
+    branches: [ niraj, main ]
+  workflow_dispatch:
+
+jobs:
+  build-ipa:
+    name: Build Native iOS IPA (Unsigned)
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout Codebase
+        uses: actions/checkout@v4
+
+      - name: Setup Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: 'latest-stable'
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode Project
+        run: xcodegen generate
+
+      - name: Build Native App & Extension
+        run: |
+          xcodebuild clean build \
+            -project ApowerMirror.xcodeproj \
+            -scheme ApowerMirror \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build/derivedData \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            AD_HOC_CODE_SIGNING_ALLOWED=YES
+
+      - name: Package Unsigned IPA
+        run: |
+          mkdir -p build/Payload
+          cp -r build/derivedData/Build/Products/Release-iphoneos/ApowerMirror.app build/Payload/
+
+          echo "=== Verifying Embedded Extension ==="
+          ls -la build/Payload/ApowerMirror.app/PlugIns || echo "No PlugIns directory created"
+
+          echo "=== Verifying App Bundle ID ==="
+          /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" build/Payload/ApowerMirror.app/Info.plist
+
+          cd build
+          zip -r ApowerMirror-v1.6.0-Native-Unsigned.ipa Payload
+          echo "=== IPA Generated Successfully ==="
+          ls -lh ApowerMirror-v1.6.0-Native-Unsigned.ipa
+
+      - name: Upload IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ApowerMirror-v1.6.0-Native-Unsigned
+          path: build/ApowerMirror-v1.6.0-Native-Unsigned.ipa
+          retention-days: 14
