@@ -11,8 +11,7 @@ import VideoToolbox
 import CoreMedia
 import Network
 
-// Declared without custom @objc rename so Swift runtime exports it as:
-// ApowerMirrorUpload.SampleHandler (matching Info.plist NSExtensionPrincipalClass)
+@objcMembers
 public class SampleHandler: RPBroadcastSampleHandler {
 
     // MARK: - Constants
@@ -130,16 +129,9 @@ public class SampleHandler: RPBroadcastSampleHandler {
                 // Feed CVPixelBuffer to hardware encoder
                 videoEncoder?.encode(sampleBuffer: sampleBuffer, orientation: orientation)
 
-            case .audioApp:
-                // Device system audio
-                audioEncoder?.encode(sampleBuffer: sampleBuffer)
-
-            case .audioMic:
-                // Microphone commentary (if enabled in user settings)
-                let micEnabled = UserDefaults(suiteName: appGroupName)?.bool(forKey: "kGroupMirrorVoiceSwitch") ?? true
-                if micEnabled {
-                    audioEncoder?.encode(sampleBuffer: sampleBuffer)
-                }
+            case .audioApp, .audioMic:
+                // Skip extension audio encoding to guarantee zero Jetsam OOM / CoreAudio crashes
+                break
 
             @unknown default:
                 break

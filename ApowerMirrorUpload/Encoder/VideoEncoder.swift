@@ -160,8 +160,8 @@ public final class VideoEncoder {
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxFrameDelayCount, value: 1 as CFNumber)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_H264EntropyMode, value: kVTH264EntropyMode_CABAC)
 
-        // Profile Level: Main for >1080p, Baseline for <=1080p (ASM @ 0x12e0c - 0x12e30)
-        let profile = (currentWidth > 1919) ? kVTProfileLevel_H264_Main_AutoLevel : kVTProfileLevel_H264_Baseline_AutoLevel
+        // Profile Level: High AutoLevel (universally supported by Apple VideoToolbox hardware with CABAC)
+        let profile = kVTProfileLevel_H264_High_AutoLevel
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ProfileLevel, value: profile)
 
         // Dynamic Quality factor (ASM @ 0x12e8c - 0x12ec0)
