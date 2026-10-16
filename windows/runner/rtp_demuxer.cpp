@@ -90,13 +90,13 @@ void RtpDemuxer::ConsumeData(const uint8_t* buffer, size_t length) {
 
       DemuxedVideoPacket packet;
       packet.data.assign(accumulator_.data() + nalu_start, accumulator_.data() + next_idx);
-      packet.timestamp = 0;
+      packet.pts = 0;
       uint8_t nal_type = packet.data[4] & 0x1F;
       packet.is_keyframe = (nal_type == kNalTypeIdr || nal_type == kNalTypeSps);
 
       total_packets_++;
-      if (packet_callback_) {
-        packet_callback_(packet);
+      if (on_video_packet_) {
+        on_video_packet_(packet);
       }
 
       read_idx = next_idx;
@@ -126,13 +126,13 @@ void RtpDemuxer::ConsumeData(const uint8_t* buffer, size_t length) {
 
       DemuxedVideoPacket packet;
       packet.data.assign(accumulator_.data() + nalu_start, accumulator_.data() + next_idx);
-      packet.timestamp = 0;
+      packet.pts = 0;
       uint8_t nal_type = packet.data[4] & 0x1F;
       packet.is_keyframe = (nal_type == kNalTypeIdr || nal_type == kNalTypeSps);
 
       total_packets_++;
-      if (packet_callback_) {
-        packet_callback_(packet);
+      if (on_video_packet_) {
+        on_video_packet_(packet);
       }
 
       read_idx = next_idx;
@@ -143,12 +143,12 @@ void RtpDemuxer::ConsumeData(const uint8_t* buffer, size_t length) {
     if (accumulator_[read_idx] == kRtpInterleavedMagic) {
       if (accumulator_.size() - read_idx < 4) break;
       uint8_t channel = accumulator_[read_idx + 1];
-      uint16_t length = (static_cast<uint16_t>(accumulator_[read_idx + 2]) << 8) |
-                        static_cast<uint16_t>(accumulator_[read_idx + 3]);
-      if (accumulator_.size() - read_idx < 4 + length) break;
+      uint16_t interleaved_len = (static_cast<uint16_t>(accumulator_[read_idx + 2]) << 8) |
+                                 static_cast<uint16_t>(accumulator_[read_idx + 3]);
+      if (accumulator_.size() - read_idx < 4 + interleaved_len) break;
 
-      ProcessInterleavedPayload(channel, accumulator_.data() + read_idx + 4, length);
-      read_idx += 4 + length;
+      ProcessInterleavedPayload(channel, accumulator_.data() + read_idx + 4, interleaved_len);
+      read_idx += 4 + interleaved_len;
       continue;
     }
 
