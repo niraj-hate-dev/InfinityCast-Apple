@@ -12,8 +12,8 @@ class AppleCastConstants {
   // Usbmuxd & Network Protocol Defaults
   static const int usbmuxdPort = 27015;
   static const String usbmuxdLoopbackIp = '127.0.0.1';
-  static const int defaultDeviceStreamingPort = 15333;
-  static const int defaultDeviceControlPort = 15332;
+  static const int defaultDeviceStreamingPort = 25334; // Matches ApowerMirror / Extension
+  static const int defaultDeviceControlPort = 25333;   // Matches ApowerMirror / Main App
   static const int appleLockdownPort = 62078;
 
   // Interleaved RTP Stream Framing Constants (RFC 2326 / Section 3 of blueprint)

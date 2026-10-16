@@ -17,8 +17,8 @@ public class SampleHandler: RPBroadcastSampleHandler {
 
     // MARK: - Constants & Architecture Specifications
     private let appGroupName = "group.applecast.mirror"
-    private let defaultPort: UInt16 = 15333
-    private var streamingPort: UInt16 = 15333
+    private let defaultPort: UInt16 = 25334
+    private var streamingPort: UInt16 = 25334
     private var targetFps: Int32 = 60
     private var targetBitrate: Int32 = 4_000_000 // 4 Mbps (safe for 50MB Jetsam)
     private let rtpMagicByte: UInt8 = 0x24       // '$'

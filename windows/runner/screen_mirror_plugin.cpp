@@ -281,7 +281,7 @@ void ScreenMirrorPlugin::HandleMethodCall(
   } else if (method_name == "connectDevice") {
     const auto* args = std::get_if<flutter::EncodableMap>(method_call.arguments());
     uint32_t device_id = 0;
-    uint16_t target_port = 15333;
+    uint16_t target_port = 25334;
 
     if (args) {
       auto dev_it = args->find(flutter::EncodableValue("deviceId"));
@@ -305,7 +305,11 @@ void ScreenMirrorPlugin::HandleMethodCall(
 
     SOCKET tunnel_sock = INVALID_SOCKET;
     std::string err_msg;
-    const bool success = usbmuxd_client_->ConnectTunnel(device_id, target_port, &tunnel_sock, &err_msg);
+    bool success = usbmuxd_client_->ConnectTunnel(device_id, target_port, &tunnel_sock, &err_msg);
+    if (!success && target_port == 25334) {
+      // Auto-fallback to port 15333
+      success = usbmuxd_client_->ConnectTunnel(device_id, 15333, &tunnel_sock, &err_msg);
+    }
 
     if (success) {
       StartStreamingWorker(tunnel_sock);
@@ -339,7 +343,7 @@ void ScreenMirrorPlugin::HandleMethodCall(
   } else if (method_name == "probeDevice") {
     const auto* args = std::get_if<flutter::EncodableMap>(method_call.arguments());
     uint32_t device_id = 0;
-    uint16_t target_port = 15332;
+    uint16_t target_port = 25333;
 
     if (args) {
       auto dev_it = args->find(flutter::EncodableValue("deviceId"));
@@ -363,7 +367,11 @@ void ScreenMirrorPlugin::HandleMethodCall(
 
     SOCKET probe_sock = INVALID_SOCKET;
     std::string err_msg;
-    const bool success = usbmuxd_client_->ConnectTunnel(device_id, target_port, &probe_sock, &err_msg);
+    bool success = usbmuxd_client_->ConnectTunnel(device_id, target_port, &probe_sock, &err_msg);
+    if (!success && target_port == 25333) {
+      // Auto-fallback to custom port 15332
+      success = usbmuxd_client_->ConnectTunnel(device_id, 15332, &probe_sock, &err_msg);
+    }
 
     flutter::EncodableMap resp;
     if (success) {

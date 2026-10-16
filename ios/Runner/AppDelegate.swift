@@ -8,8 +8,8 @@ import Darwin
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
 
   private let appGroup = "group.applecast.mirror"
-  private let defaultPort: UInt16 = 15333
-  private let controlPort: UInt16 = 15332
+  private let defaultPort: UInt16 = 25334
+  private let controlPort: UInt16 = 25333
 
   private var flutterChannel: FlutterMethodChannel?
   private var controlListener: NWListener?

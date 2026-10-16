@@ -223,7 +223,7 @@ class MirrorController extends ChangeNotifier {
 
         addLog(
           'CONTROL',
-          'iPhone companion app detected online on port 15332! (Name: ${deviceName ?? "iPhone"}, Screen Captured: $isCaptured)',
+          'iPhone companion app detected online on port ${AppleCastConstants.defaultDeviceControlPort}! (Name: ${deviceName ?? "iPhone"}, Screen Captured: $isCaptured)',
           level: LogLevel.success,
         );
 
@@ -318,7 +318,7 @@ class MirrorController extends ChangeNotifier {
       selectedDevice: targetDevice,
       status: MirrorConnectionStatus.connected,
       clearError: true,
-      errorMessage: 'Connecting to iOS broadcast on port 15333...',
+      errorMessage: 'Connecting to iOS broadcast on port ${AppleCastConstants.defaultDeviceStreamingPort}...',
     );
     notifyListeners();
 
@@ -333,24 +333,24 @@ class MirrorController extends ChangeNotifier {
       notifyListeners();
     }
 
-    // 2. Probe control channel on port 15332 to notify iPhone that Laptop is connected
-    addLog('CONTROL', 'Probing device control channel on port 15332...', level: LogLevel.info);
+    // 2. Probe control channel on port 25333 (or fallback) to notify iPhone that Laptop is connected
+    addLog('CONTROL', 'Probing device control channel on port ${AppleCastConstants.defaultDeviceControlPort}...', level: LogLevel.info);
     final probeResult = await _channelService.probeDevice(deviceId: targetDevice.deviceId);
     if (probeResult['connected'] == true) {
-      addLog('CONTROL', 'iPhone AppleCast companion confirmed online! (Screen Captured: ${probeResult["isCaptured"]})', level: LogLevel.success);
+      addLog('CONTROL', 'iPhone companion confirmed online! (Screen Captured: ${probeResult["isCaptured"]})', level: LogLevel.success);
     }
 
-    // 3. Connect virtual TCP tunnel to iOS companion app port 15333
-    //    The native side retries up to 8 times with backoff if the iOS broadcast
+    // 3. Connect virtual TCP tunnel to iOS streaming port 25334 (with fallback)
+    //    The native side retries with backoff if the iOS broadcast
     //    extension's TCP server isn't listening yet.
-    addLog('TUNNEL', 'Opening usbmuxd virtual TCP tunnel to device port 15333 (with backoff retry)...', level: LogLevel.info);
+    addLog('TUNNEL', 'Opening usbmuxd virtual TCP tunnel to device port ${AppleCastConstants.defaultDeviceStreamingPort} (with backoff retry)...', level: LogLevel.info);
 
     final bool success = await _channelService.connectDevice(
       deviceId: targetDevice.deviceId,
     );
 
     if (success) {
-      addLog('TUNNEL', 'Virtual TCP tunnel connected! Demuxing RFC 2326 Interleaved RTP stream...', level: LogLevel.success);
+      addLog('TUNNEL', 'Virtual TCP tunnel connected! Demuxing H.264 video stream...', level: LogLevel.success);
       _state = _state.copyWith(
         status: MirrorConnectionStatus.mirroring,
         metrics: const StreamMetrics(
@@ -363,10 +363,10 @@ class MirrorController extends ChangeNotifier {
         ),
       );
     } else {
-      addLog('TUNNEL', 'Connection failed on port 15333. iOS AppleCast broadcast may not be active.', level: LogLevel.error);
+      addLog('TUNNEL', 'Connection failed on port ${AppleCastConstants.defaultDeviceStreamingPort}. iOS broadcast may not be active.', level: LogLevel.error);
       _state = _state.copyWith(
         status: MirrorConnectionStatus.error,
-        errorMessage: 'Could not connect to port 15333 on device ${targetDevice.serialNumber}. Make sure to tap "Launch ReplayKit Picker" and "Start Broadcast" on your iPhone.',
+        errorMessage: 'Could not connect to port ${AppleCastConstants.defaultDeviceStreamingPort} on device ${targetDevice.serialNumber}. Make sure to tap "Launch ReplayKit Picker" and "Start Broadcast" on your iPhone.',
       );
     }
     notifyListeners();

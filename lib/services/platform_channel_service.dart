@@ -136,7 +136,7 @@ class PlatformChannelService {
     }
   }
 
-  /// Probes iOS device over control port (15332) via usbmuxd tunnel
+  /// Probes iOS device over control port (25333 / 15332) via usbmuxd tunnel
   Future<Map<String, dynamic>> probeDevice({
     required int deviceId,
     int port = AppleCastConstants.defaultDeviceControlPort,

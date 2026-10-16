@@ -59,47 +59,101 @@ void RtpDemuxer::ConsumeData(const uint8_t* buffer, size_t length) {
   size_t read_idx = 0;
 
   while (read_idx < accumulator_.size()) {
-    if (state_ == STATE_FIND_MAGIC) {
-      // Step 1: Scan for RFC 2326 Interleaved Magic Byte '$' (0x24)
-      while (read_idx < accumulator_.size() && accumulator_[read_idx] != kRtpInterleavedMagic) {
-        read_idx++;
+    // Mode A: ApowerMirror 4-byte Tag [00 00 00 00] / [00 00 00 02] followed by Annex-B [00 00 00 01]
+    if (accumulator_.size() - read_idx >= 8 &&
+        accumulator_[read_idx] == 0x00 && accumulator_[read_idx + 1] == 0x00 &&
+        accumulator_[read_idx + 2] == 0x00 &&
+        (accumulator_[read_idx + 3] == 0x00 || accumulator_[read_idx + 3] == 0x02) &&
+        accumulator_[read_idx + 4] == 0x00 && accumulator_[read_idx + 5] == 0x00 &&
+        accumulator_[read_idx + 6] == 0x00 && accumulator_[read_idx + 7] == 0x01) {
+
+      read_idx += 4; // Skip 4-byte ApowerMirror slice tag
+      size_t nalu_start = read_idx;
+      size_t next_idx = nalu_start + 4;
+
+      while (next_idx + 8 <= accumulator_.size()) {
+        if (accumulator_[next_idx] == 0x00 && accumulator_[next_idx + 1] == 0x00 &&
+            accumulator_[next_idx + 2] == 0x00 &&
+            (accumulator_[next_idx + 3] == 0x00 || accumulator_[next_idx + 3] == 0x02) &&
+            accumulator_[next_idx + 4] == 0x00 && accumulator_[next_idx + 5] == 0x00 &&
+            accumulator_[next_idx + 6] == 0x00 && accumulator_[next_idx + 7] == 0x01) {
+          break;
+        }
+        next_idx++;
       }
 
-      if (read_idx >= accumulator_.size()) {
-        // No magic byte in remaining buffer; clear and wait for next chunk
-        accumulator_.clear();
-        return;
+      if (next_idx + 8 > accumulator_.size()) {
+        // Wait for remaining frame data
+        read_idx -= 4; // Revert tag skip and wait
+        break;
       }
 
-      state_ = STATE_READ_HEADER;
+      DemuxedVideoPacket packet;
+      packet.data.assign(accumulator_.data() + nalu_start, accumulator_.data() + next_idx);
+      packet.timestamp = 0;
+      uint8_t nal_type = packet.data[4] & 0x1F;
+      packet.is_keyframe = (nal_type == kNalTypeIdr || nal_type == kNalTypeSps);
+
+      total_packets_++;
+      if (packet_callback_) {
+        packet_callback_(packet);
+      }
+
+      read_idx = next_idx;
+      continue;
     }
 
-    if (state_ == STATE_READ_HEADER) {
-      // Step 2: Need 4 bytes for '$' (1B) + Channel (1B) + 16-bit Payload Length (2B)
-      if (accumulator_.size() - read_idx < 4) {
-        break; // Wait for more data
+    // Mode B: Direct Annex-B start code [00 00 00 01]
+    if (accumulator_.size() - read_idx >= 4 &&
+        accumulator_[read_idx] == 0x00 && accumulator_[read_idx + 1] == 0x00 &&
+        accumulator_[read_idx + 2] == 0x00 && accumulator_[read_idx + 3] == 0x01) {
+
+      size_t nalu_start = read_idx;
+      size_t next_idx = nalu_start + 4;
+
+      while (next_idx + 4 <= accumulator_.size()) {
+        if (accumulator_[next_idx] == 0x00 && accumulator_[next_idx + 1] == 0x00 &&
+            accumulator_[next_idx + 2] == 0x00 && accumulator_[next_idx + 3] == 0x01) {
+          break;
+        }
+        next_idx++;
       }
 
-      current_channel_ = accumulator_[read_idx + 1];
-      current_payload_length_ = (static_cast<uint16_t>(accumulator_[read_idx + 2]) << 8) |
-                                static_cast<uint16_t>(accumulator_[read_idx + 3]);
-
-      state_ = STATE_READ_PAYLOAD;
-    }
-
-    if (state_ == STATE_READ_PAYLOAD) {
-      // Step 3: Check if full payload has arrived
-      const size_t total_frame_size = 4 + current_payload_length_;
-      if (accumulator_.size() - read_idx < total_frame_size) {
-        break; // Wait for remaining payload bytes
+      if (next_idx + 4 > accumulator_.size()) {
+        // Wait for remaining NAL unit
+        break;
       }
 
-      const uint8_t* payload_ptr = accumulator_.data() + read_idx + 4;
-      ProcessInterleavedPayload(current_channel_, payload_ptr, current_payload_length_);
+      DemuxedVideoPacket packet;
+      packet.data.assign(accumulator_.data() + nalu_start, accumulator_.data() + next_idx);
+      packet.timestamp = 0;
+      uint8_t nal_type = packet.data[4] & 0x1F;
+      packet.is_keyframe = (nal_type == kNalTypeIdr || nal_type == kNalTypeSps);
 
-      read_idx += total_frame_size;
-      state_ = STATE_FIND_MAGIC;
+      total_packets_++;
+      if (packet_callback_) {
+        packet_callback_(packet);
+      }
+
+      read_idx = next_idx;
+      continue;
     }
+
+    // Mode C: RFC 2326 Interleaved RTP framing ($)
+    if (accumulator_[read_idx] == kRtpInterleavedMagic) {
+      if (accumulator_.size() - read_idx < 4) break;
+      uint8_t channel = accumulator_[read_idx + 1];
+      uint16_t length = (static_cast<uint16_t>(accumulator_[read_idx + 2]) << 8) |
+                        static_cast<uint16_t>(accumulator_[read_idx + 3]);
+      if (accumulator_.size() - read_idx < 4 + length) break;
+
+      ProcessInterleavedPayload(channel, accumulator_.data() + read_idx + 4, length);
+      read_idx += 4 + length;
+      continue;
+    }
+
+    // Unrecognized leading byte, scan forward
+    read_idx++;
   }
 
   // Erase consumed bytes from accumulator

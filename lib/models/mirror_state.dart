@@ -6,7 +6,7 @@ import 'stream_metrics.dart';
 enum MirrorConnectionStatus {
   scanning,      // Listening on 127.0.0.1:27015 for attached iOS devices
   connected,     // Device discovered and selected, ready to establish tunnel
-  mirroring,     // Active stream over usbmuxd tunnel (port 15333) with live texture rendering
+  mirroring,     // Active stream over usbmuxd tunnel (port 25334 / 15333) with live texture rendering
   disconnected,  // Stream gracefully ended or USB cable unplugged
   error,         // Error during tunnel connect, pairing rejected, or daemon unreachable
 }
