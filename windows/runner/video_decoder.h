@@ -35,6 +35,9 @@ class VideoDecoder {
   // Initializes FFmpeg libavcodec with low-delay flags and D3D11VA hardware acceleration.
   bool InitializeCodec();
 
+  // Decodes raw Annex-B stream chunks directly from the TCP socket.
+  bool DecodeStream(const uint8_t* in_data, size_t in_size);
+
   // Decodes an Annex B formatted NAL unit video packet received from RtpDemuxer.
   bool DecodePacket(const DemuxedVideoPacket& packet);
 
@@ -79,8 +82,8 @@ class VideoDecoder {
   void* av_parser_ctx_ = nullptr;
   void* sws_ctx_ = nullptr;
 
-  // Zero-allocation reusable BGRA frame buffer for Direct3D 11 surface upload
-  std::vector<uint8_t> bgra_buffer_;
+  // Zero-allocation reusable RGBA frame buffer for Flutter texture upload
+  std::vector<uint8_t> rgba_buffer_;
 
   std::mutex decode_mutex_;
   std::atomic<bool> is_initialized_{false};

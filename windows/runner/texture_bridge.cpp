@@ -58,16 +58,21 @@ void TextureBridge::PushD3D11Texture(ID3D11Texture2D* texture, HANDLE shared_han
 }
 
 void TextureBridge::PushPixelBuffer(const uint8_t* buffer, size_t width, size_t height) {
+  if (!buffer || width == 0 || height == 0) return;
+
+  const size_t total_bytes = width * height * 4;
   {
     std::lock_guard<std::mutex> lock(surface_mutex_);
     current_width_ = width;
     current_height_ = height;
-    const size_t total_bytes = width * height * 4;
 
-    if (pixel_buffer_.size() != total_bytes) {
-      pixel_buffer_.resize(total_bytes);
+    if (back_buffer_.size() != total_bytes) {
+      back_buffer_.resize(total_bytes);
     }
-    std::memcpy(pixel_buffer_.data(), buffer, total_bytes);
+    std::memcpy(back_buffer_.data(), buffer, total_bytes);
+
+    // Swap back buffer to front buffer in O(1) time
+    std::swap(front_buffer_, back_buffer_);
   }
 
   if (texture_id_ >= 0 && texture_registrar_) {
@@ -87,7 +92,7 @@ const FlutterDesktopGpuSurfaceDescriptor* TextureBridge::ObtainDescriptor(size_t
   gpu_surface_descriptor_.height = current_height_;
   gpu_surface_descriptor_.visible_width = current_width_;
   gpu_surface_descriptor_.visible_height = current_height_;
-  gpu_surface_descriptor_.format = kFlutterDesktopPixelFormatBGRA8888;
+  gpu_surface_descriptor_.format = kFlutterDesktopPixelFormatRGBA8888;
   gpu_surface_descriptor_.release_callback = nullptr;
   gpu_surface_descriptor_.release_context = nullptr;
 
@@ -97,11 +102,11 @@ const FlutterDesktopGpuSurfaceDescriptor* TextureBridge::ObtainDescriptor(size_t
 const FlutterDesktopPixelBuffer* TextureBridge::CopyPixelBuffer(size_t width, size_t height) {
   std::lock_guard<std::mutex> lock(surface_mutex_);
 
-  if (pixel_buffer_.empty() || current_width_ == 0 || current_height_ == 0) {
+  if (front_buffer_.empty() || current_width_ == 0 || current_height_ == 0) {
     return nullptr;
   }
 
-  flutter_pixel_buffer_.buffer = pixel_buffer_.data();
+  flutter_pixel_buffer_.buffer = front_buffer_.data();
   flutter_pixel_buffer_.width = current_width_;
   flutter_pixel_buffer_.height = current_height_;
   flutter_pixel_buffer_.release_callback = nullptr;

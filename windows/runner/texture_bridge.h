@@ -59,8 +59,9 @@ class TextureBridge {
   HANDLE d3d11_shared_handle_ = nullptr;
   Microsoft::WRL::ComPtr<ID3D11Texture2D> d3d11_texture_;
 
-  // CPU fallback buffer
-  std::vector<uint8_t> pixel_buffer_;
+  // Double-buffered presentation buffers for zero-tear concurrency
+  std::vector<uint8_t> front_buffer_;
+  std::vector<uint8_t> back_buffer_;
   FlutterDesktopPixelBuffer flutter_pixel_buffer_{};
 
   // Retain variant pointer while registered

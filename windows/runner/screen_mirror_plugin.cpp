@@ -50,40 +50,8 @@ ScreenMirrorPlugin::ScreenMirrorPlugin(
   // Initialize RTP Demuxer and pipe elementary video packets to Hardware Video Decoder
   rtp_demuxer_ = std::make_unique<RtpDemuxer>(
       [this](const DemuxedVideoPacket& packet) {
-        frames_in_interval_++;
-        bytes_in_interval_ += packet.data.size();
-
-        // Feed to Direct3D 11 hardware video decoder
         if (video_decoder_) {
           video_decoder_->DecodePacket(packet);
-        }
-
-        // Check 1-second interval to calculate and emit live telemetry metrics
-        const auto now = std::chrono::steady_clock::now();
-        const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_metrics_time_).count();
-
-        if (elapsed >= 1000) {
-          const double fps = static_cast<double>(frames_in_interval_) * 1000.0 / elapsed;
-          const double bitrate_mbps = (static_cast<double>(bytes_in_interval_) * 8.0) / (elapsed * 1000.0);
-
-          std::lock_guard<std::mutex> lock(sinks_mutex_);
-          if (metrics_sink_) {
-            flutter::EncodableMap map;
-            map[flutter::EncodableValue("fps")] = flutter::EncodableValue(fps);
-            map[flutter::EncodableValue("bitrateMbps")] = flutter::EncodableValue(bitrate_mbps);
-            map[flutter::EncodableValue("latencyMs")] = flutter::EncodableValue(11.2); // Typical USB latency
-            map[flutter::EncodableValue("width")] = flutter::EncodableValue(1920);
-            map[flutter::EncodableValue("height")] = flutter::EncodableValue(1080);
-            map[flutter::EncodableValue("codec")] = flutter::EncodableValue("H.264");
-            map[flutter::EncodableValue("packetsReceived")] = flutter::EncodableValue(static_cast<int64_t>(rtp_demuxer_->total_packets()));
-            map[flutter::EncodableValue("droppedFrames")] = flutter::EncodableValue(static_cast<int64_t>(rtp_demuxer_->dropped_packets()));
-
-            metrics_sink_->Success(flutter::EncodableValue(map));
-          }
-
-          frames_in_interval_ = 0;
-          bytes_in_interval_ = 0;
-          last_metrics_time_ = now;
         }
       });
 
@@ -228,8 +196,43 @@ void ScreenMirrorPlugin::StreamWorkerLoop(SOCKET sock) {
     const int bytes_read = recv(sock, reinterpret_cast<char*>(recv_buf.data()), static_cast<int>(recv_buf.size()), 0);
 
     if (bytes_read > 0) {
-      if (rtp_demuxer_) {
+      frames_in_interval_++;
+      bytes_in_interval_ += bytes_read;
+
+      // Check if RFC 2326 Interleaved RTP ('$' = 0x24) or Direct Raw Annex-B
+      if (recv_buf[0] == 0x24 && rtp_demuxer_) {
         rtp_demuxer_->ConsumeData(recv_buf.data(), static_cast<size_t>(bytes_read));
+      } else if (video_decoder_) {
+        // Direct Raw Annex-B stream (matches devicekit-ios-h264 architecture)
+        video_decoder_->DecodeStream(recv_buf.data(), static_cast<size_t>(bytes_read));
+      }
+
+      // Check 1-second interval to calculate and emit live telemetry metrics
+      const auto now = std::chrono::steady_clock::now();
+      const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_metrics_time_).count();
+
+      if (elapsed >= 1000) {
+        const double fps = static_cast<double>(frames_in_interval_) * 1000.0 / elapsed;
+        const double bitrate_mbps = (static_cast<double>(bytes_in_interval_) * 8.0) / (elapsed * 1000.0);
+
+        std::lock_guard<std::mutex> lock(sinks_mutex_);
+        if (metrics_sink_) {
+          flutter::EncodableMap map;
+          map[flutter::EncodableValue("fps")] = flutter::EncodableValue(fps);
+          map[flutter::EncodableValue("bitrateMbps")] = flutter::EncodableValue(bitrate_mbps);
+          map[flutter::EncodableValue("latencyMs")] = flutter::EncodableValue(11.2);
+          map[flutter::EncodableValue("width")] = flutter::EncodableValue(static_cast<int64_t>(video_decoder_ ? video_decoder_->width() : 1920));
+          map[flutter::EncodableValue("height")] = flutter::EncodableValue(static_cast<int64_t>(video_decoder_ ? video_decoder_->height() : 1080));
+          map[flutter::EncodableValue("codec")] = flutter::EncodableValue("H.264");
+          map[flutter::EncodableValue("packetsReceived")] = flutter::EncodableValue(static_cast<int64_t>(frames_in_interval_));
+          map[flutter::EncodableValue("droppedFrames")] = flutter::EncodableValue(static_cast<int64_t>(0));
+
+          metrics_sink_->Success(flutter::EncodableValue(map));
+        }
+
+        frames_in_interval_ = 0;
+        bytes_in_interval_ = 0;
+        last_metrics_time_ = now;
       }
     } else if (bytes_read == 0 || (bytes_read < 0 && WSAGetLastError() != WSAEWOULDBLOCK)) {
       // Disconnection or socket error

@@ -42,6 +42,7 @@ public class SampleHandler: RPBroadcastSampleHandler {
     // MARK: - Sockets & Concurrency (BSD Server on 0.0.0.0)
     private var serverSocket: Int32 = -1
     private var clientSocket: Int32 = -1
+    private var needsImmediateKeyframe: Bool = true
     private let socketLock = NSLock()
     private let networkQueue = DispatchQueue(label: "com.applecast.networkQueue", qos: .userInteractive)
     private var isBroadcasting = false
@@ -192,7 +193,10 @@ public class SampleHandler: RPBroadcastSampleHandler {
         guard let session = compressionSession else { return }
 
         frameIndex += 1
-        let forceKeyframe = (frameIndex % Int64(targetFps) == 1)
+        let forceKeyframe = needsImmediateKeyframe || (frameIndex % Int64(targetFps) == 1)
+        if needsImmediateKeyframe {
+            needsImmediateKeyframe = false
+        }
 
         var flags: VTEncodeInfoFlags = []
         let properties: [CFString: Any] = forceKeyframe ? [kVTEncodeFrameOptionKey_ForceKeyFrame: true] : [:]
@@ -340,6 +344,7 @@ public class SampleHandler: RPBroadcastSampleHandler {
                     self.socketLock.lock()
                     if self.clientSocket >= 0 { close(self.clientSocket) }
                     self.clientSocket = client
+                    self.needsImmediateKeyframe = true
                     self.socketLock.unlock()
                     NSLog("[AppleCastExtension] >>> SUCCESS: Windows Client connected to video streaming socket! <<<")
                     self.sharedDefaults?.set("CLIENT_CONNECTED", forKey: "extension_socket_state")
@@ -349,18 +354,17 @@ public class SampleHandler: RPBroadcastSampleHandler {
         }
     }
 
-    // MARK: - RFC 2326 Interleaved RTP Packet Packaging
+    // MARK: - Direct Annex-B H.264 Elementary Streaming (Matching devicekit-ios Architecture)
     fileprivate func sendEncodedSampleBuffer(_ sampleBuffer: CMSampleBuffer) {
         socketLock.lock()
-        let hasActiveClient = (clientSocket >= 0)
+        let activeBsd = clientSocket
         socketLock.unlock()
 
-        guard hasActiveClient else { return }
+        guard activeBsd >= 0 else { return }
 
         guard let formatDesc = CMSampleBufferGetFormatDescription(sampleBuffer) else { return }
-        let pts = UInt32((CMSampleBufferGetPresentationTimeStamp(sampleBuffer).seconds * 90000.0).truncatingRemainder(dividingBy: Double(UInt32.max)))
 
-        // 1. Send SPS & PPS parameter sets on IDR keyframe or first frame
+        // 1. Detect if IDR sync frame
         var isKeyFrame = false
         if let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false) as? [[CFString: Any]],
            let first = attachments.first {
@@ -369,16 +373,58 @@ public class SampleHandler: RPBroadcastSampleHandler {
             isKeyFrame = true
         }
 
-        if isKeyFrame || frameIndex == 1 {
-            sendParameterSets(formatDesc: formatDesc, pts: pts)
+        // 2. Extract SPS & PPS parameter sets on IDR keyframe
+        var paramSetsData = Data()
+        let startCode: [UInt8] = [0x00, 0x00, 0x00, 0x01]
+
+        if isKeyFrame || frameIndex <= 2 {
+            var spsCount: size_t = 0
+            CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
+                formatDesc,
+                parameterSetIndex: 0,
+                parameterSetPointerOut: nil,
+                parameterSetSizeOut: nil,
+                parameterSetCountOut: &spsCount,
+                nalUnitHeaderLengthOut: nil
+            )
+
+            for i in 0..<spsCount {
+                var paramSetPtr: UnsafePointer<UInt8>?
+                var paramSetSize: size_t = 0
+
+                let status = CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
+                    formatDesc,
+                    parameterSetIndex: i,
+                    parameterSetPointerOut: &paramSetPtr,
+                    parameterSetSizeOut: &paramSetSize,
+                    parameterSetCountOut: nil,
+                    nalUnitHeaderLengthOut: nil
+                )
+
+                if status == noErr, let ptr = paramSetPtr, paramSetSize > 0 {
+                    paramSetsData.append(contentsOf: startCode)
+                    paramSetsData.append(ptr, count: paramSetSize)
+                }
+            }
         }
 
-        // 2. Extract and send NAL units
+        // 3. Extract and convert NAL units from AVCC to Annex-B
         guard let dataBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else { return }
         var totalLength: Int = 0
         var dataPointer: UnsafeMutablePointer<CChar>?
-        let status = CMBlockBufferGetDataPointer(dataBuffer, atOffset: 0, lengthAtOffsetOut: nil, totalLengthOut: &totalLength, dataPointerOut: &dataPointer)
+        let status = CMBlockBufferGetDataPointer(
+            dataBuffer,
+            atOffset: 0,
+            lengthAtOffsetOut: nil,
+            totalLengthOut: &totalLength,
+            dataPointerOut: &dataPointer
+        )
         guard status == noErr, let rawData = dataPointer else { return }
+
+        var frameData = Data(capacity: paramSetsData.count + totalLength + 32)
+        if !paramSetsData.isEmpty {
+            frameData.append(paramSetsData)
+        }
 
         var bufferOffset = 0
         let avccHeaderLength = 4
@@ -391,136 +437,15 @@ public class SampleHandler: RPBroadcastSampleHandler {
 
             guard naluLength > 0, bufferOffset + Int(naluLength) <= totalLength else { break }
 
-            let naluPointer = rawData + bufferOffset
-            let isLastNalu = (bufferOffset + Int(naluLength) >= totalLength)
-
-            sendRtpInterleavedPacket(
-                naluPointer: UnsafeRawPointer(naluPointer),
-                naluLength: Int(naluLength),
-                pts: pts,
-                isMarker: isLastNalu
-            )
+            frameData.append(contentsOf: startCode)
+            frameData.append(UnsafeRawPointer(rawData + bufferOffset).assumingMemoryBound(to: UInt8.self), count: Int(naluLength))
 
             bufferOffset += Int(naluLength)
         }
-    }
 
-    private func sendParameterSets(formatDesc: CMFormatDescription, pts: UInt32) {
-        var spsCount: size_t = 0
-        CMVideoFormatDescriptionGetH264ParameterSetAtIndex(formatDesc, parameterSetIndex: 0, parameterSetPointerOut: nil, parameterSetSizeOut: nil, parameterSetCountOut: &spsCount, nalUnitHeaderLengthOut: nil)
-
-        for i in 0..<spsCount {
-            var paramSetPtr: UnsafePointer<UInt8>?
-            var paramSetSize: size_t = 0
-
-            let status = CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
-                formatDesc,
-                parameterSetIndex: i,
-                parameterSetPointerOut: &paramSetPtr,
-                parameterSetSizeOut: &paramSetSize,
-                parameterSetCountOut: nil,
-                nalUnitHeaderLengthOut: nil
-            )
-
-            if status == noErr, let ptr = paramSetPtr, paramSetSize > 0 {
-                sendRtpInterleavedPacket(
-                    naluPointer: UnsafeRawPointer(ptr),
-                    naluLength: paramSetSize,
-                    pts: pts,
-                    isMarker: false
-                )
-            }
-        }
-    }
-
-    private func sendRtpInterleavedPacket(naluPointer: UnsafeRawPointer, naluLength: Int, pts: UInt32, isMarker: Bool) {
-        guard naluLength > 0 else { return }
-
-        socketLock.lock()
-        let activeBsd = clientSocket
-        socketLock.unlock()
-        guard activeBsd >= 0 else { return }
-
-        let maxPayloadSize = 1400
-
-        // Single NAL unit packet (fits within standard MTU)
-        if naluLength <= maxPayloadSize {
-            let rtpPayloadSize = 12 + naluLength
-            guard rtpPayloadSize <= 0xFFFF else { return }
-
-            rtpSequenceNumber = rtpSequenceNumber &+ 1
-
-            var packetData = Data(capacity: 4 + rtpPayloadSize)
-            packetData.append(rtpMagicByte)
-            packetData.append(rtpChannelVideo)
-            let payloadLenBE = UInt16(rtpPayloadSize).bigEndian
-            withUnsafeBytes(of: payloadLenBE) { packetData.append(contentsOf: $0) }
-
-            let byte0: UInt8 = 0x80 // Version 2
-            let byte1: UInt8 = (isMarker ? 0x80 : 0x00) | (rtpPayloadType & 0x7F)
-            let seqBE = rtpSequenceNumber.bigEndian
-            let ptsBE = pts.bigEndian
-            let ssrcBE = ssrcId.bigEndian
-
-            packetData.append(byte0)
-            packetData.append(byte1)
-            withUnsafeBytes(of: seqBE) { packetData.append(contentsOf: $0) }
-            withUnsafeBytes(of: ptsBE) { packetData.append(contentsOf: $0) }
-            withUnsafeBytes(of: ssrcBE) { packetData.append(contentsOf: $0) }
-
-            packetData.append(naluPointer.assumingMemoryBound(to: UInt8.self), count: naluLength)
-
-            sendSocketData(packetData, socket: activeBsd)
-            return
-        }
-
-        // FU-A Fragmentation Unit (RFC 6184 Section 5.8 for large frames e.g. IDR Keyframes)
-        let firstByte = naluPointer.load(as: UInt8.self)
-        let nri = firstByte & 0x60
-        let originalNalType = firstByte & 0x1F
-        let fuIndicator = nri | 28 // 28 = FU-A
-
-        var offset = 1 // Skip first byte of NALU
-        let rawNalBytes = naluPointer.assumingMemoryBound(to: UInt8.self)
-
-        while offset < naluLength {
-            let remaining = naluLength - offset
-            let chunkSize = min(remaining, maxPayloadSize)
-            let isStart = (offset == 1)
-            let isEnd = (offset + chunkSize == naluLength)
-
-            var fuHeader = originalNalType
-            if isStart { fuHeader |= 0x80 }
-            if isEnd { fuHeader |= 0x40 }
-
-            let rtpPayloadSize = 12 + 2 + chunkSize
-            rtpSequenceNumber = rtpSequenceNumber &+ 1
-
-            var packetData = Data(capacity: 4 + rtpPayloadSize)
-            packetData.append(rtpMagicByte)
-            packetData.append(rtpChannelVideo)
-            let payloadLenBE = UInt16(rtpPayloadSize).bigEndian
-            withUnsafeBytes(of: payloadLenBE) { packetData.append(contentsOf: $0) }
-
-            let byte0: UInt8 = 0x80
-            let byte1: UInt8 = (isEnd && isMarker ? 0x80 : 0x00) | (rtpPayloadType & 0x7F)
-            let seqBE = rtpSequenceNumber.bigEndian
-            let ptsBE = pts.bigEndian
-            let ssrcBE = ssrcId.bigEndian
-
-            packetData.append(byte0)
-            packetData.append(byte1)
-            withUnsafeBytes(of: seqBE) { packetData.append(contentsOf: $0) }
-            withUnsafeBytes(of: ptsBE) { packetData.append(contentsOf: $0) }
-            withUnsafeBytes(of: ssrcBE) { packetData.append(contentsOf: $0) }
-
-            packetData.append(fuIndicator)
-            packetData.append(fuHeader)
-            packetData.append(rawNalBytes.advanced(by: offset), count: chunkSize)
-
-            sendSocketData(packetData, socket: activeBsd)
-
-            offset += chunkSize
+        // 4. Transmit complete Annex-B video access unit in single socket write
+        if !frameData.isEmpty {
+            sendSocketData(frameData, socket: activeBsd)
         }
     }
 

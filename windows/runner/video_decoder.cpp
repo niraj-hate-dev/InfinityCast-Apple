@@ -13,6 +13,7 @@ constexpr int kAvCodecFlagLowDelay = (1 << 19);
 constexpr int kAvHwDeviceTypeD3d11va = 4;
 constexpr int kAvPixFmtD3d11 = 174;
 constexpr int kAvPixFmtYuv420p = 0;
+constexpr int kAvPixFmtRgba = 26;
 constexpr int kAvPixFmtBgra = 28;
 constexpr int kSwsFastBilinear = 1;
 constexpr int64_t kAvNoPtsValue = static_cast<int64_t>(0x8000000000000000ULL);
@@ -184,6 +185,15 @@ bool VideoDecoder::CreateSharedTexture(size_t width, size_t height) {
 }
 
 bool VideoDecoder::LoadFfmpegSymbols() {
+  char exe_path[MAX_PATH] = {0};
+  if (GetModuleFileNameA(nullptr, exe_path, MAX_PATH) > 0) {
+    char* last_slash = strrchr(exe_path, '\\');
+    if (last_slash) {
+      *last_slash = '\0';
+      SetDllDirectoryA(exe_path);
+    }
+  }
+
   // 1. Load avutil first (core dependency for avcodec and swscale)
   const char* kAvutilNames[] = {
       "avutil-59.dll", "avutil-60.dll", "avutil-58.dll", "avutil-57.dll",
@@ -306,64 +316,38 @@ bool VideoDecoder::InitializeCodec() {
   return true;
 }
 
-bool VideoDecoder::DecodePacket(const DemuxedVideoPacket& packet) {
+bool VideoDecoder::DecodeStream(const uint8_t* in_data, size_t in_size) {
   std::lock_guard<std::mutex> lock(decode_mutex_);
-  if (packet.data.empty()) return false;
+  if (!in_data || in_size == 0) return false;
 
   if (!is_initialized_) {
     InitializeCodec();
   }
 
-  if (!av_codec_ctx_ || !av_packet_ || !av_frame_) {
+  if (!av_codec_ctx_ || !av_packet_ || !av_frame_ || !av_parser_ctx_) {
     return false;
   }
 
-  const uint8_t* in_data = packet.data.data();
-  int in_size = static_cast<int>(packet.data.size());
+  while (in_size > 0) {
+    uint8_t* parsed_buf = nullptr;
+    int parsed_size = 0;
+    const int consumed = g_ffmpeg.parser_parse2(
+        av_parser_ctx_, av_codec_ctx_,
+        &parsed_buf, &parsed_size,
+        in_data, static_cast<int>(in_size),
+        kAvNoPtsValue, kAvNoPtsValue, 0);
 
-  // Mode 1: High-reliability AVCodecParser pipeline (assembles complete NALUs & frames)
-  if (av_parser_ctx_ && g_ffmpeg.parser_parse2 && g_ffmpeg.new_packet) {
-    while (in_size > 0) {
-      uint8_t* parsed_buf = nullptr;
-      int parsed_size = 0;
-      const int consumed = g_ffmpeg.parser_parse2(
-          av_parser_ctx_, av_codec_ctx_,
-          &parsed_buf, &parsed_size,
-          in_data, in_size,
-          kAvNoPtsValue, kAvNoPtsValue, 0);
-
-      if (consumed <= 0) {
-        break;
-      }
-
+    if (consumed > 0) {
       in_data += consumed;
       in_size -= consumed;
-
-      if (parsed_size > 0 && parsed_buf) {
-        g_ffmpeg.packet_unref(av_packet_);
-        if (g_ffmpeg.new_packet(av_packet_, parsed_size) == 0) {
-          uint8_t** pkt_data = reinterpret_cast<uint8_t**>(reinterpret_cast<uint8_t*>(av_packet_) + 24);
-          if (pkt_data && *pkt_data) {
-            std::memcpy(*pkt_data, parsed_buf, parsed_size);
-          }
-
-          const int send_res = g_ffmpeg.send_packet(av_codec_ctx_, av_packet_);
-          if (send_res >= 0 || send_res == -11 /* EAGAIN */) {
-            while (g_ffmpeg.receive_frame(av_codec_ctx_, av_frame_) >= 0) {
-              RenderDecodedFrame(av_frame_);
-            }
-          }
-        }
-      }
     }
-  } else {
-    // Mode 2: Direct av_new_packet fallback with internal FFmpeg buffer padding
-    if (g_ffmpeg.new_packet) {
+
+    if (parsed_size > 0 && parsed_buf) {
       g_ffmpeg.packet_unref(av_packet_);
-      if (g_ffmpeg.new_packet(av_packet_, in_size) == 0) {
+      if (g_ffmpeg.new_packet(av_packet_, parsed_size) == 0) {
         uint8_t** pkt_data = reinterpret_cast<uint8_t**>(reinterpret_cast<uint8_t*>(av_packet_) + 24);
         if (pkt_data && *pkt_data) {
-          std::memcpy(*pkt_data, packet.data.data(), in_size);
+          std::memcpy(*pkt_data, parsed_buf, parsed_size);
         }
 
         const int send_res = g_ffmpeg.send_packet(av_codec_ctx_, av_packet_);
@@ -374,9 +358,18 @@ bool VideoDecoder::DecodePacket(const DemuxedVideoPacket& packet) {
         }
       }
     }
+
+    if (consumed <= 0 && parsed_size <= 0) {
+      break;
+    }
   }
 
   return true;
+}
+
+bool VideoDecoder::DecodePacket(const DemuxedVideoPacket& packet) {
+  if (packet.data.empty()) return false;
+  return DecodeStream(packet.data.data(), packet.data.size());
 }
 
 void VideoDecoder::RenderDecodedFrame(void* av_frame) {
@@ -398,7 +391,7 @@ void VideoDecoder::RenderDecodedFrame(void* av_frame) {
 
   static uint64_t s_rendered_count = 0;
   s_rendered_count++;
-  if (s_rendered_count == 1 || s_rendered_count % 300 == 0) {
+  if (s_rendered_count == 1 || s_rendered_count % 180 == 0) {
     std::cout << "[DECODER] Successfully rendered active screen frame #" << s_rendered_count
               << " (" << frame_w << "x" << frame_h << ")" << std::endl;
   }
@@ -416,13 +409,13 @@ void VideoDecoder::RenderDecodedFrame(void* av_frame) {
     }
   }
 
-  // Pre-allocate / resize BGRA buffer once (zero reallocation on steady-state frames)
+  // Pre-allocate / resize RGBA buffer once (zero reallocation on steady-state frames)
   const size_t required_bytes = width_ * height_ * 4;
-  if (bgra_buffer_.size() != required_bytes) {
-    bgra_buffer_.resize(required_bytes);
+  if (rgba_buffer_.size() != required_bytes) {
+    rgba_buffer_.resize(required_bytes);
   }
 
-  // Convert to BGRA using SIMD swscale if available
+  // Convert to RGBA using SIMD swscale if available
   if (g_ffmpeg.sws_scale && g_ffmpeg.sws_getContext) {
     if (!sws_ctx_ || current_pix_fmt_ != frame_fmt) {
       if (sws_ctx_ && g_ffmpeg.sws_freeContext) {
@@ -431,17 +424,17 @@ void VideoDecoder::RenderDecodedFrame(void* av_frame) {
       current_pix_fmt_ = frame_fmt;
       sws_ctx_ = g_ffmpeg.sws_getContext(
           static_cast<int>(width_), static_cast<int>(height_), frame_fmt,
-          static_cast<int>(width_), static_cast<int>(height_), kAvPixFmtBgra,
+          static_cast<int>(width_), static_cast<int>(height_), kAvPixFmtRgba,
           kSwsFastBilinear, nullptr, nullptr, nullptr);
     }
 
     if (sws_ctx_) {
-      uint8_t* dst_planes[4] = { bgra_buffer_.data(), nullptr, nullptr, nullptr };
+      uint8_t* dst_planes[4] = { rgba_buffer_.data(), nullptr, nullptr, nullptr };
       const int dst_strides[4] = { static_cast<int>(width_ * 4), 0, 0, 0 };
       g_ffmpeg.sws_scale(sws_ctx_, src_data, src_linesize, 0, static_cast<int>(height_), dst_planes, dst_strides);
     }
   } else {
-    // High-performance CPU fallback for YUV420P -> BGRA
+    // High-performance CPU fallback for YUV420P -> RGBA
     const uint8_t* y_plane = src_data[0];
     const uint8_t* u_plane = src_data[1];
     const uint8_t* v_plane = src_data[2];
@@ -450,7 +443,7 @@ void VideoDecoder::RenderDecodedFrame(void* av_frame) {
     const int v_stride = src_linesize[2];
 
     if (y_plane && u_plane && v_plane) {
-      uint32_t* dst = reinterpret_cast<uint32_t*>(bgra_buffer_.data());
+      uint32_t* dst = reinterpret_cast<uint32_t*>(rgba_buffer_.data());
       for (size_t y = 0; y < height_; ++y) {
         const uint8_t* y_row = y_plane + y * y_stride;
         const uint8_t* u_row = u_plane + (y / 2) * u_stride;
@@ -470,7 +463,7 @@ void VideoDecoder::RenderDecodedFrame(void* av_frame) {
           g = (g < 0) ? 0 : ((g > 255) ? 255 : g);
           b = (b < 0) ? 0 : ((b > 255) ? 255 : b);
 
-          dst_row[x] = (0xFF << 24) | (r << 16) | (g << 8) | b;
+          dst_row[x] = (0xFF << 24) | (b << 16) | (g << 8) | r;
         }
       }
     }
@@ -478,23 +471,23 @@ void VideoDecoder::RenderDecodedFrame(void* av_frame) {
 
   // Push directly to Flutter PixelBufferTexture (100% universal rock-solid display, zero GPU overhead)
   if (texture_bridge_) {
-    texture_bridge_->PushPixelBuffer(bgra_buffer_.data(), width_, height_);
+    texture_bridge_->PushPixelBuffer(rgba_buffer_.data(), width_, height_);
   }
 }
 
 void VideoDecoder::RenderTestPatternFrame(uint32_t frame_index) {
   const size_t required_bytes = width_ * height_ * 4;
-  if (bgra_buffer_.size() != required_bytes) {
-    bgra_buffer_.resize(required_bytes);
+  if (rgba_buffer_.size() != required_bytes) {
+    rgba_buffer_.resize(required_bytes);
   }
 
   // Elegant dark background (#0D1117) matching the AppleCast dark theme
   const uint32_t bg_color = 0xFF0D1117;
-  uint32_t* dst = reinterpret_cast<uint32_t*>(bgra_buffer_.data());
+  uint32_t* dst = reinterpret_cast<uint32_t*>(rgba_buffer_.data());
   std::fill(dst, dst + (width_ * height_), bg_color);
 
   if (texture_bridge_) {
-    texture_bridge_->PushPixelBuffer(reinterpret_cast<const uint8_t*>(bgra_buffer_.data()), width_, height_);
+    texture_bridge_->PushPixelBuffer(reinterpret_cast<const uint8_t*>(rgba_buffer_.data()), width_, height_);
   }
 }
 
@@ -543,7 +536,7 @@ void VideoDecoder::Teardown() {
   d3d11_context_.Reset();
   d3d11_device_.Reset();
   shared_handle_ = nullptr;
-  bgra_buffer_.clear();
+  rgba_buffer_.clear();
 }
 
 }  // namespace applecast
