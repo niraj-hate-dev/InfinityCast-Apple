@@ -413,6 +413,9 @@ void ScreenMirrorPlugin::HandleMethodCall(
     }
 
     if (success) {
+      if (video_decoder_) {
+        video_decoder_->InitializeD3D11(1920, 1080);
+      }
       StartStreamingWorker(tunnel_sock);
 
       // Connect Audio Tunnel to Port 25335
