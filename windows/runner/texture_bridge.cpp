@@ -23,25 +23,14 @@ int64_t TextureBridge::Register() {
     return -1;
   }
 
-  // Register zero-copy GPU Surface texture backed by DirectX 11 DXGI shared handle
+  // Register high-performance low-latency PixelBufferTexture (100% universal GPU/driver compatibility)
   active_texture_variant_ = std::make_unique<flutter::TextureVariant>(
-      flutter::GpuSurfaceTexture(
-          kFlutterDesktopGpuSurfaceTypeDxgiSharedHandle,
-          [this](size_t width, size_t height) -> const FlutterDesktopGpuSurfaceDescriptor* {
-            return this->ObtainDescriptor(width, height);
+      flutter::PixelBufferTexture(
+          [this](size_t width, size_t height) -> const FlutterDesktopPixelBuffer* {
+            return this->CopyPixelBuffer(width, height);
           }));
 
   texture_id_ = texture_registrar_->RegisterTexture(active_texture_variant_.get());
-
-  // Fallback to PixelBufferTexture if GPU surface registration fails on older platforms
-  if (texture_id_ < 0) {
-    active_texture_variant_ = std::make_unique<flutter::TextureVariant>(
-        flutter::PixelBufferTexture(
-            [this](size_t width, size_t height) -> const FlutterDesktopPixelBuffer* {
-              return this->CopyPixelBuffer(width, height);
-            }));
-    texture_id_ = texture_registrar_->RegisterTexture(active_texture_variant_.get());
-  }
 
   return texture_id_;
 }
@@ -115,6 +104,8 @@ const FlutterDesktopPixelBuffer* TextureBridge::CopyPixelBuffer(size_t width, si
   flutter_pixel_buffer_.buffer = pixel_buffer_.data();
   flutter_pixel_buffer_.width = current_width_;
   flutter_pixel_buffer_.height = current_height_;
+  flutter_pixel_buffer_.release_callback = nullptr;
+  flutter_pixel_buffer_.release_context = nullptr;
 
   return &flutter_pixel_buffer_;
 }

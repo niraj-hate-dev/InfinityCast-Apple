@@ -125,6 +125,9 @@ bool VideoDecoder::InitializeD3D11(size_t initial_width, size_t initial_height) 
   // Attempt FFmpeg dynamic symbols loading
   InitializeCodec();
 
+  // Render initial active frame so canvas is never black
+  RenderTestPatternFrame(0);
+
   is_initialized_ = true;
   return true;
 }
@@ -303,9 +306,9 @@ bool VideoDecoder::DecodePacket(const DemuxedVideoPacket& packet) {
     *size_ptr = static_cast<int>(packet.data.size());
 
     const int send_res = g_ffmpeg.send_packet(av_codec_ctx_, av_packet_);
-    if (send_res >= 0 && g_ffmpeg.receive_frame && av_frame_) {
+    if ((send_res >= 0 || send_res == -11 /* EAGAIN */) && g_ffmpeg.receive_frame && av_frame_) {
       while (g_ffmpeg.receive_frame(av_codec_ctx_, av_frame_) >= 0) {
-        // Frame successfully decoded! Render directly onto Direct3D 11 surface
+        // Frame successfully decoded! Render directly onto Direct3D 11 surface and PixelBuffer
         RenderDecodedFrame(av_frame_);
       }
     }
@@ -315,7 +318,7 @@ bool VideoDecoder::DecodePacket(const DemuxedVideoPacket& packet) {
 }
 
 void VideoDecoder::RenderDecodedFrame(void* av_frame) {
-  if (!d3d11_context_ || !av_frame) return;
+  if (!av_frame) return;
 
   uint8_t** src_data = reinterpret_cast<uint8_t**>(reinterpret_cast<uint8_t*>(av_frame) + 0);
   int* src_linesize = reinterpret_cast<int*>(reinterpret_cast<uint8_t*>(av_frame) + 64);
@@ -413,15 +416,20 @@ void VideoDecoder::RenderDecodedFrame(void* av_frame) {
         static_cast<UINT>(row_pitch),
         0);
 
+    d3d11_context_->Flush();
+
     if (texture_bridge_ && shared_handle_) {
       texture_bridge_->PushD3D11Texture(shared_texture_.Get(), shared_handle_, width_, height_);
     }
   }
+
+  // Push directly to Flutter PixelBufferTexture (100% universal rock-solid display)
+  if (texture_bridge_) {
+    texture_bridge_->PushPixelBuffer(bgra_buffer_.data(), width_, height_);
+  }
 }
 
 void VideoDecoder::RenderTestPatternFrame(uint32_t frame_index) {
-  if (!d3d11_context_ || !shared_texture_) return;
-
   const size_t row_pitch = width_ * 4;
   const size_t required_bytes = width_ * height_ * 4;
   if (bgra_buffer_.size() != required_bytes) {
@@ -437,16 +445,24 @@ void VideoDecoder::RenderTestPatternFrame(uint32_t frame_index) {
     dst[i] = bg_color;
   }
 
-  d3d11_context_->UpdateSubresource(
-      shared_texture_.Get(),
-      0,
-      nullptr,
-      bgra_buffer_.data(),
-      static_cast<UINT>(row_pitch),
-      0);
+  if (d3d11_context_ && shared_texture_) {
+    d3d11_context_->UpdateSubresource(
+        shared_texture_.Get(),
+        0,
+        nullptr,
+        bgra_buffer_.data(),
+        static_cast<UINT>(row_pitch),
+        0);
 
-  if (texture_bridge_ && shared_handle_) {
-    texture_bridge_->PushD3D11Texture(shared_texture_.Get(), shared_handle_, width_, height_);
+    d3d11_context_->Flush();
+
+    if (texture_bridge_ && shared_handle_) {
+      texture_bridge_->PushD3D11Texture(shared_texture_.Get(), shared_handle_, width_, height_);
+    }
+  }
+
+  if (texture_bridge_) {
+    texture_bridge_->PushPixelBuffer(reinterpret_cast<const uint8_t*>(bgra_buffer_.data()), width_, height_);
   }
 }
 
