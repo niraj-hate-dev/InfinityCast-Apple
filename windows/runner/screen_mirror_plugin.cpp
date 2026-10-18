@@ -44,6 +44,7 @@ ScreenMirrorPlugin::ScreenMirrorPlugin(
       texture_bridge_(std::make_unique<TextureBridge>(texture_registrar)),
       usbmuxd_client_(std::make_unique<UsbmuxdClient>()),
       video_decoder_(std::make_unique<VideoDecoder>(texture_bridge_.get())),
+      audio_decoder_(std::make_unique<AudioDecoder>()),
       last_metrics_time_(std::chrono::steady_clock::now()) {
 
   UsbmuxdClient::InitializeWinsock();
@@ -147,6 +148,13 @@ ScreenMirrorPlugin::ScreenMirrorPlugin(
 ScreenMirrorPlugin::~ScreenMirrorPlugin() {
   Logger::Instance().SetCallback(nullptr);
   StopStreamingWorker();
+  StopAudioStreamingWorker();
+  if (video_decoder_) {
+    video_decoder_->Teardown();
+  }
+  if (audio_decoder_) {
+    audio_decoder_->Teardown();
+  }
   if (usbmuxd_client_) {
     usbmuxd_client_->StopDiscovery();
   }
@@ -271,6 +279,51 @@ void ScreenMirrorPlugin::StreamWorkerLoop(SOCKET sock) {
   }
 }
 
+void ScreenMirrorPlugin::StartAudioStreamingWorker(SOCKET sock) {
+  StopAudioStreamingWorker();
+
+  active_audio_tunnel_sock_ = sock;
+  is_audio_streaming_ = true;
+
+  if (audio_decoder_) {
+    audio_decoder_->Initialize();
+  }
+
+  audio_stream_thread_ = std::thread(&ScreenMirrorPlugin::AudioStreamWorkerLoop, this, sock);
+}
+
+void ScreenMirrorPlugin::StopAudioStreamingWorker() {
+  is_audio_streaming_ = false;
+
+  if (active_audio_tunnel_sock_ != INVALID_SOCKET) {
+    closesocket(active_audio_tunnel_sock_);
+    active_audio_tunnel_sock_ = INVALID_SOCKET;
+  }
+
+  if (audio_stream_thread_.joinable()) {
+    audio_stream_thread_.join();
+  }
+}
+
+void ScreenMirrorPlugin::AudioStreamWorkerLoop(SOCKET sock) {
+  std::vector<uint8_t> recv_buf(16384);
+
+  while (is_audio_streaming_) {
+    const int bytes_read = recv(sock, reinterpret_cast<char*>(recv_buf.data()), static_cast<int>(recv_buf.size()), 0);
+
+    if (bytes_read > 0) {
+      if (audio_decoder_) {
+        audio_decoder_->DecodeStream(recv_buf.data(), static_cast<size_t>(bytes_read));
+      }
+    } else if (bytes_read == 0 || (bytes_read < 0 && WSAGetLastError() != WSAEWOULDBLOCK)) {
+      break;
+    }
+  }
+
+  is_audio_streaming_ = false;
+  Log("AUDIO", "Audio streaming worker stopped", "info");
+}
+
 void ScreenMirrorPlugin::HandleMethodCall(
     const flutter::MethodCall<flutter::EncodableValue>& method_call,
     std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result) {
@@ -362,6 +415,57 @@ void ScreenMirrorPlugin::HandleMethodCall(
     if (success) {
       StartStreamingWorker(tunnel_sock);
 
+      // Connect Audio Tunnel to Port 25335
+      SOCKET audio_sock = INVALID_SOCKET;
+      std::string audio_err;
+      bool audio_ok = false;
+      if (device_id > 0) {
+        audio_ok = usbmuxd_client_->ConnectTunnel(device_id, 25335, &audio_sock, &audio_err);
+      }
+      if (!audio_ok) {
+        // Direct TCP fallback for Wi-Fi mirroring
+        SOCKET direct_audio = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        if (direct_audio != INVALID_SOCKET) {
+          const BOOL flag = TRUE;
+          setsockopt(direct_audio, IPPROTO_TCP, TCP_NODELAY, reinterpret_cast<const char*>(&flag), sizeof(flag));
+          sockaddr_in direct_addr{};
+          direct_addr.sin_family = AF_INET;
+          direct_addr.sin_port = htons(25335);
+          inet_pton(AF_INET, "172.20.10.1", &direct_addr.sin_addr);
+
+          DWORD timeout = 1000;
+          setsockopt(direct_audio, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&timeout), sizeof(timeout));
+          setsockopt(direct_audio, SOL_SOCKET, SO_SNDTIMEO, reinterpret_cast<const char*>(&timeout), sizeof(timeout));
+
+          if (connect(direct_audio, reinterpret_cast<sockaddr*>(&direct_addr), sizeof(direct_addr)) == 0) {
+            audio_sock = direct_audio;
+            audio_ok = true;
+          } else {
+            closesocket(direct_audio);
+          }
+        }
+      }
+
+      if (!audio_ok) {
+        // Fallback: connect secondary socket to target_port (25334) and issue HTTP /mirrorVoice.do request
+        SOCKET voice_sock = INVALID_SOCKET;
+        std::string voice_err;
+        if (device_id > 0 && usbmuxd_client_->ConnectTunnel(device_id, target_port, &voice_sock, &voice_err)) {
+          const char* req = "GET /mirrorVoice.do HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n";
+          send(voice_sock, req, static_cast<int>(strlen(req)), 0);
+          audio_sock = voice_sock;
+          audio_ok = true;
+          Log("AUDIO", "Connected audio via /mirrorVoice.do handshake on port " + std::to_string(target_port), "info");
+        }
+      }
+
+      if (audio_ok) {
+        Log("AUDIO", "Successfully connected Audio Tunnel", "success");
+        StartAudioStreamingWorker(audio_sock);
+      } else {
+        Log("AUDIO", "Audio tunnel not available: " + audio_err, "warn");
+      }
+
       std::lock_guard<std::mutex> lock(sinks_mutex_);
       if (status_sink_) {
         flutter::EncodableMap map;
@@ -384,8 +488,12 @@ void ScreenMirrorPlugin::HandleMethodCall(
     }
   } else if (method_name == "disconnectDevice") {
     StopStreamingWorker();
+    StopAudioStreamingWorker();
     if (video_decoder_) {
       video_decoder_->Teardown();
+    }
+    if (audio_decoder_) {
+      audio_decoder_->Teardown();
     }
     result->Success(flutter::EncodableValue(true));
   } else if (method_name == "probeDevice") {

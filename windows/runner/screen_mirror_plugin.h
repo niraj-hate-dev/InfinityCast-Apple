@@ -31,6 +31,7 @@
 #include "usbmuxd_client.h"
 #include "rtp_demuxer.h"
 #include "video_decoder.h"
+#include "audio_decoder.h"
 
 namespace applecast {
 
@@ -56,17 +57,27 @@ class ScreenMirrorPlugin : public flutter::Plugin {
   void StopStreamingWorker();
   void StreamWorkerLoop(SOCKET sock);
 
+  void StartAudioStreamingWorker(SOCKET sock);
+  void StopAudioStreamingWorker();
+  void AudioStreamWorkerLoop(SOCKET sock);
+
   flutter::BinaryMessenger* messenger_ = nullptr;
   flutter::TextureRegistrar* texture_registrar_ = nullptr;
   std::unique_ptr<TextureBridge> texture_bridge_;
   std::unique_ptr<UsbmuxdClient> usbmuxd_client_;
   std::unique_ptr<RtpDemuxer> rtp_demuxer_;
   std::unique_ptr<VideoDecoder> video_decoder_;
+  std::unique_ptr<AudioDecoder> audio_decoder_;
 
-  // Tunnel streaming state
+  // Video tunnel streaming state
   std::atomic<bool> is_streaming_{false};
   SOCKET active_tunnel_sock_ = INVALID_SOCKET;
   std::thread stream_thread_;
+
+  // Audio tunnel streaming state
+  std::atomic<bool> is_audio_streaming_{false};
+  SOCKET active_audio_tunnel_sock_ = INVALID_SOCKET;
+  std::thread audio_stream_thread_;
 
   // Telemetry metrics tracking
   std::chrono::steady_clock::time_point last_metrics_time_;

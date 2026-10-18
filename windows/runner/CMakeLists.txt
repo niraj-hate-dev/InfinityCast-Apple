@@ -16,6 +16,7 @@ add_executable(${BINARY_NAME} WIN32
   "usbmuxd_client.cpp"
   "rtp_demuxer.cpp"
   "video_decoder.cpp"
+  "audio_decoder.cpp"
   "${FLUTTER_MANAGED_DIR}/generated_plugin_registrant.cc"
   "Runner.rc"
   "runner.exe.manifest"
@@ -42,6 +43,7 @@ target_compile_definitions(${BINARY_NAME} PRIVATE "_WINSOCK_DEPRECATED_NO_WARNIN
 target_link_libraries(${BINARY_NAME} PRIVATE flutter flutter_wrapper_app flutter_wrapper_plugin)
 target_link_libraries(${BINARY_NAME} PRIVATE "dwmapi.lib")
 target_link_libraries(${BINARY_NAME} PRIVATE "ws2_32.lib")
+target_link_libraries(${BINARY_NAME} PRIVATE "winmm.lib")
 target_link_libraries(${BINARY_NAME} PRIVATE "d3d11.lib")
 target_link_libraries(${BINARY_NAME} PRIVATE "dxgi.lib")
 target_link_libraries(${BINARY_NAME} PRIVATE "shell32.lib")
