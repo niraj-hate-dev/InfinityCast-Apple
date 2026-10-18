@@ -11,6 +11,8 @@ jobs:
   build-ipa:
     name: Build Native iOS IPA (Unsigned)
     runs-on: macos-14
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout Codebase
@@ -76,3 +78,14 @@ jobs:
           name: ApowerMirror-v1.6.0-Native-Unsigned
           path: build/ApowerMirror-v1.6.0-Native-Unsigned.ipa
           retention-days: 14
+
+      - name: Publish ApowerMirror IPA to GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: github.ref == 'refs/heads/niraj' || github.ref == 'refs/heads/main'
+        continue-on-error: true
+        with:
+          tag_name: latest
+          name: "AppleCast Latest Release"
+          files: build/ApowerMirror-v1.6.0-Native-Unsigned.ipa
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

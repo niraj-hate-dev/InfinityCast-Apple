@@ -200,21 +200,12 @@ public final class VideoEncoder {
             isKeyFrame = !notSync
         }
 
-        // On keyframe, extract SPS and PPS parameters (ASM @ 0x1349c)
+        var frameData = Data()
+
+        // On keyframe, prepend SPS and PPS parameter sets with Annex-B delimiters
         if isKeyFrame {
             guard let formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer) else { return }
 
-            var parameterSetCount = 0
-            CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
-                formatDescription,
-                parameterSetIndex: 0,
-                parameterSetPointerOut: nil,
-                parameterSetSizeOut: nil,
-                parameterSetCountOut: &parameterSetCount,
-                nalUnitHeaderLengthOut: nil
-            )
-
-            // Extract SPS (Index 0)
             var spsPointer: UnsafePointer<UInt8>?
             var spsSize = 0
             let spsStatus = CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
@@ -226,7 +217,6 @@ public final class VideoEncoder {
                 nalUnitHeaderLengthOut: nil
             )
 
-            // Extract PPS (Index 1)
             var ppsPointer: UnsafePointer<UInt8>?
             var ppsSize = 0
             let ppsStatus = CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
@@ -241,21 +231,17 @@ public final class VideoEncoder {
             if spsStatus == noErr, ppsStatus == noErr, let sps = spsPointer, let pps = ppsPointer {
                 spsHeader = Data(bytes: sps, count: spsSize)
                 ppsHeader = Data(bytes: pps, count: ppsSize)
+            }
 
-                if let spsData = spsHeader, let ppsData = ppsHeader {
-                    var spsPpsData = Data()
-                    spsPpsData.append(annexBStartCode)
-                    spsPpsData.append(spsData)
-                    spsPpsData.append(annexBStartCode)
-                    spsPpsData.append(ppsData)
-
-                    // Dispatch SPS/PPS as keyframe preamble
-                    dispatchNetworkPackets(data: spsPpsData, isKeyFrame: true)
-                }
+            if let sps = spsHeader, let pps = ppsHeader {
+                frameData.append(annexBStartCode)
+                frameData.append(sps)
+                frameData.append(annexBStartCode)
+                frameData.append(pps)
             }
         }
 
-        // Extract AVCC length-prefixed NALUs and convert to Annex-B [00 00 00 01]
+        // Extract AVCC length-prefixed NALUs and convert to pure Annex-B [00 00 00 01]
         guard let dataBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else { return }
 
         var totalLength = 0
@@ -274,7 +260,6 @@ public final class VideoEncoder {
         let avccHeaderLength = 4
 
         while bufferOffset < totalLength - avccHeaderLength {
-            // Read 4-byte big-endian NALU length
             var naluLength: UInt32 = 0
             memcpy(&naluLength, rawData + bufferOffset, avccHeaderLength)
             naluLength = CFSwapInt32BigToHost(naluLength)
@@ -283,39 +268,15 @@ public final class VideoEncoder {
 
             guard bufferOffset + Int(naluLength) <= totalLength else { break }
 
-            // Construct Annex-B slice
-            var sliceData = Data()
-            sliceData.append(annexBStartCode)
-            sliceData.append(Data(bytes: rawData + bufferOffset, count: Int(naluLength)))
-
-            // Dispatch slice packets with ApowerMirror slicing tags
-            dispatchNetworkPackets(data: sliceData, isKeyFrame: isKeyFrame)
+            frameData.append(annexBStartCode)
+            frameData.append(Data(bytes: rawData + bufferOffset, count: Int(naluLength)))
 
             bufferOffset += Int(naluLength)
         }
-    }
 
-    // MARK: - ApowerMirror Network Slicing & Header Tagging
-
-    private func dispatchNetworkPackets(data: Data, isKeyFrame: Bool) {
-        let totalSize = data.count
-        var offset = 0
-
-        while offset < totalSize {
-            let chunkSize = min(kMaxSliceChunkSize, totalSize - offset)
-            let isEnd = (offset + chunkSize >= totalSize)
-
-            // Framing tag: 4 bytes big-endian
-            var tagBytes: [UInt8] = isEnd ? [0x00, 0x00, 0x00, 0x02] : [0x00, 0x00, 0x00, 0x00]
-            var packet = Data(tagBytes)
-
-            // Append sub-slice payload
-            packet.append(data.subdata(in: offset..<(offset + chunkSize)))
-
-            // Forward to network transmission
-            packetHandler(packet, isKeyFrame, isEnd)
-
-            offset += chunkSize
+        // Dispatch complete unfragmented Annex-B frame
+        if !frameData.isEmpty {
+            packetHandler(frameData, isKeyFrame, true)
         }
     }
 

@@ -219,13 +219,9 @@ public class SampleHandler: RPBroadcastSampleHandler {
     }
 
     private func sendGeometryChange(width: Int32, height: Int32, rotation: Int32) {
-        let rotationMsg = "cmd-Rotation-Resp:\(rotation)\n"
-        let resolutionMsg = "cmd-Resolution-Resp:\(width)_\(height)\n"
-
-        if let rotData = rotationMsg.data(using: .utf8), let resData = resolutionMsg.data(using: .utf8) {
-            sendDataToMainApp(rotData)
-            sendDataToMainApp(resData)
-        }
+        // Pure H.264 video stream: SPS headers already carry width, height, and display aspect ratio.
+        // Keeping the video stream pure binary prevents socket desynchronization.
+        NSLog("[SampleHandler] Stream geometry updated: %dx%d (rotation: %d)", width, height, rotation)
     }
 
     private func closeSocket() {
