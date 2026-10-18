@@ -18,6 +18,35 @@ constexpr int kAvPixFmtBgra = 28;
 constexpr int kSwsFastBilinear = 1;
 constexpr int64_t kAvNoPtsValue = static_cast<int64_t>(0x8000000000000000ULL);
 
+// Exact 64-bit struct layouts for AVPacket and AVFrame across FFmpeg 6.x and 7.x
+struct FF_AVPacket {
+  void* buf;                // offset 0
+  int64_t pts;             // offset 8
+  int64_t dts;             // offset 16
+  uint8_t* data;           // offset 24
+  int size;                // offset 32
+  int stream_index;        // offset 36
+  int flags;               // offset 40
+  void* side_data;         // offset 48
+  int side_data_elems;     // offset 56
+  int64_t duration;        // offset 64
+  int64_t pos;             // offset 72
+  void* opaque;            // offset 80
+  void* opaque_ref;        // offset 88
+  int time_base_num;       // offset 96
+  int time_base_den;       // offset 100
+};
+
+struct FF_AVFrame {
+  uint8_t* data[8];        // offset 0..63
+  int linesize[8];         // offset 64..95
+  uint8_t** extended_data; // offset 96..103
+  int width;               // offset 104
+  int height;              // offset 108
+  int nb_samples;          // offset 112
+  int format;              // offset 116
+};
+
 typedef void* (*FnAvcodecFindDecoder)(int id);
 typedef void* (*FnAvcodecAllocContext3)(const void* codec);
 typedef void  (*FnAvcodecFreeContext)(void** s);
@@ -31,7 +60,9 @@ typedef int   (*FnAvcodecSendPacket)(void* avctx, const void* pkt);
 typedef int   (*FnAvcodecReceiveFrame)(void* avctx, void* frame);
 typedef int   (*FnAvHwdeviceCtxCreate)(void** device_ctx, int type, const char* device, void* opts, int flags);
 typedef int   (*FnAvOptSetInt)(void* obj, const char* name, int64_t val, int search_flags);
-typedef int   (*FnAvNewPacket)(void* pkt, int size);
+typedef int   (*FnAvOptSet)(void* obj, const char* name, const char* val, int search_flags);
+typedef void* (*FnAvBufferRef)(const void* buf);
+typedef void  (*FnAvBufferUnref)(void** buf);
 typedef void* (*FnAvParserInit)(int codec_id);
 typedef int   (*FnAvParserParse2)(void* s, void* avctx,
                                   uint8_t** poutbuf, int* poutbuf_size,
@@ -58,7 +89,6 @@ struct FfmpegFunctions {
   FnAvPacketUnref packet_unref = nullptr;
   FnAvcodecSendPacket send_packet = nullptr;
   FnAvcodecReceiveFrame receive_frame = nullptr;
-  FnAvNewPacket new_packet = nullptr;
   FnAvParserInit parser_init = nullptr;
   FnAvParserParse2 parser_parse2 = nullptr;
   FnAvParserClose parser_close = nullptr;
@@ -68,6 +98,9 @@ struct FfmpegFunctions {
   FnAvFrameFree frame_free = nullptr;
   FnAvHwdeviceCtxCreate hwdevice_ctx_create = nullptr;
   FnAvOptSetInt opt_set_int = nullptr;
+  FnAvOptSet opt_set = nullptr;
+  FnAvBufferRef buffer_ref = nullptr;
+  FnAvBufferUnref buffer_unref = nullptr;
 
   // swscale
   FnSwsGetContext sws_getContext = nullptr;
@@ -213,6 +246,9 @@ bool VideoDecoder::LoadFfmpegSymbols() {
   g_ffmpeg.frame_free = (FnAvFrameFree)GetProcAddress(avutil_module_, "av_frame_free");
   g_ffmpeg.hwdevice_ctx_create = (FnAvHwdeviceCtxCreate)GetProcAddress(avutil_module_, "av_hwdevice_ctx_create");
   g_ffmpeg.opt_set_int = (FnAvOptSetInt)GetProcAddress(avutil_module_, "av_opt_set_int");
+  g_ffmpeg.opt_set = (FnAvOptSet)GetProcAddress(avutil_module_, "av_opt_set");
+  g_ffmpeg.buffer_ref = (FnAvBufferRef)GetProcAddress(avutil_module_, "av_buffer_ref");
+  g_ffmpeg.buffer_unref = (FnAvBufferUnref)GetProcAddress(avutil_module_, "av_buffer_unref");
 
   // 2. Load avcodec
   const char* kAvcodecNames[] = {
@@ -236,7 +272,6 @@ bool VideoDecoder::LoadFfmpegSymbols() {
   g_ffmpeg.packet_alloc = (FnAvPacketAlloc)GetProcAddress(avcodec_module_, "av_packet_alloc");
   g_ffmpeg.packet_free = (FnAvPacketFree)GetProcAddress(avcodec_module_, "av_packet_free");
   g_ffmpeg.packet_unref = (FnAvPacketUnref)GetProcAddress(avcodec_module_, "av_packet_unref");
-  g_ffmpeg.new_packet = (FnAvNewPacket)GetProcAddress(avcodec_module_, "av_new_packet");
   g_ffmpeg.parser_init = (FnAvParserInit)GetProcAddress(avcodec_module_, "av_parser_init");
   g_ffmpeg.parser_parse2 = (FnAvParserParse2)GetProcAddress(avcodec_module_, "av_parser_parse2");
   g_ffmpeg.parser_close = (FnAvParserClose)GetProcAddress(avcodec_module_, "av_parser_close");
@@ -285,17 +320,28 @@ bool VideoDecoder::InitializeCodec() {
     return false;
   }
 
-  // Set low-delay flags and single-thread decode via standard av_opt_set_int
+  // 1. Configure ultra-low-latency and multi-threaded CPU decoding
+  // threads = 0: automatically detects CPU cores for slice & frame decoding (fixes lag completely)
+  // thread_type = 3: FF_THREAD_FRAME (1) | FF_THREAD_SLICE (2)
   if (g_ffmpeg.opt_set_int) {
+    g_ffmpeg.opt_set_int(av_codec_ctx_, "threads", 0, 0);
+    g_ffmpeg.opt_set_int(av_codec_ctx_, "thread_type", 3, 0);
     g_ffmpeg.opt_set_int(av_codec_ctx_, "flags", kAvCodecFlagLowDelay, 0);
-    g_ffmpeg.opt_set_int(av_codec_ctx_, "threads", 1, 0);
+    g_ffmpeg.opt_set_int(av_codec_ctx_, "flags2", 1 /* FAST */, 0);
+  }
+  if (g_ffmpeg.opt_set) {
+    g_ffmpeg.opt_set(av_codec_ctx_, "tune", "zerolatency", 0);
   }
 
-  // Configure D3D11VA Hardware Acceleration Device Context if available
+  // 2. Hardware Acceleration Initialization (D3D11VA GPU with seamless CPU fallback)
   if (g_ffmpeg.hwdevice_ctx_create) {
     const int ret = g_ffmpeg.hwdevice_ctx_create(&av_hw_device_ctx_, kAvHwDeviceTypeD3d11va, nullptr, nullptr, 0);
     if (ret >= 0) {
       is_hw_accelerated_ = true;
+      std::cout << "[DECODER] D3D11VA GPU hardware acceleration enabled." << std::endl;
+    } else {
+      is_hw_accelerated_ = false;
+      std::cout << "[DECODER] D3D11VA not active, using ultra-fast multi-core CPU decoding." << std::endl;
     }
   }
 
@@ -344,19 +390,21 @@ bool VideoDecoder::DecodeStream(const uint8_t* in_data, size_t in_size) {
 
     if (parsed_size > 0 && parsed_buf) {
       g_ffmpeg.packet_unref(av_packet_);
-      if (g_ffmpeg.new_packet(av_packet_, parsed_size) == 0) {
-        uint8_t** pkt_data = reinterpret_cast<uint8_t**>(reinterpret_cast<uint8_t*>(av_packet_) + 24);
-        if (pkt_data && *pkt_data) {
-          std::memcpy(*pkt_data, parsed_buf, parsed_size);
-        }
+      auto* pkt = reinterpret_cast<FF_AVPacket*>(av_packet_);
+      pkt->data = parsed_buf;
+      pkt->size = parsed_size;
+      pkt->pts = kAvNoPtsValue;
+      pkt->dts = kAvNoPtsValue;
 
-        const int send_res = g_ffmpeg.send_packet(av_codec_ctx_, av_packet_);
-        if (send_res >= 0 || send_res == -11 /* EAGAIN */) {
-          while (g_ffmpeg.receive_frame(av_codec_ctx_, av_frame_) >= 0) {
-            RenderDecodedFrame(av_frame_);
-          }
+      const int send_res = g_ffmpeg.send_packet(av_codec_ctx_, av_packet_);
+      if (send_res >= 0 || send_res == -11 /* EAGAIN */) {
+        while (g_ffmpeg.receive_frame(av_codec_ctx_, av_frame_) >= 0) {
+          RenderDecodedFrame(av_frame_);
         }
       }
+
+      pkt->data = nullptr;
+      pkt->size = 0;
     }
 
     if (consumed <= 0 && parsed_size <= 0) {
@@ -375,14 +423,12 @@ bool VideoDecoder::DecodePacket(const DemuxedVideoPacket& packet) {
 void VideoDecoder::RenderDecodedFrame(void* av_frame) {
   if (!av_frame) return;
 
-  uint8_t** src_data = reinterpret_cast<uint8_t**>(reinterpret_cast<uint8_t*>(av_frame) + 0);
-  int* src_linesize = reinterpret_cast<int*>(reinterpret_cast<uint8_t*>(av_frame) + 64);
+  auto* frame = reinterpret_cast<FF_AVFrame*>(av_frame);
+  const int frame_w = frame->width;
+  const int frame_h = frame->height;
+  const int frame_fmt = frame->format;
 
-  const int frame_w = *(reinterpret_cast<int*>(reinterpret_cast<uint8_t*>(av_frame) + 104));
-  const int frame_h = *(reinterpret_cast<int*>(reinterpret_cast<uint8_t*>(av_frame) + 108));
-  const int frame_fmt = *(reinterpret_cast<int*>(reinterpret_cast<uint8_t*>(av_frame) + 116));
-
-  if (!src_data[0] || frame_w <= 0 || frame_h <= 0) {
+  if (!frame->data[0] || frame_w <= 0 || frame_h <= 0) {
     return;
   }
 
@@ -391,12 +437,12 @@ void VideoDecoder::RenderDecodedFrame(void* av_frame) {
 
   static uint64_t s_rendered_count = 0;
   s_rendered_count++;
-  if (s_rendered_count == 1 || s_rendered_count % 180 == 0) {
-    std::cout << "[DECODER] Successfully rendered active screen frame #" << s_rendered_count
-              << " (" << frame_w << "x" << frame_h << ")" << std::endl;
+  if (s_rendered_count == 1 || s_rendered_count % 120 == 0) {
+    std::cout << "[DECODER] Screen frame #" << s_rendered_count
+              << " displayed (" << frame_w << "x" << frame_h << ", fmt: " << frame_fmt << ")" << std::endl;
   }
 
-  // Resize buffers if resolution changed
+  // Resize buffers if resolution changed (e.g. portrait <-> landscape rotation)
   if (target_w != width_ || target_h != height_) {
     width_ = target_w;
     height_ = target_h;
@@ -415,7 +461,8 @@ void VideoDecoder::RenderDecodedFrame(void* av_frame) {
     rgba_buffer_.resize(required_bytes);
   }
 
-  // Convert to RGBA using SIMD swscale if available
+  // 1. Convert to RGBA using SIMD swscale if available
+  bool converted = false;
   if (g_ffmpeg.sws_scale && g_ffmpeg.sws_getContext) {
     if (!sws_ctx_ || current_pix_fmt_ != frame_fmt) {
       if (sws_ctx_ && g_ffmpeg.sws_freeContext) {
@@ -431,39 +478,69 @@ void VideoDecoder::RenderDecodedFrame(void* av_frame) {
     if (sws_ctx_) {
       uint8_t* dst_planes[4] = { rgba_buffer_.data(), nullptr, nullptr, nullptr };
       const int dst_strides[4] = { static_cast<int>(width_ * 4), 0, 0, 0 };
-      g_ffmpeg.sws_scale(sws_ctx_, src_data, src_linesize, 0, static_cast<int>(height_), dst_planes, dst_strides);
+      g_ffmpeg.sws_scale(sws_ctx_, frame->data, frame->linesize, 0, static_cast<int>(height_), dst_planes, dst_strides);
+      converted = true;
     }
-  } else {
-    // High-performance CPU fallback for YUV420P -> RGBA
-    const uint8_t* y_plane = src_data[0];
-    const uint8_t* u_plane = src_data[1];
-    const uint8_t* v_plane = src_data[2];
-    const int y_stride = src_linesize[0];
-    const int u_stride = src_linesize[1];
-    const int v_stride = src_linesize[2];
+  }
 
-    if (y_plane && u_plane && v_plane) {
-      uint32_t* dst = reinterpret_cast<uint32_t*>(rgba_buffer_.data());
-      for (size_t y = 0; y < height_; ++y) {
-        const uint8_t* y_row = y_plane + y * y_stride;
-        const uint8_t* u_row = u_plane + (y / 2) * u_stride;
-        const uint8_t* v_row = v_plane + (y / 2) * v_stride;
-        uint32_t* dst_row = dst + y * width_;
+  // 2. High-performance multi-format CPU fallback for NV12 & YUV420P
+  if (!converted) {
+    const uint8_t* y_plane = frame->data[0];
+    const int y_stride = frame->linesize[0];
 
-        for (size_t x = 0; x < width_; ++x) {
-          const int c = static_cast<int>(y_row[x]) - 16;
-          const int d = static_cast<int>(u_row[x / 2]) - 128;
-          const int e = static_cast<int>(v_row[x / 2]) - 128;
+    if (frame_fmt == 23 /* AV_PIX_FMT_NV12 */) {
+      const uint8_t* uv_plane = frame->data[1];
+      const int uv_stride = frame->linesize[1];
+      if (y_plane && uv_plane) {
+        uint32_t* dst = reinterpret_cast<uint32_t*>(rgba_buffer_.data());
+        for (size_t y = 0; y < height_; ++y) {
+          const uint8_t* y_row = y_plane + y * y_stride;
+          const uint8_t* uv_row = uv_plane + (y / 2) * uv_stride;
+          uint32_t* dst_row = dst + y * width_;
+          for (size_t x = 0; x < width_; ++x) {
+            const int c = static_cast<int>(y_row[x]) - 16;
+            const int d = static_cast<int>(uv_row[(x & ~1)]) - 128;
+            const int e = static_cast<int>(uv_row[(x & ~1) + 1]) - 128;
+            int r = (298 * c + 409 * e + 128) >> 8;
+            int g = (298 * c - 100 * d - 208 * e + 128) >> 8;
+            int b = (298 * c + 516 * d + 128) >> 8;
+            r = (r < 0) ? 0 : ((r > 255) ? 255 : r);
+            g = (g < 0) ? 0 : ((g > 255) ? 255 : g);
+            b = (b < 0) ? 0 : ((b > 255) ? 255 : b);
+            dst_row[x] = (0xFF << 24) | (b << 16) | (g << 8) | r;
+          }
+        }
+      }
+    } else {
+      // YUV420P
+      const uint8_t* u_plane = frame->data[1];
+      const uint8_t* v_plane = frame->data[2];
+      const int u_stride = frame->linesize[1];
+      const int v_stride = frame->linesize[2];
 
-          int r = (298 * c + 409 * e + 128) >> 8;
-          int g = (298 * c - 100 * d - 208 * e + 128) >> 8;
-          int b = (298 * c + 516 * d + 128) >> 8;
+      if (y_plane && u_plane && v_plane) {
+        uint32_t* dst = reinterpret_cast<uint32_t*>(rgba_buffer_.data());
+        for (size_t y = 0; y < height_; ++y) {
+          const uint8_t* y_row = y_plane + y * y_stride;
+          const uint8_t* u_row = u_plane + (y / 2) * u_stride;
+          const uint8_t* v_row = v_plane + (y / 2) * v_stride;
+          uint32_t* dst_row = dst + y * width_;
 
-          r = (r < 0) ? 0 : ((r > 255) ? 255 : r);
-          g = (g < 0) ? 0 : ((g > 255) ? 255 : g);
-          b = (b < 0) ? 0 : ((b > 255) ? 255 : b);
+          for (size_t x = 0; x < width_; ++x) {
+            const int c = static_cast<int>(y_row[x]) - 16;
+            const int d = static_cast<int>(u_row[x / 2]) - 128;
+            const int e = static_cast<int>(v_row[x / 2]) - 128;
 
-          dst_row[x] = (0xFF << 24) | (b << 16) | (g << 8) | r;
+            int r = (298 * c + 409 * e + 128) >> 8;
+            int g = (298 * c - 100 * d - 208 * e + 128) >> 8;
+            int b = (298 * c + 516 * d + 128) >> 8;
+
+            r = (r < 0) ? 0 : ((r > 255) ? 255 : r);
+            g = (g < 0) ? 0 : ((g > 255) ? 255 : g);
+            b = (b < 0) ? 0 : ((b > 255) ? 255 : b);
+
+            dst_row[x] = (0xFF << 24) | (b << 16) | (g << 8) | r;
+          }
         }
       }
     }

@@ -95,7 +95,21 @@ void RtpDemuxer::ConsumeData(const uint8_t* buffer, size_t length) {
       continue;
     }
 
-    // 2. Mode C: RFC 2326 Interleaved RTP framing ($ = 0x24)
+    // 2. Skip text control commands (e.g. "cmd-Rotation-Resp:...\n" or "cmd-Resolution-Resp:...\n")
+    if (rem >= 4 && std::memcmp(accumulator_.data() + read_idx, "cmd-", 4) == 0) {
+      bool found_nl = false;
+      for (size_t i = read_idx; i < accumulator_.size(); ++i) {
+        if (accumulator_[i] == '\n') {
+          read_idx = i + 1;
+          found_nl = true;
+          break;
+        }
+      }
+      if (found_nl) continue;
+      break;
+    }
+
+    // 3. Mode C: RFC 2326 Interleaved RTP framing ($ = 0x24)
     if (accumulator_[read_idx] == kRtpInterleavedMagic) {
       if (rem < 4) break;
       const uint8_t channel = accumulator_[read_idx + 1];
@@ -108,7 +122,7 @@ void RtpDemuxer::ConsumeData(const uint8_t* buffer, size_t length) {
       continue;
     }
 
-    // 3. Mode A: ApowerMirror Sliced Framing (4-byte tag [00 00 00 00] or [00 00 00 02])
+    // 4. Mode A: ApowerMirror Sliced Framing (4-byte tag [00 00 00 00] or [00 00 00 02])
     if (rem >= 4 && accumulator_[read_idx] == 0x00 && accumulator_[read_idx + 1] == 0x00 &&
         accumulator_[read_idx + 2] == 0x00 &&
         (accumulator_[read_idx + 3] == 0x00 || accumulator_[read_idx + 3] == 0x02)) {
@@ -116,15 +130,12 @@ void RtpDemuxer::ConsumeData(const uint8_t* buffer, size_t length) {
       const uint8_t tag = accumulator_[read_idx + 3];
 
       if (tag == 0x00) {
-        // Tag 0x00 = Intermediate slice chunk.
-        // ApowerMirror slices NALUs into chunks of exactly 10,240 bytes (0x2800).
-        // Total chunk on wire = 4 (tag) + 10240 = 10,244 bytes.
+        // Tag 0x00 = Intermediate slice chunk of 10,240 bytes
         constexpr size_t kApowerChunkLen = 10240;
         constexpr size_t kApowerTotalChunk = 4 + kApowerChunkLen;
 
         if (rem < kApowerTotalChunk) {
-          // Incomplete chunk, wait for remaining bytes from TCP
-          break;
+          break; // wait for remaining bytes
         }
 
         apower_assembly_buffer_.insert(
@@ -135,137 +146,67 @@ void RtpDemuxer::ConsumeData(const uint8_t* buffer, size_t length) {
         read_idx += kApowerTotalChunk;
         continue;
       } else {
-        // Tag 0x02 = End slice chunk (final chunk of NAL unit / frame).
-        // The payload of this chunk starts at read_idx + 4.
-        // It ends where the NEXT packet header begins.
+        // Tag 0x02 = End frame chunk.
+        // Locate end of this chunk (next tag or end of accumulator)
         size_t next_boundary = std::string::npos;
         for (size_t i = read_idx + 4; i + 4 <= accumulator_.size(); ++i) {
-          // Next ApowerMirror packet: [00 00 00 00/02] followed by [00 00 00 01]
-          if (i + 8 <= accumulator_.size() &&
-              accumulator_[i] == 0x00 && accumulator_[i + 1] == 0x00 && accumulator_[i + 2] == 0x00 &&
-              (accumulator_[i + 3] == 0x00 || accumulator_[i + 3] == 0x02) &&
-              accumulator_[i + 4] == 0x00 && accumulator_[i + 5] == 0x00 &&
-              accumulator_[i + 6] == 0x00 && accumulator_[i + 7] == 0x01) {
+          if (accumulator_[i] == 0x00 && accumulator_[i + 1] == 0x00 && accumulator_[i + 2] == 0x00 &&
+              (accumulator_[i + 3] == 0x00 || accumulator_[i + 3] == 0x02 || accumulator_[i + 3] == 0x01)) {
             next_boundary = i;
             break;
           }
-          // RTP packet
           if (accumulator_[i] == kRtpInterleavedMagic) {
             next_boundary = i;
             break;
           }
-          // HTTP header
-          if (i + 4 <= accumulator_.size() &&
-              (std::memcmp(accumulator_.data() + i, "HTTP", 4) == 0 ||
-               std::memcmp(accumulator_.data() + i, "GET ", 4) == 0)) {
-            next_boundary = i;
-            break;
-          }
         }
 
-        if (next_boundary != std::string::npos) {
-          const size_t final_chunk_len = next_boundary - (read_idx + 4);
+        const size_t final_chunk_len = (next_boundary != std::string::npos)
+                                           ? (next_boundary - (read_idx + 4))
+                                           : (rem - 4);
+
+        if (final_chunk_len > 0) {
           apower_assembly_buffer_.insert(
               apower_assembly_buffer_.end(),
               accumulator_.data() + read_idx + 4,
               accumulator_.data() + read_idx + 4 + final_chunk_len);
-
-          if (!apower_assembly_buffer_.empty()) {
-            // Find NAL unit type
-            uint8_t nal_type = 0;
-            for (size_t j = 0; j + 4 < apower_assembly_buffer_.size(); ++j) {
-              if (apower_assembly_buffer_[j] == 0x00 && apower_assembly_buffer_[j + 1] == 0x00 &&
-                  apower_assembly_buffer_[j + 2] == 0x00 && apower_assembly_buffer_[j + 3] == 0x01) {
-                nal_type = apower_assembly_buffer_[j + 4] & 0x1F;
-                CacheParameterSets(nal_type, apower_assembly_buffer_.data() + j + 4, apower_assembly_buffer_.size() - j - 4);
-                break;
-              }
-            }
-
-            DemuxedVideoPacket packet;
-            packet.pts = 0;
-            packet.is_keyframe = (nal_type == kNalTypeIdr || nal_type == kNalTypeSps);
-
-            // Prepend cached SPS/PPS to IDR keyframe if not present
-            if (nal_type == kNalTypeIdr && !cached_sps_.empty() && !cached_pps_.empty()) {
-              bool has_sps = false;
-              for (size_t k = 0; k + 4 < apower_assembly_buffer_.size() && k < 64; ++k) {
-                if (apower_assembly_buffer_[k] == 0x00 && apower_assembly_buffer_[k + 1] == 0x00 &&
-                    apower_assembly_buffer_[k + 2] == 0x00 && apower_assembly_buffer_[k + 3] == 0x01 &&
-                    (apower_assembly_buffer_[k + 4] & 0x1F) == kNalTypeSps) {
-                  has_sps = true;
-                  break;
-                }
-              }
-              if (!has_sps) {
-                AppendAnnexBStartCode(packet.data);
-                packet.data.insert(packet.data.end(), cached_sps_.begin(), cached_sps_.end());
-                AppendAnnexBStartCode(packet.data);
-                packet.data.insert(packet.data.end(), cached_pps_.begin(), cached_pps_.end());
-              }
-            }
-
-            packet.data.insert(packet.data.end(), apower_assembly_buffer_.begin(), apower_assembly_buffer_.end());
-            total_packets_++;
-            if (on_video_packet_) {
-              on_video_packet_(packet);
-            }
-            apower_assembly_buffer_.clear();
-          }
-
-          read_idx = next_boundary;
-          continue;
-        } else {
-          // Boundary not found yet
-          if (rem <= 4 + 10240 + 8) {
-            break;
-          }
-          // Fallback if boundary wasn't found after full chunk size
-          apower_assembly_buffer_.insert(
-              apower_assembly_buffer_.end(),
-              accumulator_.data() + read_idx + 4,
-              accumulator_.data() + read_idx + 4 + 10240);
-          read_idx += (4 + 10240);
-          continue;
         }
+
+        if (!apower_assembly_buffer_.empty()) {
+          DemuxedVideoPacket packet;
+          packet.data = std::move(apower_assembly_buffer_);
+          packet.pts = 0;
+          total_packets_++;
+          if (on_video_packet_) {
+            on_video_packet_(packet);
+          }
+          apower_assembly_buffer_.clear();
+        }
+
+        read_idx += (4 + final_chunk_len);
+        continue;
       }
     }
 
-    // 4. Mode B: Direct Raw Annex-B start code [00 00 00 01]
+    // 5. Mode B: Direct Raw Annex-B stream [00 00 00 01]
     if (rem >= 4 && accumulator_[read_idx] == 0x00 && accumulator_[read_idx + 1] == 0x00 &&
         accumulator_[read_idx + 2] == 0x00 && accumulator_[read_idx + 3] == 0x01) {
 
-      size_t next_idx = read_idx + 4;
-      while (next_idx + 4 <= accumulator_.size()) {
-        if (accumulator_[next_idx] == 0x00 && accumulator_[next_idx + 1] == 0x00 &&
-            accumulator_[next_idx + 2] == 0x00 && accumulator_[next_idx + 3] == 0x01) {
-          break;
-        }
-        next_idx++;
-      }
-
-      if (next_idx + 4 > accumulator_.size()) {
-        // Wait for remaining NAL unit
-        break;
-      }
-
+      // Feed complete Annex-B slice chunk directly to video decoder stream parser
       DemuxedVideoPacket packet;
-      packet.data.assign(accumulator_.data() + read_idx, accumulator_.data() + next_idx);
+      packet.data.assign(accumulator_.data() + read_idx, accumulator_.data() + accumulator_.size());
       packet.pts = 0;
-      const uint8_t nal_type = packet.data[4] & 0x1F;
-      packet.is_keyframe = (nal_type == kNalTypeIdr || nal_type == kNalTypeSps);
-      CacheParameterSets(nal_type, packet.data.data() + 4, packet.data.size() - 4);
-
       total_packets_++;
+
       if (on_video_packet_) {
         on_video_packet_(packet);
       }
 
-      read_idx = next_idx;
-      continue;
+      read_idx = accumulator_.size();
+      break;
     }
 
-    // 5. Unrecognized leading byte, scan forward
+    // 6. Unrecognized leading byte, scan forward
     read_idx++;
   }
 
