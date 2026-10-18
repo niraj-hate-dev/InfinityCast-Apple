@@ -201,7 +201,7 @@ bool AudioDecoder::InitWaveOut(uint32_t sample_rate, uint32_t channels) {
   wfx.nAvgBytesPerSec = wfx.nSamplesPerSec * wfx.nBlockAlign;
   wfx.cbSize = 0;
 
-  MMRESULT res = waveOutOpen(&h_wave_out_, WAVE_MAPPER, &wfx, (DWORD_PTR)&WaveOutProc, (DWORD_PTR)this, CALLBACK_FUNCTION);
+  MMRESULT res = waveOutOpen(&h_wave_out_, WAVE_MAPPER, &wfx, reinterpret_cast<DWORD_PTR>(&AudioDecoder::WaveOutProc), reinterpret_cast<DWORD_PTR>(this), CALLBACK_FUNCTION);
   if (res != MMSYSERR_NOERROR) {
     Log("AUDIO", "waveOutOpen failed with error: " + std::to_string(res), "error");
     h_wave_out_ = nullptr;
@@ -289,6 +289,8 @@ bool AudioDecoder::DecodeStream(const uint8_t* in_data, size_t in_size) {
   if (!codec_ctx_ || !parser_) return false;
 
   const uint8_t* cur_ptr = in_data;
+  int cur_size = static_cast<int>(in_size);
+
   // If packet starts with HTTP response (e.g. from /mirrorVoice.do handshake), skip HTTP header
   if (cur_size >= 4 && cur_ptr[0] == 'H' && cur_ptr[1] == 'T' && cur_ptr[2] == 'T' && cur_ptr[3] == 'P') {
     for (int i = 0; i <= cur_size - 4; ++i) {

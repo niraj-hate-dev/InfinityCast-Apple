@@ -42,7 +42,7 @@ jobs:
         run: flutter test
 
       - name: Build Windows Desktop Release
-        run: flutter build windows --release
+        run: flutter build windows --release -v
 
       - name: Package Windows Binary
         shell: pwsh
