@@ -56,6 +56,7 @@ class VideoDecoder {
   TextureBridge* texture_bridge_ = nullptr;
   size_t width_ = 1920;
   size_t height_ = 1080;
+  int current_pix_fmt_ = -1;
   bool is_hw_accelerated_ = false;
 
   // Direct3D 11 Core Components
@@ -68,12 +69,17 @@ class VideoDecoder {
   // Dynamic FFmpeg Module Handles & Function Pointers
   HMODULE avcodec_module_ = nullptr;
   HMODULE avutil_module_ = nullptr;
+  HMODULE swscale_module_ = nullptr;
 
   void* av_codec_ = nullptr;
   void* av_codec_ctx_ = nullptr;
   void* av_hw_device_ctx_ = nullptr;
   void* av_packet_ = nullptr;
   void* av_frame_ = nullptr;
+  void* sws_ctx_ = nullptr;
+
+  // Zero-allocation reusable BGRA frame buffer for Direct3D 11 surface upload
+  std::vector<uint8_t> bgra_buffer_;
 
   std::mutex decode_mutex_;
   std::atomic<bool> is_initialized_{false};

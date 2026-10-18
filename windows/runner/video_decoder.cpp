@@ -12,6 +12,9 @@ constexpr int kAvCodecIdH264 = 27;
 constexpr int kAvCodecFlagLowDelay = (1 << 19);
 constexpr int kAvHwDeviceTypeD3d11va = 4;
 constexpr int kAvPixFmtD3d11 = 174;
+constexpr int kAvPixFmtYuv420p = 0;
+constexpr int kAvPixFmtBgra = 28;
+constexpr int kSwsFastBilinear = 1;
 
 typedef void* (*FnAvcodecFindDecoder)(int id);
 typedef void* (*FnAvcodecAllocContext3)(const void* codec);
@@ -19,24 +22,44 @@ typedef void  (*FnAvcodecFreeContext)(void** s);
 typedef int   (*FnAvcodecOpen2)(void* avctx, const void* codec, void** options);
 typedef void* (*FnAvPacketAlloc)();
 typedef void  (*FnAvPacketFree)(void** pkt);
+typedef void  (*FnAvPacketUnref)(void* pkt);
 typedef void* (*FnAvFrameAlloc)();
 typedef void  (*FnAvFrameFree)(void** frame);
 typedef int   (*FnAvcodecSendPacket)(void* avctx, const void* pkt);
 typedef int   (*FnAvcodecReceiveFrame)(void* avctx, void* frame);
 typedef int   (*FnAvHwdeviceCtxCreate)(void** device_ctx, int type, const char* device, void* opts, int flags);
+typedef int   (*FnAvOptSetInt)(void* obj, const char* name, int64_t val, int search_flags);
+
+typedef void* (*FnSwsGetContext)(int srcW, int srcH, int srcFormat,
+                                 int dstW, int dstH, int dstFormat,
+                                 int flags, void* srcFilter, void* dstFilter, const double* param);
+typedef int   (*FnSwsScale)(void* c, const uint8_t* const srcSlice[],
+                            const int srcStride[], int srcSliceY, int srcSliceH,
+                            uint8_t* const dst[], const int dstStride[]);
+typedef void  (*FnSwsFreeContext)(void* swsContext);
 
 struct FfmpegFunctions {
+  // avcodec
   FnAvcodecFindDecoder find_decoder = nullptr;
   FnAvcodecAllocContext3 alloc_context3 = nullptr;
   FnAvcodecFreeContext free_context = nullptr;
   FnAvcodecOpen2 open2 = nullptr;
   FnAvPacketAlloc packet_alloc = nullptr;
   FnAvPacketFree packet_free = nullptr;
-  FnAvFrameAlloc frame_alloc = nullptr;
-  FnAvFrameFree frame_free = nullptr;
+  FnAvPacketUnref packet_unref = nullptr;
   FnAvcodecSendPacket send_packet = nullptr;
   FnAvcodecReceiveFrame receive_frame = nullptr;
+
+  // avutil
+  FnAvFrameAlloc frame_alloc = nullptr;
+  FnAvFrameFree frame_free = nullptr;
   FnAvHwdeviceCtxCreate hwdevice_ctx_create = nullptr;
+  FnAvOptSetInt opt_set_int = nullptr;
+
+  // swscale
+  FnSwsGetContext sws_getContext = nullptr;
+  FnSwsScale sws_scale = nullptr;
+  FnSwsFreeContext sws_freeContext = nullptr;
 } g_ffmpeg;
 
 }  // namespace
@@ -146,17 +169,38 @@ bool VideoDecoder::CreateSharedTexture(size_t width, size_t height) {
 }
 
 bool VideoDecoder::LoadFfmpegSymbols() {
+  // 1. Load avutil first (core dependency for avcodec and swscale)
+  const char* kAvutilNames[] = {
+      "avutil-59.dll", "avutil-60.dll", "avutil-58.dll", "avutil-57.dll",
+      "avutil-56.dll", "avutil.dll"
+  };
+  for (const char* dll_name : kAvutilNames) {
+    avutil_module_ = LoadLibraryA(dll_name);
+    if (avutil_module_) break;
+  }
+
+  if (!avutil_module_) {
+    std::cerr << "[DECODER] avutil dynamic library not found" << std::endl;
+    return false;
+  }
+
+  g_ffmpeg.frame_alloc = (FnAvFrameAlloc)GetProcAddress(avutil_module_, "av_frame_alloc");
+  g_ffmpeg.frame_free = (FnAvFrameFree)GetProcAddress(avutil_module_, "av_frame_free");
+  g_ffmpeg.hwdevice_ctx_create = (FnAvHwdeviceCtxCreate)GetProcAddress(avutil_module_, "av_hwdevice_ctx_create");
+  g_ffmpeg.opt_set_int = (FnAvOptSetInt)GetProcAddress(avutil_module_, "av_opt_set_int");
+
+  // 2. Load avcodec
   const char* kAvcodecNames[] = {
-      "avcodec-62.dll", "avcodec-61.dll", "avcodec-60.dll",
+      "avcodec-61.dll", "avcodec-62.dll", "avcodec-60.dll",
       "avcodec-59.dll", "avcodec-58.dll", "avcodec.dll"
   };
-
   for (const char* dll_name : kAvcodecNames) {
     avcodec_module_ = LoadLibraryA(dll_name);
     if (avcodec_module_) break;
   }
 
   if (!avcodec_module_) {
+    std::cerr << "[DECODER] avcodec dynamic library not found" << std::endl;
     return false;
   }
 
@@ -166,25 +210,32 @@ bool VideoDecoder::LoadFfmpegSymbols() {
   g_ffmpeg.open2 = (FnAvcodecOpen2)GetProcAddress(avcodec_module_, "avcodec_open2");
   g_ffmpeg.packet_alloc = (FnAvPacketAlloc)GetProcAddress(avcodec_module_, "av_packet_alloc");
   g_ffmpeg.packet_free = (FnAvPacketFree)GetProcAddress(avcodec_module_, "av_packet_free");
-  g_ffmpeg.frame_alloc = (FnAvFrameAlloc)GetProcAddress(avcodec_module_, "av_frame_alloc");
-  g_ffmpeg.frame_free = (FnAvFrameFree)GetProcAddress(avcodec_module_, "av_frame_free");
+  g_ffmpeg.packet_unref = (FnAvPacketUnref)GetProcAddress(avcodec_module_, "av_packet_unref");
   g_ffmpeg.send_packet = (FnAvcodecSendPacket)GetProcAddress(avcodec_module_, "avcodec_send_packet");
   g_ffmpeg.receive_frame = (FnAvcodecReceiveFrame)GetProcAddress(avcodec_module_, "avcodec_receive_frame");
 
-  const char* kAvutilNames[] = {
-      "avutil-60.dll", "avutil-59.dll", "avutil-58.dll", "avutil-57.dll",
-      "avutil-56.dll", "avutil.dll"
+  // 3. Load swscale (for zero-latency SIMD color conversion)
+  const char* kSwscaleNames[] = {
+      "swscale-8.dll", "swscale-9.dll", "swscale-7.dll", "swscale-6.dll", "swscale.dll"
   };
-  for (const char* dll_name : kAvutilNames) {
-    avutil_module_ = LoadLibraryA(dll_name);
-    if (avutil_module_) break;
+  for (const char* dll_name : kSwscaleNames) {
+    swscale_module_ = LoadLibraryA(dll_name);
+    if (swscale_module_) break;
   }
 
-  if (avutil_module_) {
-    g_ffmpeg.hwdevice_ctx_create = (FnAvHwdeviceCtxCreate)GetProcAddress(avutil_module_, "av_hwdevice_ctx_create");
+  if (swscale_module_) {
+    g_ffmpeg.sws_getContext = (FnSwsGetContext)GetProcAddress(swscale_module_, "sws_getContext");
+    g_ffmpeg.sws_scale = (FnSwsScale)GetProcAddress(swscale_module_, "sws_scale");
+    g_ffmpeg.sws_freeContext = (FnSwsFreeContext)GetProcAddress(swscale_module_, "sws_freeContext");
   }
 
-  return (g_ffmpeg.find_decoder && g_ffmpeg.alloc_context3 && g_ffmpeg.send_packet && g_ffmpeg.receive_frame);
+  const bool ok = (g_ffmpeg.find_decoder && g_ffmpeg.alloc_context3 &&
+                   g_ffmpeg.send_packet && g_ffmpeg.receive_frame &&
+                   g_ffmpeg.frame_alloc && g_ffmpeg.packet_alloc);
+  if (!ok) {
+    std::cerr << "[DECODER] Required FFmpeg functions missing from loaded DLLs" << std::endl;
+  }
+  return ok;
 }
 
 bool VideoDecoder::InitializeCodec() {
@@ -194,21 +245,24 @@ bool VideoDecoder::InitializeCodec() {
   }
 
   av_codec_ = g_ffmpeg.find_decoder(kAvCodecIdH264);
-  if (!av_codec_) return false;
+  if (!av_codec_) {
+    std::cerr << "[DECODER] H.264 decoder not found" << std::endl;
+    return false;
+  }
 
   av_codec_ctx_ = g_ffmpeg.alloc_context3(av_codec_);
-  if (!av_codec_ctx_) return false;
+  if (!av_codec_ctx_) {
+    std::cerr << "[DECODER] avcodec_alloc_context3 failed" << std::endl;
+    return false;
+  }
 
-  // Architecture Blueprint: Module 3 - Set low-latency parser flags
-  // struct fields directly cast:
-  uint32_t* flags_ptr = reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(av_codec_ctx_) + 104);
-  *flags_ptr |= kAvCodecFlagLowDelay;
+  // Set low-delay flags and single-thread decode via standard av_opt_set_int
+  if (g_ffmpeg.opt_set_int) {
+    g_ffmpeg.opt_set_int(av_codec_ctx_, "flags", kAvCodecFlagLowDelay, 0);
+    g_ffmpeg.opt_set_int(av_codec_ctx_, "threads", 1, 0);
+  }
 
-  // Single-threaded low latency (eliminates decode queue latency)
-  int* thread_count_ptr = reinterpret_cast<int*>(reinterpret_cast<uint8_t*>(av_codec_ctx_) + 872);
-  *thread_count_ptr = 1;
-
-  // Configure D3D11VA Hardware Acceleration Device Context
+  // Configure D3D11VA Hardware Acceleration Device Context if available
   if (g_ffmpeg.hwdevice_ctx_create) {
     const int ret = g_ffmpeg.hwdevice_ctx_create(&av_hw_device_ctx_, kAvHwDeviceTypeD3d11va, nullptr, nullptr, 0);
     if (ret >= 0) {
@@ -217,11 +271,14 @@ bool VideoDecoder::InitializeCodec() {
   }
 
   if (g_ffmpeg.open2(av_codec_ctx_, av_codec_, nullptr) < 0) {
+    std::cerr << "[DECODER] avcodec_open2 failed" << std::endl;
     return false;
   }
 
   av_packet_ = g_ffmpeg.packet_alloc();
   av_frame_ = g_ffmpeg.frame_alloc();
+
+  std::cout << "[DECODER] Real-time H.264 decoder successfully ready!" << std::endl;
   return true;
 }
 
@@ -229,7 +286,15 @@ bool VideoDecoder::DecodePacket(const DemuxedVideoPacket& packet) {
   std::lock_guard<std::mutex> lock(decode_mutex_);
   if (packet.data.empty()) return false;
 
+  if (!is_initialized_) {
+    InitializeCodec();
+  }
+
   if (g_ffmpeg.send_packet && av_codec_ctx_ && av_packet_) {
+    if (g_ffmpeg.packet_unref) {
+      g_ffmpeg.packet_unref(av_packet_);
+    }
+
     // Structure of AVPacket has data at offset 24, size at offset 32
     uint8_t** data_ptr = reinterpret_cast<uint8_t**>(reinterpret_cast<uint8_t*>(av_packet_) + 24);
     int* size_ptr = reinterpret_cast<int*>(reinterpret_cast<uint8_t*>(av_packet_) + 32);
@@ -239,88 +304,144 @@ bool VideoDecoder::DecodePacket(const DemuxedVideoPacket& packet) {
 
     const int send_res = g_ffmpeg.send_packet(av_codec_ctx_, av_packet_);
     if (send_res >= 0 && g_ffmpeg.receive_frame && av_frame_) {
-      int recv_res = g_ffmpeg.receive_frame(av_codec_ctx_, av_frame_);
-      bool frame_rendered = false;
-      while (recv_res >= 0) {
+      while (g_ffmpeg.receive_frame(av_codec_ctx_, av_frame_) >= 0) {
         // Frame successfully decoded! Render directly onto Direct3D 11 surface
         RenderDecodedFrame(av_frame_);
-        frame_rendered = true;
-        recv_res = g_ffmpeg.receive_frame(av_codec_ctx_, av_frame_);
-      }
-      if (frame_rendered) {
-        return true;
       }
     }
   }
 
-  // If incoming video frame is received before decoder warms up, update hardware canvas
-  RenderTestPatternFrame(packet.seq);
   return true;
 }
 
 void VideoDecoder::RenderDecodedFrame(void* av_frame) {
   if (!d3d11_context_ || !av_frame) return;
 
-  uint8_t* y_plane = *(reinterpret_cast<uint8_t**>(reinterpret_cast<uint8_t*>(av_frame) + 0));
-  uint8_t* u_plane = *(reinterpret_cast<uint8_t**>(reinterpret_cast<uint8_t*>(av_frame) + 8));
-  uint8_t* v_plane = *(reinterpret_cast<uint8_t**>(reinterpret_cast<uint8_t*>(av_frame) + 16));
+  uint8_t** src_data = reinterpret_cast<uint8_t**>(reinterpret_cast<uint8_t*>(av_frame) + 0);
+  int* src_linesize = reinterpret_cast<int*>(reinterpret_cast<uint8_t*>(av_frame) + 64);
 
-  int y_stride = *(reinterpret_cast<int*>(reinterpret_cast<uint8_t*>(av_frame) + 64));
-  int u_stride = *(reinterpret_cast<int*>(reinterpret_cast<uint8_t*>(av_frame) + 68));
-  int v_stride = *(reinterpret_cast<int*>(reinterpret_cast<uint8_t*>(av_frame) + 72));
+  const int frame_w = *(reinterpret_cast<int*>(reinterpret_cast<uint8_t*>(av_frame) + 104));
+  const int frame_h = *(reinterpret_cast<int*>(reinterpret_cast<uint8_t*>(av_frame) + 108));
+  const int frame_fmt = *(reinterpret_cast<int*>(reinterpret_cast<uint8_t*>(av_frame) + 116));
 
-  int frame_w = *(reinterpret_cast<int*>(reinterpret_cast<uint8_t*>(av_frame) + 104));
-  int frame_h = *(reinterpret_cast<int*>(reinterpret_cast<uint8_t*>(av_frame) + 108));
-
-  if (!y_plane || !u_plane || !v_plane || frame_w <= 0 || frame_h <= 0) {
+  if (!src_data[0] || frame_w <= 0 || frame_h <= 0) {
     return;
   }
 
-  // Dynamically re-create shared texture surface if resolution changed
-  if (static_cast<size_t>(frame_w) != width_ || static_cast<size_t>(frame_h) != height_ || !shared_texture_) {
-    width_ = static_cast<size_t>(frame_w);
-    height_ = static_cast<size_t>(frame_h);
+  const size_t target_w = static_cast<size_t>(frame_w);
+  const size_t target_h = static_cast<size_t>(frame_h);
+
+  // Resize Direct3D 11 shared texture if resolution changed
+  if (target_w != width_ || target_h != height_ || !shared_texture_) {
+    width_ = target_w;
+    height_ = target_h;
     CreateSharedTexture(width_, height_);
-  }
-
-  if (!shared_texture_) return;
-
-  std::vector<uint32_t> bgra(width_ * height_);
-
-  // Fast YUV420P to BGRA conversion
-  for (size_t y = 0; y < height_; ++y) {
-    const uint8_t* y_row = y_plane + y * y_stride;
-    const uint8_t* u_row = u_plane + (y / 2) * u_stride;
-    const uint8_t* v_row = v_plane + (y / 2) * v_stride;
-    uint32_t* dst_row = bgra.data() + y * width_;
-
-    for (size_t x = 0; x < width_; ++x) {
-      const int Y = static_cast<int>(y_row[x]);
-      const int U = static_cast<int>(u_row[x / 2]);
-      const int V = static_cast<int>(v_row[x / 2]);
-
-      const int c = Y - 16;
-      const int d = U - 128;
-      const int e = V - 128;
-
-      int r = (298 * c + 409 * e + 128) >> 8;
-      int g = (298 * c - 100 * d - 208 * e + 128) >> 8;
-      int b = (298 * c + 516 * d + 128) >> 8;
-
-      r = r < 0 ? 0 : (r > 255 ? 255 : r);
-      g = g < 0 ? 0 : (g > 255 ? 255 : g);
-      b = b < 0 ? 0 : (b > 255 ? 255 : b);
-
-      dst_row[x] = (0xFF << 24) | (r << 16) | (g << 8) | b;
+    if (sws_ctx_ && g_ffmpeg.sws_freeContext) {
+      g_ffmpeg.sws_freeContext(sws_ctx_);
+      sws_ctx_ = nullptr;
     }
   }
 
+  // Pre-allocate / resize BGRA buffer once (zero reallocation on steady-state frames)
+  const size_t required_bytes = width_ * height_ * 4;
+  if (bgra_buffer_.size() != required_bytes) {
+    bgra_buffer_.resize(required_bytes);
+  }
+
+  // Convert to BGRA using SIMD swscale if available
+  if (g_ffmpeg.sws_scale && g_ffmpeg.sws_getContext) {
+    if (!sws_ctx_ || current_pix_fmt_ != frame_fmt) {
+      if (sws_ctx_ && g_ffmpeg.sws_freeContext) {
+        g_ffmpeg.sws_freeContext(sws_ctx_);
+      }
+      current_pix_fmt_ = frame_fmt;
+      sws_ctx_ = g_ffmpeg.sws_getContext(
+          static_cast<int>(width_), static_cast<int>(height_), frame_fmt,
+          static_cast<int>(width_), static_cast<int>(height_), kAvPixFmtBgra,
+          kSwsFastBilinear, nullptr, nullptr, nullptr);
+    }
+
+    if (sws_ctx_) {
+      uint8_t* dst_planes[4] = { bgra_buffer_.data(), nullptr, nullptr, nullptr };
+      const int dst_strides[4] = { static_cast<int>(width_ * 4), 0, 0, 0 };
+      g_ffmpeg.sws_scale(sws_ctx_, src_data, src_linesize, 0, static_cast<int>(height_), dst_planes, dst_strides);
+    }
+  } else {
+    // High-performance CPU fallback for YUV420P -> BGRA
+    const uint8_t* y_plane = src_data[0];
+    const uint8_t* u_plane = src_data[1];
+    const uint8_t* v_plane = src_data[2];
+    const int y_stride = src_linesize[0];
+    const int u_stride = src_linesize[1];
+    const int v_stride = src_linesize[2];
+
+    if (y_plane && u_plane && v_plane) {
+      uint32_t* dst = reinterpret_cast<uint32_t*>(bgra_buffer_.data());
+      for (size_t y = 0; y < height_; ++y) {
+        const uint8_t* y_row = y_plane + y * y_stride;
+        const uint8_t* u_row = u_plane + (y / 2) * u_stride;
+        const uint8_t* v_row = v_plane + (y / 2) * v_stride;
+        uint32_t* dst_row = dst + y * width_;
+
+        for (size_t x = 0; x < width_; ++x) {
+          const int c = static_cast<int>(y_row[x]) - 16;
+          const int d = static_cast<int>(u_row[x / 2]) - 128;
+          const int e = static_cast<int>(v_row[x / 2]) - 128;
+
+          int r = (298 * c + 409 * e + 128) >> 8;
+          int g = (298 * c - 100 * d - 208 * e + 128) >> 8;
+          int b = (298 * c + 516 * d + 128) >> 8;
+
+          r = (r < 0) ? 0 : ((r > 255) ? 255 : r);
+          g = (g < 0) ? 0 : ((g > 255) ? 255 : g);
+          b = (b < 0) ? 0 : ((b > 255) ? 255 : b);
+
+          dst_row[x] = (0xFF << 24) | (r << 16) | (g << 8) | b;
+        }
+      }
+    }
+  }
+
+  // Blit directly to Direct3D 11 zero-copy texture surface
+  if (shared_texture_) {
+    const size_t row_pitch = width_ * 4;
+    d3d11_context_->UpdateSubresource(
+        shared_texture_.Get(),
+        0,
+        nullptr,
+        bgra_buffer_.data(),
+        static_cast<UINT>(row_pitch),
+        0);
+
+    if (texture_bridge_ && shared_handle_) {
+      texture_bridge_->PushD3D11Texture(shared_texture_.Get(), shared_handle_, width_, height_);
+    }
+  }
+}
+
+void VideoDecoder::RenderTestPatternFrame(uint32_t frame_index) {
+  if (!d3d11_context_ || !shared_texture_) return;
+
   const size_t row_pitch = width_ * 4;
+  const size_t required_bytes = width_ * height_ * 4;
+  if (bgra_buffer_.size() != required_bytes) {
+    bgra_buffer_.resize(required_bytes);
+  }
+
+  const uint8_t r_pulse = static_cast<uint8_t>((std::sin(frame_index * 0.05) + 1.0) * 40.0 + 10.0);
+  const uint8_t g_pulse = static_cast<uint8_t>((std::cos(frame_index * 0.05) + 1.0) * 50.0 + 20.0);
+  const uint32_t bg_color = 0xFF000000 | (r_pulse << 16) | (g_pulse << 8) | 0x80;
+
+  uint32_t* dst = reinterpret_cast<uint32_t*>(bgra_buffer_.data());
+  for (size_t i = 0; i < width_ * height_; ++i) {
+    dst[i] = bg_color;
+  }
+
   d3d11_context_->UpdateSubresource(
       shared_texture_.Get(),
       0,
       nullptr,
-      bgra.data(),
+      bgra_buffer_.data(),
       static_cast<UINT>(row_pitch),
       0);
 
@@ -329,38 +450,14 @@ void VideoDecoder::RenderDecodedFrame(void* av_frame) {
   }
 }
 
-void VideoDecoder::RenderTestPatternFrame(uint32_t frame_index) {
-  if (!d3d11_context_ || !shared_texture_) return;
-
-  // Fast Direct3D 11 Subresource Update for active visual feedback
-  const size_t row_pitch = width_ * 4;
-  std::vector<uint32_t> pixels(width_ * height_);
-
-  const uint8_t r_pulse = static_cast<uint8_t>((std::sin(frame_index * 0.05) + 1.0) * 40.0 + 10.0);
-  const uint8_t g_pulse = static_cast<uint8_t>((std::cos(frame_index * 0.05) + 1.0) * 50.0 + 20.0);
-  const uint32_t bg_color = 0xFF000000 | (r_pulse << 16) | (g_pulse << 8) | 0x80;
-
-  for (size_t y = 0; y < height_; ++y) {
-    for (size_t x = 0; x < width_; ++x) {
-      pixels[y * width_ + x] = bg_color;
-    }
-  }
-
-  d3d11_context_->UpdateSubresource(
-      shared_texture_.Get(),
-      0,
-      nullptr,
-      pixels.data(),
-      static_cast<UINT>(row_pitch),
-      0);
-
-  if (texture_bridge_) {
-    texture_bridge_->PushD3D11Texture(shared_texture_.Get(), shared_handle_, width_, height_);
-  }
-}
-
 void VideoDecoder::Teardown() {
   std::lock_guard<std::mutex> lock(decode_mutex_);
+  is_initialized_ = false;
+
+  if (sws_ctx_ && g_ffmpeg.sws_freeContext) {
+    g_ffmpeg.sws_freeContext(sws_ctx_);
+    sws_ctx_ = nullptr;
+  }
 
   if (g_ffmpeg.packet_free && av_packet_) {
     g_ffmpeg.packet_free(&av_packet_);
@@ -375,6 +472,10 @@ void VideoDecoder::Teardown() {
     av_codec_ctx_ = nullptr;
   }
 
+  if (swscale_module_) {
+    FreeLibrary(swscale_module_);
+    swscale_module_ = nullptr;
+  }
   if (avcodec_module_) {
     FreeLibrary(avcodec_module_);
     avcodec_module_ = nullptr;
@@ -384,12 +485,12 @@ void VideoDecoder::Teardown() {
     avutil_module_ = nullptr;
   }
 
-  dxgi_resource_.Reset();
   shared_texture_.Reset();
+  dxgi_resource_.Reset();
   d3d11_context_.Reset();
   d3d11_device_.Reset();
   shared_handle_ = nullptr;
-  is_initialized_ = false;
+  bgra_buffer_.clear();
 }
 
 }  // namespace applecast

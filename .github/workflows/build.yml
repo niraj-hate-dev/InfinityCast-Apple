@@ -45,6 +45,9 @@ jobs:
         shell: pwsh
         run: |
           $buildDir = "build/windows/x64/runner/Release"
+          if (Test-Path "windows/third_party/ffmpeg") {
+            Copy-Item "windows/third_party/ffmpeg/*" $buildDir -Force
+          }
           $outputZip = "AppleCast-Windows-x64.zip"
           Compress-Archive -Path "$buildDir/*" -DestinationPath $outputZip -Force
 
