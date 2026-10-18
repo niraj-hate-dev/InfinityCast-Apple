@@ -307,11 +307,19 @@ void ScreenMirrorPlugin::StopAudioStreamingWorker() {
 
 void ScreenMirrorPlugin::AudioStreamWorkerLoop(SOCKET sock) {
   std::vector<uint8_t> recv_buf(16384);
+  bool first_chunk = true;
+  size_t total_audio_bytes = 0;
 
   while (is_audio_streaming_) {
     const int bytes_read = recv(sock, reinterpret_cast<char*>(recv_buf.data()), static_cast<int>(recv_buf.size()), 0);
 
     if (bytes_read > 0) {
+      total_audio_bytes += bytes_read;
+      if (first_chunk) {
+        first_chunk = false;
+        Log("AUDIO", "First audio stream chunk (" + std::to_string(bytes_read) + " bytes) received on port 25335!", "success");
+      }
+
       if (audio_decoder_) {
         audio_decoder_->DecodeStream(recv_buf.data(), static_cast<size_t>(bytes_read));
       }
@@ -321,7 +329,7 @@ void ScreenMirrorPlugin::AudioStreamWorkerLoop(SOCKET sock) {
   }
 
   is_audio_streaming_ = false;
-  Log("AUDIO", "Audio streaming worker stopped", "info");
+  Log("AUDIO", "Audio streaming worker stopped (total received: " + std::to_string(total_audio_bytes) + " bytes)", "info");
 }
 
 void ScreenMirrorPlugin::HandleMethodCall(

@@ -247,6 +247,12 @@ void AudioDecoder::PlayPcm(const int16_t* pcm_data, size_t num_samples) {
   std::lock_guard<std::mutex> lock(wave_mutex_);
   if (!h_wave_out_) return;
 
+  static size_t s_audio_frames_played = 0;
+  s_audio_frames_played++;
+  if (s_audio_frames_played % 100 == 1) {
+    Log("AUDIO", "Playing audio frame #" + std::to_string(s_audio_frames_played) + " (" + std::to_string(num_samples) + " samples)", "info");
+  }
+
   const size_t bytes_to_write = num_samples * sizeof(int16_t);
 
   size_t idx = current_wave_buffer_idx_;
