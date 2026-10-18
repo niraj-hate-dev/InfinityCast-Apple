@@ -15,6 +15,7 @@ constexpr int kAvPixFmtD3d11 = 174;
 constexpr int kAvPixFmtYuv420p = 0;
 constexpr int kAvPixFmtBgra = 28;
 constexpr int kSwsFastBilinear = 1;
+constexpr int64_t kAvNoPtsValue = static_cast<int64_t>(0x8000000000000000ULL);
 
 typedef void* (*FnAvcodecFindDecoder)(int id);
 typedef void* (*FnAvcodecAllocContext3)(const void* codec);
@@ -300,6 +301,7 @@ bool VideoDecoder::InitializeCodec() {
   av_packet_ = g_ffmpeg.packet_alloc();
   av_frame_ = g_ffmpeg.frame_alloc();
 
+  is_initialized_ = true;
   std::cout << "[DECODER] Real-time H.264 CPU/GPU decoder successfully ready!" << std::endl;
   return true;
 }
@@ -328,7 +330,11 @@ bool VideoDecoder::DecodePacket(const DemuxedVideoPacket& packet) {
           av_parser_ctx_, av_codec_ctx_,
           &parsed_buf, &parsed_size,
           in_data, in_size,
-          AV_NOPTS_VALUE, AV_NOPTS_VALUE, 0);
+          kAvNoPtsValue, kAvNoPtsValue, 0);
+
+      if (consumed <= 0) {
+        break;
+      }
 
       in_data += consumed;
       in_size -= consumed;
@@ -390,11 +396,13 @@ void VideoDecoder::RenderDecodedFrame(void* av_frame) {
   const size_t target_w = static_cast<size_t>(frame_w);
   const size_t target_h = static_cast<size_t>(frame_h);
 
-  // Resize Direct3D 11 shared texture if resolution changed
-  if (target_w != width_ || target_h != height_ || !shared_texture_) {
+  // Resize buffers if resolution changed
+  if (target_w != width_ || target_h != height_) {
     width_ = target_w;
     height_ = target_h;
-    CreateSharedTexture(width_, height_);
+    if (d3d11_device_) {
+      CreateSharedTexture(width_, height_);
+    }
     if (sws_ctx_ && g_ffmpeg.sws_freeContext) {
       g_ffmpeg.sws_freeContext(sws_ctx_);
       sws_ctx_ = nullptr;
