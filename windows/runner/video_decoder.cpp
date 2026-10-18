@@ -320,7 +320,7 @@ bool VideoDecoder::DecodeStream(const uint8_t* in_data, size_t in_size) {
   std::lock_guard<std::mutex> lock(decode_mutex_);
   if (!in_data || in_size == 0) return false;
 
-  if (!is_initialized_) {
+  if (!is_initialized_ || !av_codec_ctx_ || !av_packet_ || !av_frame_ || !av_parser_ctx_) {
     InitializeCodec();
   }
 

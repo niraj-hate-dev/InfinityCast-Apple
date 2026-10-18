@@ -31,6 +31,7 @@ RtpDemuxer::~RtpDemuxer() = default;
 void RtpDemuxer::Reset() {
   state_ = STATE_FIND_MAGIC;
   accumulator_.clear();
+  apower_assembly_buffer_.clear();
   fu_assembly_buffer_.clear();
   fu_in_progress_ = false;
   has_initial_seq_ = false;
@@ -44,8 +45,23 @@ void RtpDemuxer::AppendAnnexBStartCode(std::vector<uint8_t>& out) {
 }
 
 void RtpDemuxer::CacheParameterSets(uint8_t nal_type, const uint8_t* nal_data, size_t nal_len) {
+  if (!nal_data || nal_len == 0) return;
+
   if (nal_type == kNalTypeSps) {
-    cached_sps_.assign(nal_data, nal_data + nal_len);
+    // Check if PPS start code is embedded inside (standard in ApowerMirror gotSpsPps)
+    size_t sps_len = nal_len;
+    for (size_t i = 0; i + 4 <= nal_len; ++i) {
+      if (nal_data[i] == 0x00 && nal_data[i + 1] == 0x00 &&
+          nal_data[i + 2] == 0x00 && nal_data[i + 3] == 0x01) {
+        sps_len = i;
+        const uint8_t pps_type = nal_data[i + 4] & 0x1F;
+        if (pps_type == kNalTypePps) {
+          cached_pps_.assign(nal_data + i + 4, nal_data + nal_len);
+        }
+        break;
+      }
+    }
+    cached_sps_.assign(nal_data, nal_data + sps_len);
   } else if (nal_type == kNalTypePps) {
     cached_pps_.assign(nal_data, nal_data + nal_len);
   }
@@ -59,27 +75,167 @@ void RtpDemuxer::ConsumeData(const uint8_t* buffer, size_t length) {
   size_t read_idx = 0;
 
   while (read_idx < accumulator_.size()) {
-    // Mode C: RFC 2326 Interleaved RTP framing ($ = 0x24) - PRIMARY STREAMING PROTOCOL
+    const size_t rem = accumulator_.size() - read_idx;
+
+    // 1. Skip HTTP Handshake / Headers if present (e.g. "HTTP/1.1 200 OK\r\n..." or "GET /...")
+    if (rem >= 4 && (std::memcmp(accumulator_.data() + read_idx, "HTTP", 4) == 0 ||
+                     std::memcmp(accumulator_.data() + read_idx, "GET ", 4) == 0)) {
+      bool found_crlf = false;
+      for (size_t i = read_idx; i + 3 < accumulator_.size(); ++i) {
+        if (accumulator_[i] == '\r' && accumulator_[i + 1] == '\n' &&
+            accumulator_[i + 2] == '\r' && accumulator_[i + 3] == '\n') {
+          read_idx = i + 4;
+          found_crlf = true;
+          break;
+        }
+      }
+      if (found_crlf) continue;
+      if (rem < 4096) break;
+      read_idx += 4;
+      continue;
+    }
+
+    // 2. Mode C: RFC 2326 Interleaved RTP framing ($ = 0x24)
     if (accumulator_[read_idx] == kRtpInterleavedMagic) {
-      if (accumulator_.size() - read_idx < 4) break;
-      uint8_t channel = accumulator_[read_idx + 1];
-      uint16_t interleaved_len = (static_cast<uint16_t>(accumulator_[read_idx + 2]) << 8) |
-                                 static_cast<uint16_t>(accumulator_[read_idx + 3]);
-      if (accumulator_.size() - read_idx < 4 + interleaved_len) break;
+      if (rem < 4) break;
+      const uint8_t channel = accumulator_[read_idx + 1];
+      const uint16_t interleaved_len = (static_cast<uint16_t>(accumulator_[read_idx + 2]) << 8) |
+                                       static_cast<uint16_t>(accumulator_[read_idx + 3]);
+      if (rem < 4 + interleaved_len) break;
 
       ProcessInterleavedPayload(channel, accumulator_.data() + read_idx + 4, interleaved_len);
       read_idx += 4 + interleaved_len;
       continue;
     }
 
-    // Mode B: Direct Annex-B start code [00 00 00 01]
-    if (accumulator_.size() - read_idx >= 4 &&
-        accumulator_[read_idx] == 0x00 && accumulator_[read_idx + 1] == 0x00 &&
+    // 3. Mode A: ApowerMirror Sliced Framing (4-byte tag [00 00 00 00] or [00 00 00 02])
+    if (rem >= 4 && accumulator_[read_idx] == 0x00 && accumulator_[read_idx + 1] == 0x00 &&
+        accumulator_[read_idx + 2] == 0x00 &&
+        (accumulator_[read_idx + 3] == 0x00 || accumulator_[read_idx + 3] == 0x02)) {
+
+      const uint8_t tag = accumulator_[read_idx + 3];
+
+      if (tag == 0x00) {
+        // Tag 0x00 = Intermediate slice chunk.
+        // ApowerMirror slices NALUs into chunks of exactly 10,240 bytes (0x2800).
+        // Total chunk on wire = 4 (tag) + 10240 = 10,244 bytes.
+        constexpr size_t kApowerChunkLen = 10240;
+        constexpr size_t kApowerTotalChunk = 4 + kApowerChunkLen;
+
+        if (rem < kApowerTotalChunk) {
+          // Incomplete chunk, wait for remaining bytes from TCP
+          break;
+        }
+
+        apower_assembly_buffer_.insert(
+            apower_assembly_buffer_.end(),
+            accumulator_.data() + read_idx + 4,
+            accumulator_.data() + read_idx + kApowerTotalChunk);
+
+        read_idx += kApowerTotalChunk;
+        continue;
+      } else {
+        // Tag 0x02 = End slice chunk (final chunk of NAL unit / frame).
+        // The payload of this chunk starts at read_idx + 4.
+        // It ends where the NEXT packet header begins.
+        size_t next_boundary = std::string::npos;
+        for (size_t i = read_idx + 4; i + 4 <= accumulator_.size(); ++i) {
+          // Next ApowerMirror packet: [00 00 00 00/02] followed by [00 00 00 01]
+          if (i + 8 <= accumulator_.size() &&
+              accumulator_[i] == 0x00 && accumulator_[i + 1] == 0x00 && accumulator_[i + 2] == 0x00 &&
+              (accumulator_[i + 3] == 0x00 || accumulator_[i + 3] == 0x02) &&
+              accumulator_[i + 4] == 0x00 && accumulator_[i + 5] == 0x00 &&
+              accumulator_[i + 6] == 0x00 && accumulator_[i + 7] == 0x01) {
+            next_boundary = i;
+            break;
+          }
+          // RTP packet
+          if (accumulator_[i] == kRtpInterleavedMagic) {
+            next_boundary = i;
+            break;
+          }
+          // HTTP header
+          if (i + 4 <= accumulator_.size() &&
+              (std::memcmp(accumulator_.data() + i, "HTTP", 4) == 0 ||
+               std::memcmp(accumulator_.data() + i, "GET ", 4) == 0)) {
+            next_boundary = i;
+            break;
+          }
+        }
+
+        if (next_boundary != std::string::npos) {
+          const size_t final_chunk_len = next_boundary - (read_idx + 4);
+          apower_assembly_buffer_.insert(
+              apower_assembly_buffer_.end(),
+              accumulator_.data() + read_idx + 4,
+              accumulator_.data() + read_idx + 4 + final_chunk_len);
+
+          if (!apower_assembly_buffer_.empty()) {
+            // Find NAL unit type
+            uint8_t nal_type = 0;
+            for (size_t j = 0; j + 4 < apower_assembly_buffer_.size(); ++j) {
+              if (apower_assembly_buffer_[j] == 0x00 && apower_assembly_buffer_[j + 1] == 0x00 &&
+                  apower_assembly_buffer_[j + 2] == 0x00 && apower_assembly_buffer_[j + 3] == 0x01) {
+                nal_type = apower_assembly_buffer_[j + 4] & 0x1F;
+                CacheParameterSets(nal_type, apower_assembly_buffer_.data() + j + 4, apower_assembly_buffer_.size() - j - 4);
+                break;
+              }
+            }
+
+            DemuxedVideoPacket packet;
+            packet.pts = 0;
+            packet.is_keyframe = (nal_type == kNalTypeIdr || nal_type == kNalTypeSps);
+
+            // Prepend cached SPS/PPS to IDR keyframe if not present
+            if (nal_type == kNalTypeIdr && !cached_sps_.empty() && !cached_pps_.empty()) {
+              bool has_sps = false;
+              for (size_t k = 0; k + 4 < apower_assembly_buffer_.size() && k < 64; ++k) {
+                if (apower_assembly_buffer_[k] == 0x00 && apower_assembly_buffer_[k + 1] == 0x00 &&
+                    apower_assembly_buffer_[k + 2] == 0x00 && apower_assembly_buffer_[k + 3] == 0x01 &&
+                    (apower_assembly_buffer_[k + 4] & 0x1F) == kNalTypeSps) {
+                  has_sps = true;
+                  break;
+                }
+              }
+              if (!has_sps) {
+                AppendAnnexBStartCode(packet.data);
+                packet.data.insert(packet.data.end(), cached_sps_.begin(), cached_sps_.end());
+                AppendAnnexBStartCode(packet.data);
+                packet.data.insert(packet.data.end(), cached_pps_.begin(), cached_pps_.end());
+              }
+            }
+
+            packet.data.insert(packet.data.end(), apower_assembly_buffer_.begin(), apower_assembly_buffer_.end());
+            total_packets_++;
+            if (on_video_packet_) {
+              on_video_packet_(packet);
+            }
+            apower_assembly_buffer_.clear();
+          }
+
+          read_idx = next_boundary;
+          continue;
+        } else {
+          // Boundary not found yet
+          if (rem <= 4 + 10240 + 8) {
+            break;
+          }
+          // Fallback if boundary wasn't found after full chunk size
+          apower_assembly_buffer_.insert(
+              apower_assembly_buffer_.end(),
+              accumulator_.data() + read_idx + 4,
+              accumulator_.data() + read_idx + 4 + 10240);
+          read_idx += (4 + 10240);
+          continue;
+        }
+      }
+    }
+
+    // 4. Mode B: Direct Raw Annex-B start code [00 00 00 01]
+    if (rem >= 4 && accumulator_[read_idx] == 0x00 && accumulator_[read_idx + 1] == 0x00 &&
         accumulator_[read_idx + 2] == 0x00 && accumulator_[read_idx + 3] == 0x01) {
 
-      size_t nalu_start = read_idx;
-      size_t next_idx = nalu_start + 4;
-
+      size_t next_idx = read_idx + 4;
       while (next_idx + 4 <= accumulator_.size()) {
         if (accumulator_[next_idx] == 0x00 && accumulator_[next_idx + 1] == 0x00 &&
             accumulator_[next_idx + 2] == 0x00 && accumulator_[next_idx + 3] == 0x01) {
@@ -94,10 +250,11 @@ void RtpDemuxer::ConsumeData(const uint8_t* buffer, size_t length) {
       }
 
       DemuxedVideoPacket packet;
-      packet.data.assign(accumulator_.data() + nalu_start, accumulator_.data() + next_idx);
+      packet.data.assign(accumulator_.data() + read_idx, accumulator_.data() + next_idx);
       packet.pts = 0;
-      uint8_t nal_type = packet.data[4] & 0x1F;
+      const uint8_t nal_type = packet.data[4] & 0x1F;
       packet.is_keyframe = (nal_type == kNalTypeIdr || nal_type == kNalTypeSps);
+      CacheParameterSets(nal_type, packet.data.data() + 4, packet.data.size() - 4);
 
       total_packets_++;
       if (on_video_packet_) {
@@ -108,56 +265,14 @@ void RtpDemuxer::ConsumeData(const uint8_t* buffer, size_t length) {
       continue;
     }
 
-    // Mode A: ApowerMirror 8-byte Tag [00 00 00 00/02] followed by Annex-B [00 00 00 01]
-    if (accumulator_.size() - read_idx >= 8 &&
-        accumulator_[read_idx] == 0x00 && accumulator_[read_idx + 1] == 0x00 &&
-        accumulator_[read_idx + 2] == 0x00 &&
-        (accumulator_[read_idx + 3] == 0x00 || accumulator_[read_idx + 3] == 0x02) &&
-        accumulator_[read_idx + 4] == 0x00 && accumulator_[read_idx + 5] == 0x00 &&
-        accumulator_[read_idx + 6] == 0x00 && accumulator_[read_idx + 7] == 0x01) {
-
-      read_idx += 4; // Skip 4-byte ApowerMirror slice tag
-      size_t nalu_start = read_idx;
-      size_t next_idx = nalu_start + 4;
-
-      while (next_idx + 8 <= accumulator_.size()) {
-        if (accumulator_[next_idx] == 0x00 && accumulator_[next_idx + 1] == 0x00 &&
-            accumulator_[next_idx + 2] == 0x00 &&
-            (accumulator_[next_idx + 3] == 0x00 || accumulator_[next_idx + 3] == 0x02) &&
-            accumulator_[next_idx + 4] == 0x00 && accumulator_[next_idx + 5] == 0x00 &&
-            accumulator_[next_idx + 6] == 0x00 && accumulator_[next_idx + 7] == 0x01) {
-          break;
-        }
-        next_idx++;
-      }
-
-      if (next_idx + 8 > accumulator_.size()) {
-        read_idx -= 4; // Revert tag skip and wait
-        break;
-      }
-
-      DemuxedVideoPacket packet;
-      packet.data.assign(accumulator_.data() + nalu_start, accumulator_.data() + next_idx);
-      packet.pts = 0;
-      uint8_t nal_type = packet.data[4] & 0x1F;
-      packet.is_keyframe = (nal_type == kNalTypeIdr || nal_type == kNalTypeSps);
-
-      total_packets_++;
-      if (on_video_packet_) {
-        on_video_packet_(packet);
-      }
-
-      read_idx = next_idx;
-      continue;
-    }
-
-    // Unrecognized leading byte, scan forward
+    // 5. Unrecognized leading byte, scan forward
     read_idx++;
   }
 
   // Prevent runaway buffer allocation if stream desynchronizes
   if (accumulator_.size() > 4 * 1024 * 1024) {
     accumulator_.clear();
+    apower_assembly_buffer_.clear();
     read_idx = 0;
   }
 

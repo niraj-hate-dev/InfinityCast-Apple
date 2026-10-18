@@ -78,6 +78,9 @@ class RtpDemuxer {
   // FU-A Fragment Assembly Buffer
   std::vector<uint8_t> fu_assembly_buffer_;
   bool fu_in_progress_ = false;
+
+  // ApowerMirror Multi-Chunk Slice Assembly Buffer
+  std::vector<uint8_t> apower_assembly_buffer_;
 };
 
 }  // namespace applecast

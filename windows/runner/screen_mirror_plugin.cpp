@@ -173,6 +173,10 @@ void ScreenMirrorPlugin::StartStreamingWorker(SOCKET sock) {
   frames_in_interval_ = 0;
   bytes_in_interval_ = 0;
 
+  if (rtp_demuxer_) {
+    rtp_demuxer_->Reset();
+  }
+
   stream_thread_ = std::thread(&ScreenMirrorPlugin::StreamWorkerLoop, this, sock);
 }
 
@@ -199,11 +203,10 @@ void ScreenMirrorPlugin::StreamWorkerLoop(SOCKET sock) {
       frames_in_interval_++;
       bytes_in_interval_ += bytes_read;
 
-      // Check if RFC 2326 Interleaved RTP ('$' = 0x24) or Direct Raw Annex-B
-      if (recv_buf[0] == 0x24 && rtp_demuxer_) {
+      // Route all streaming bytes through RtpDemuxer (handles ApowerMirror, Raw Annex-B, and RTP)
+      if (rtp_demuxer_) {
         rtp_demuxer_->ConsumeData(recv_buf.data(), static_cast<size_t>(bytes_read));
       } else if (video_decoder_) {
-        // Direct Raw Annex-B stream (matches devicekit-ios-h264 architecture)
         video_decoder_->DecodeStream(recv_buf.data(), static_cast<size_t>(bytes_read));
       }
 
