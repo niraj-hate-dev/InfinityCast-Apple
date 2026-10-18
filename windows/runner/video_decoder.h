@@ -76,6 +76,7 @@ class VideoDecoder {
   void* av_hw_device_ctx_ = nullptr;
   void* av_packet_ = nullptr;
   void* av_frame_ = nullptr;
+  void* av_parser_ctx_ = nullptr;
   void* sws_ctx_ = nullptr;
 
   // Zero-allocation reusable BGRA frame buffer for Direct3D 11 surface upload

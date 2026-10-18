@@ -456,7 +456,7 @@ class _HomeScreenState extends State<HomeScreen> {
           SizedBox(width: 8),
           Expanded(
             child: Text(
-              'Zero-Copy Direct3D 11 Renderer Active',
+              'High-Performance CPU / Direct3D Engine Active',
               style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: AppleCastTheme.textSecondary),
             ),
           ),

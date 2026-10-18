@@ -29,6 +29,13 @@ typedef int   (*FnAvcodecSendPacket)(void* avctx, const void* pkt);
 typedef int   (*FnAvcodecReceiveFrame)(void* avctx, void* frame);
 typedef int   (*FnAvHwdeviceCtxCreate)(void** device_ctx, int type, const char* device, void* opts, int flags);
 typedef int   (*FnAvOptSetInt)(void* obj, const char* name, int64_t val, int search_flags);
+typedef int   (*FnAvNewPacket)(void* pkt, int size);
+typedef void* (*FnAvParserInit)(int codec_id);
+typedef int   (*FnAvParserParse2)(void* s, void* avctx,
+                                  uint8_t** poutbuf, int* poutbuf_size,
+                                  const uint8_t* buf, int buf_size,
+                                  int64_t pts, int64_t dts, int64_t pos);
+typedef void  (*FnAvParserClose)(void* s);
 
 typedef void* (*FnSwsGetContext)(int srcW, int srcH, int srcFormat,
                                  int dstW, int dstH, int dstFormat,
@@ -49,6 +56,10 @@ struct FfmpegFunctions {
   FnAvPacketUnref packet_unref = nullptr;
   FnAvcodecSendPacket send_packet = nullptr;
   FnAvcodecReceiveFrame receive_frame = nullptr;
+  FnAvNewPacket new_packet = nullptr;
+  FnAvParserInit parser_init = nullptr;
+  FnAvParserParse2 parser_parse2 = nullptr;
+  FnAvParserClose parser_close = nullptr;
 
   // avutil
   FnAvFrameAlloc frame_alloc = nullptr;
@@ -214,6 +225,10 @@ bool VideoDecoder::LoadFfmpegSymbols() {
   g_ffmpeg.packet_alloc = (FnAvPacketAlloc)GetProcAddress(avcodec_module_, "av_packet_alloc");
   g_ffmpeg.packet_free = (FnAvPacketFree)GetProcAddress(avcodec_module_, "av_packet_free");
   g_ffmpeg.packet_unref = (FnAvPacketUnref)GetProcAddress(avcodec_module_, "av_packet_unref");
+  g_ffmpeg.new_packet = (FnAvNewPacket)GetProcAddress(avcodec_module_, "av_new_packet");
+  g_ffmpeg.parser_init = (FnAvParserInit)GetProcAddress(avcodec_module_, "av_parser_init");
+  g_ffmpeg.parser_parse2 = (FnAvParserParse2)GetProcAddress(avcodec_module_, "av_parser_parse2");
+  g_ffmpeg.parser_close = (FnAvParserClose)GetProcAddress(avcodec_module_, "av_parser_close");
   g_ffmpeg.send_packet = (FnAvcodecSendPacket)GetProcAddress(avcodec_module_, "avcodec_send_packet");
   g_ffmpeg.receive_frame = (FnAvcodecReceiveFrame)GetProcAddress(avcodec_module_, "avcodec_receive_frame");
 
@@ -278,10 +293,14 @@ bool VideoDecoder::InitializeCodec() {
     return false;
   }
 
+  if (g_ffmpeg.parser_init) {
+    av_parser_ctx_ = g_ffmpeg.parser_init(kAvCodecIdH264);
+  }
+
   av_packet_ = g_ffmpeg.packet_alloc();
   av_frame_ = g_ffmpeg.frame_alloc();
 
-  std::cout << "[DECODER] Real-time H.264 decoder successfully ready!" << std::endl;
+  std::cout << "[DECODER] Real-time H.264 CPU/GPU decoder successfully ready!" << std::endl;
   return true;
 }
 
@@ -293,23 +312,60 @@ bool VideoDecoder::DecodePacket(const DemuxedVideoPacket& packet) {
     InitializeCodec();
   }
 
-  if (g_ffmpeg.send_packet && av_codec_ctx_ && av_packet_) {
-    if (g_ffmpeg.packet_unref) {
-      g_ffmpeg.packet_unref(av_packet_);
+  if (!av_codec_ctx_ || !av_packet_ || !av_frame_) {
+    return false;
+  }
+
+  const uint8_t* in_data = packet.data.data();
+  int in_size = static_cast<int>(packet.data.size());
+
+  // Mode 1: High-reliability AVCodecParser pipeline (assembles complete NALUs & frames)
+  if (av_parser_ctx_ && g_ffmpeg.parser_parse2 && g_ffmpeg.new_packet) {
+    while (in_size > 0) {
+      uint8_t* parsed_buf = nullptr;
+      int parsed_size = 0;
+      const int consumed = g_ffmpeg.parser_parse2(
+          av_parser_ctx_, av_codec_ctx_,
+          &parsed_buf, &parsed_size,
+          in_data, in_size,
+          AV_NOPTS_VALUE, AV_NOPTS_VALUE, 0);
+
+      in_data += consumed;
+      in_size -= consumed;
+
+      if (parsed_size > 0 && parsed_buf) {
+        g_ffmpeg.packet_unref(av_packet_);
+        if (g_ffmpeg.new_packet(av_packet_, parsed_size) == 0) {
+          uint8_t** pkt_data = reinterpret_cast<uint8_t**>(reinterpret_cast<uint8_t*>(av_packet_) + 24);
+          if (pkt_data && *pkt_data) {
+            std::memcpy(*pkt_data, parsed_buf, parsed_size);
+          }
+
+          const int send_res = g_ffmpeg.send_packet(av_codec_ctx_, av_packet_);
+          if (send_res >= 0 || send_res == -11 /* EAGAIN */) {
+            while (g_ffmpeg.receive_frame(av_codec_ctx_, av_frame_) >= 0) {
+              RenderDecodedFrame(av_frame_);
+            }
+          }
+        }
+      }
     }
+  } else {
+    // Mode 2: Direct av_new_packet fallback with internal FFmpeg buffer padding
+    if (g_ffmpeg.new_packet) {
+      g_ffmpeg.packet_unref(av_packet_);
+      if (g_ffmpeg.new_packet(av_packet_, in_size) == 0) {
+        uint8_t** pkt_data = reinterpret_cast<uint8_t**>(reinterpret_cast<uint8_t*>(av_packet_) + 24);
+        if (pkt_data && *pkt_data) {
+          std::memcpy(*pkt_data, packet.data.data(), in_size);
+        }
 
-    // Structure of AVPacket has data at offset 24, size at offset 32
-    uint8_t** data_ptr = reinterpret_cast<uint8_t**>(reinterpret_cast<uint8_t*>(av_packet_) + 24);
-    int* size_ptr = reinterpret_cast<int*>(reinterpret_cast<uint8_t*>(av_packet_) + 32);
-
-    *data_ptr = const_cast<uint8_t*>(packet.data.data());
-    *size_ptr = static_cast<int>(packet.data.size());
-
-    const int send_res = g_ffmpeg.send_packet(av_codec_ctx_, av_packet_);
-    if ((send_res >= 0 || send_res == -11 /* EAGAIN */) && g_ffmpeg.receive_frame && av_frame_) {
-      while (g_ffmpeg.receive_frame(av_codec_ctx_, av_frame_) >= 0) {
-        // Frame successfully decoded! Render directly onto Direct3D 11 surface and PixelBuffer
-        RenderDecodedFrame(av_frame_);
+        const int send_res = g_ffmpeg.send_packet(av_codec_ctx_, av_packet_);
+        if (send_res >= 0 || send_res == -11 /* EAGAIN */) {
+          while (g_ffmpeg.receive_frame(av_codec_ctx_, av_frame_) >= 0) {
+            RenderDecodedFrame(av_frame_);
+          }
+        }
       }
     }
   }
@@ -405,61 +461,22 @@ void VideoDecoder::RenderDecodedFrame(void* av_frame) {
     }
   }
 
-  // Blit directly to Direct3D 11 zero-copy texture surface
-  if (shared_texture_) {
-    const size_t row_pitch = width_ * 4;
-    d3d11_context_->UpdateSubresource(
-        shared_texture_.Get(),
-        0,
-        nullptr,
-        bgra_buffer_.data(),
-        static_cast<UINT>(row_pitch),
-        0);
-
-    d3d11_context_->Flush();
-
-    if (texture_bridge_ && shared_handle_) {
-      texture_bridge_->PushD3D11Texture(shared_texture_.Get(), shared_handle_, width_, height_);
-    }
-  }
-
-  // Push directly to Flutter PixelBufferTexture (100% universal rock-solid display)
+  // Push directly to Flutter PixelBufferTexture (100% universal rock-solid display, zero GPU overhead)
   if (texture_bridge_) {
     texture_bridge_->PushPixelBuffer(bgra_buffer_.data(), width_, height_);
   }
 }
 
 void VideoDecoder::RenderTestPatternFrame(uint32_t frame_index) {
-  const size_t row_pitch = width_ * 4;
   const size_t required_bytes = width_ * height_ * 4;
   if (bgra_buffer_.size() != required_bytes) {
     bgra_buffer_.resize(required_bytes);
   }
 
-  const uint8_t r_pulse = static_cast<uint8_t>((std::sin(frame_index * 0.05) + 1.0) * 40.0 + 10.0);
-  const uint8_t g_pulse = static_cast<uint8_t>((std::cos(frame_index * 0.05) + 1.0) * 50.0 + 20.0);
-  const uint32_t bg_color = 0xFF000000 | (r_pulse << 16) | (g_pulse << 8) | 0x80;
-
+  // Elegant dark background (#0D1117) matching the AppleCast dark theme
+  const uint32_t bg_color = 0xFF0D1117;
   uint32_t* dst = reinterpret_cast<uint32_t*>(bgra_buffer_.data());
-  for (size_t i = 0; i < width_ * height_; ++i) {
-    dst[i] = bg_color;
-  }
-
-  if (d3d11_context_ && shared_texture_) {
-    d3d11_context_->UpdateSubresource(
-        shared_texture_.Get(),
-        0,
-        nullptr,
-        bgra_buffer_.data(),
-        static_cast<UINT>(row_pitch),
-        0);
-
-    d3d11_context_->Flush();
-
-    if (texture_bridge_ && shared_handle_) {
-      texture_bridge_->PushD3D11Texture(shared_texture_.Get(), shared_handle_, width_, height_);
-    }
-  }
+  std::fill(dst, dst + (width_ * height_), bg_color);
 
   if (texture_bridge_) {
     texture_bridge_->PushPixelBuffer(reinterpret_cast<const uint8_t*>(bgra_buffer_.data()), width_, height_);
@@ -469,6 +486,11 @@ void VideoDecoder::RenderTestPatternFrame(uint32_t frame_index) {
 void VideoDecoder::Teardown() {
   std::lock_guard<std::mutex> lock(decode_mutex_);
   is_initialized_ = false;
+
+  if (av_parser_ctx_ && g_ffmpeg.parser_close) {
+    g_ffmpeg.parser_close(av_parser_ctx_);
+    av_parser_ctx_ = nullptr;
+  }
 
   if (sws_ctx_ && g_ffmpeg.sws_freeContext) {
     g_ffmpeg.sws_freeContext(sws_ctx_);
