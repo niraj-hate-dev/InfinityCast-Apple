@@ -396,6 +396,13 @@ void VideoDecoder::RenderDecodedFrame(void* av_frame) {
   const size_t target_w = static_cast<size_t>(frame_w);
   const size_t target_h = static_cast<size_t>(frame_h);
 
+  static uint64_t s_rendered_count = 0;
+  s_rendered_count++;
+  if (s_rendered_count == 1 || s_rendered_count % 300 == 0) {
+    std::cout << "[DECODER] Successfully rendered active screen frame #" << s_rendered_count
+              << " (" << frame_w << "x" << frame_h << ")" << std::endl;
+  }
+
   // Resize buffers if resolution changed
   if (target_w != width_ || target_h != height_) {
     width_ = target_w;

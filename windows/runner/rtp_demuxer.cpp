@@ -310,7 +310,20 @@ void RtpDemuxer::ProcessH264Payload(const uint8_t* rtp_payload,
       packet.seq = seq;
       packet.is_keyframe = (original_nal_type == kNalTypeIdr);
       packet.is_marker = marker;
-      packet.data = std::move(fu_assembly_buffer_);
+
+      // If IDR keyframe, prepend cached SPS and PPS to ensure decoder synchronization
+      if (packet.is_keyframe && !cached_sps_.empty() && !cached_pps_.empty()) {
+        std::vector<uint8_t> full_idr_data;
+        full_idr_data.reserve(cached_sps_.size() + cached_pps_.size() + fu_assembly_buffer_.size() + 16);
+        AppendAnnexBStartCode(full_idr_data);
+        full_idr_data.insert(full_idr_data.end(), cached_sps_.begin(), cached_sps_.end());
+        AppendAnnexBStartCode(full_idr_data);
+        full_idr_data.insert(full_idr_data.end(), cached_pps_.begin(), cached_pps_.end());
+        full_idr_data.insert(full_idr_data.end(), fu_assembly_buffer_.begin(), fu_assembly_buffer_.end());
+        packet.data = std::move(full_idr_data);
+      } else {
+        packet.data = std::move(fu_assembly_buffer_);
+      }
       fu_assembly_buffer_.clear();
 
       if (on_video_packet_) {

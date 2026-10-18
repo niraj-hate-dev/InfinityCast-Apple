@@ -361,10 +361,13 @@ public class SampleHandler: RPBroadcastSampleHandler {
         let pts = UInt32((CMSampleBufferGetPresentationTimeStamp(sampleBuffer).seconds * 90000.0).truncatingRemainder(dividingBy: Double(UInt32.max)))
 
         // 1. Send SPS & PPS parameter sets on IDR keyframe or first frame
-        let isKeyFrame = !CFDictionaryContainsKey(
-            unsafeBitCast(CFArrayGetValueAtIndex(CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: true), 0), to: CFDictionary.self),
-            unsafeBitCast(kCMSampleAttachmentKey_NotSync, to: UnsafeRawPointer.self)
-        )
+        var isKeyFrame = false
+        if let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false) as? [[CFString: Any]],
+           let first = attachments.first {
+            isKeyFrame = !(first[kCMSampleAttachmentKey_NotSync] as? Bool ?? false)
+        } else if frameIndex <= 2 {
+            isKeyFrame = true
+        }
 
         if isKeyFrame || frameIndex == 1 {
             sendParameterSets(formatDesc: formatDesc, pts: pts)
@@ -431,55 +434,113 @@ public class SampleHandler: RPBroadcastSampleHandler {
     }
 
     private func sendRtpInterleavedPacket(naluPointer: UnsafeRawPointer, naluLength: Int, pts: UInt32, isMarker: Bool) {
-        let rtpPayloadSize = 12 + naluLength
-        guard rtpPayloadSize <= 0xFFFF else { return }
+        guard naluLength > 0 else { return }
 
-        rtpSequenceNumber = rtpSequenceNumber &+ 1
-
-        // 4-byte RFC 2326 Interleaved Header: '$' (0x24) | Channel (0x00) | 16-bit BE Length
-        var packetData = Data(capacity: 4 + rtpPayloadSize)
-        packetData.append(rtpMagicByte)
-        packetData.append(rtpChannelVideo)
-        let payloadLenBE = UInt16(rtpPayloadSize).bigEndian
-        withUnsafeBytes(of: payloadLenBE) { packetData.append(contentsOf: $0) }
-
-        // 12-byte RTP Header
-        let byte0: UInt8 = 0x80 // Version 2
-        let byte1: UInt8 = (isMarker ? 0x80 : 0x00) | (rtpPayloadType & 0x7F)
-        let seqBE = rtpSequenceNumber.bigEndian
-        let ptsBE = pts.bigEndian
-        let ssrcBE = ssrcId.bigEndian
-
-        packetData.append(byte0)
-        packetData.append(byte1)
-        withUnsafeBytes(of: seqBE) { packetData.append(contentsOf: $0) }
-        withUnsafeBytes(of: ptsBE) { packetData.append(contentsOf: $0) }
-        withUnsafeBytes(of: ssrcBE) { packetData.append(contentsOf: $0) }
-
-        // Elementary NAL Unit Body
-        packetData.append(naluPointer.assumingMemoryBound(to: UInt8.self), count: naluLength)
-
-        // Send over BSD socket
         socketLock.lock()
         let activeBsd = clientSocket
         socketLock.unlock()
+        guard activeBsd >= 0 else { return }
 
-        if activeBsd >= 0 {
-            packetData.withUnsafeBytes { rawBuffer in
-                guard let baseAddress = rawBuffer.baseAddress else { return }
-                var sentBytes = 0
-                let totalBytes = rawBuffer.count
-                while sentBytes < totalBytes {
-                    let res = write(activeBsd, baseAddress.advanced(by: sentBytes), totalBytes - sentBytes)
-                    if res <= 0 {
-                        self.socketLock.lock()
+        let maxPayloadSize = 1400
+
+        // Single NAL unit packet (fits within standard MTU)
+        if naluLength <= maxPayloadSize {
+            let rtpPayloadSize = 12 + naluLength
+            guard rtpPayloadSize <= 0xFFFF else { return }
+
+            rtpSequenceNumber = rtpSequenceNumber &+ 1
+
+            var packetData = Data(capacity: 4 + rtpPayloadSize)
+            packetData.append(rtpMagicByte)
+            packetData.append(rtpChannelVideo)
+            let payloadLenBE = UInt16(rtpPayloadSize).bigEndian
+            withUnsafeBytes(of: payloadLenBE) { packetData.append(contentsOf: $0) }
+
+            let byte0: UInt8 = 0x80 // Version 2
+            let byte1: UInt8 = (isMarker ? 0x80 : 0x00) | (rtpPayloadType & 0x7F)
+            let seqBE = rtpSequenceNumber.bigEndian
+            let ptsBE = pts.bigEndian
+            let ssrcBE = ssrcId.bigEndian
+
+            packetData.append(byte0)
+            packetData.append(byte1)
+            withUnsafeBytes(of: seqBE) { packetData.append(contentsOf: $0) }
+            withUnsafeBytes(of: ptsBE) { packetData.append(contentsOf: $0) }
+            withUnsafeBytes(of: ssrcBE) { packetData.append(contentsOf: $0) }
+
+            packetData.append(naluPointer.assumingMemoryBound(to: UInt8.self), count: naluLength)
+
+            sendSocketData(packetData, socket: activeBsd)
+            return
+        }
+
+        // FU-A Fragmentation Unit (RFC 6184 Section 5.8 for large frames e.g. IDR Keyframes)
+        let firstByte = naluPointer.load(as: UInt8.self)
+        let nri = firstByte & 0x60
+        let originalNalType = firstByte & 0x1F
+        let fuIndicator = nri | 28 // 28 = FU-A
+
+        var offset = 1 // Skip first byte of NALU
+        let rawNalBytes = naluPointer.assumingMemoryBound(to: UInt8.self)
+
+        while offset < naluLength {
+            let remaining = naluLength - offset
+            let chunkSize = min(remaining, maxPayloadSize)
+            let isStart = (offset == 1)
+            let isEnd = (offset + chunkSize == naluLength)
+
+            var fuHeader = originalNalType
+            if isStart { fuHeader |= 0x80 }
+            if isEnd { fuHeader |= 0x40 }
+
+            let rtpPayloadSize = 12 + 2 + chunkSize
+            rtpSequenceNumber = rtpSequenceNumber &+ 1
+
+            var packetData = Data(capacity: 4 + rtpPayloadSize)
+            packetData.append(rtpMagicByte)
+            packetData.append(rtpChannelVideo)
+            let payloadLenBE = UInt16(rtpPayloadSize).bigEndian
+            withUnsafeBytes(of: payloadLenBE) { packetData.append(contentsOf: $0) }
+
+            let byte0: UInt8 = 0x80
+            let byte1: UInt8 = (isEnd && isMarker ? 0x80 : 0x00) | (rtpPayloadType & 0x7F)
+            let seqBE = rtpSequenceNumber.bigEndian
+            let ptsBE = pts.bigEndian
+            let ssrcBE = ssrcId.bigEndian
+
+            packetData.append(byte0)
+            packetData.append(byte1)
+            withUnsafeBytes(of: seqBE) { packetData.append(contentsOf: $0) }
+            withUnsafeBytes(of: ptsBE) { packetData.append(contentsOf: $0) }
+            withUnsafeBytes(of: ssrcBE) { packetData.append(contentsOf: $0) }
+
+            packetData.append(fuIndicator)
+            packetData.append(fuHeader)
+            packetData.append(rawNalBytes.advanced(by: offset), count: chunkSize)
+
+            sendSocketData(packetData, socket: activeBsd)
+
+            offset += chunkSize
+        }
+    }
+
+    private func sendSocketData(_ data: Data, socket fd: Int32) {
+        data.withUnsafeBytes { rawBuffer in
+            guard let baseAddress = rawBuffer.baseAddress else { return }
+            var sentBytes = 0
+            let totalBytes = rawBuffer.count
+            while sentBytes < totalBytes {
+                let res = write(fd, baseAddress.advanced(by: sentBytes), totalBytes - sentBytes)
+                if res <= 0 {
+                    self.socketLock.lock()
+                    if self.clientSocket == fd {
                         close(self.clientSocket)
                         self.clientSocket = -1
-                        self.socketLock.unlock()
-                        break
                     }
-                    sentBytes += res
+                    self.socketLock.unlock()
+                    break
                 }
+                sentBytes += res
             }
         }
     }
