@@ -4,6 +4,8 @@
 #include <iostream>
 #include <algorithm>
 #include <cstring>
+#include <thread>
+#include <chrono>
 
 namespace applecast {
 
@@ -190,11 +192,11 @@ bool AudioDecoder::InitWaveOut(uint32_t sample_rate, uint32_t channels) {
   CloseWaveOut();
 
   current_sample_rate_ = sample_rate;
-  current_channels_ = channels;
+  current_channels_ = 2; // Always stereo output from DecodeStream
 
   WAVEFORMATEX wfx{};
   wfx.wFormatTag = WAVE_FORMAT_PCM;
-  wfx.nChannels = static_cast<WORD>(channels);
+  wfx.nChannels = 2;
   wfx.nSamplesPerSec = static_cast<DWORD>(sample_rate);
   wfx.wBitsPerSample = 16;
   wfx.nBlockAlign = wfx.nChannels * (wfx.wBitsPerSample / 8);
@@ -214,7 +216,7 @@ bool AudioDecoder::InitWaveOut(uint32_t sample_rate, uint32_t channels) {
   }
   current_wave_buffer_idx_ = 0;
 
-  Log("AUDIO", "Windows WaveOut audio device initialized: " + std::to_string(sample_rate) + " Hz, " + std::to_string(channels) + " channels", "success");
+  Log("AUDIO", "Windows WaveOut audio device initialized: " + std::to_string(sample_rate) + " Hz, 2 channels", "success");
   return true;
 }
 
@@ -233,18 +235,14 @@ void AudioDecoder::CloseWaveOut() {
 }
 
 void CALLBACK AudioDecoder::WaveOutProc(HWAVEOUT hwo, UINT uMsg, DWORD_PTR dwInstance, DWORD_PTR dwParam1, DWORD_PTR dwParam2) {
-  if (uMsg == WOM_DONE) {
-    auto* hdr = reinterpret_cast<WAVEHDR*>(dwParam1);
-    if (hdr && hwo) {
-      waveOutUnprepareHeader(hwo, hdr, sizeof(WAVEHDR));
-    }
-  }
+  // Callback notification for completed wave buffers.
+  // waveOutUnprepareHeader is performed in PlayPcm to prevent driver deadlocks.
 }
 
 void AudioDecoder::PlayPcm(const int16_t* pcm_data, size_t num_samples) {
   if (!h_wave_out_ || !pcm_data || num_samples == 0) return;
 
-  std::lock_guard<std::mutex> lock(wave_mutex_);
+  std::unique_lock<std::mutex> lock(wave_mutex_);
   if (!h_wave_out_) return;
 
   static size_t s_audio_frames_played = 0;
@@ -255,16 +253,32 @@ void AudioDecoder::PlayPcm(const int16_t* pcm_data, size_t num_samples) {
 
   const size_t bytes_to_write = num_samples * sizeof(int16_t);
 
+  // Search for the next available buffer in the ring
   size_t idx = current_wave_buffer_idx_;
-  WAVEHDR& hdr = wave_headers_[idx];
+  bool found = false;
 
-  if (hdr.dwFlags & WHDR_PREPARED) {
-    if (hdr.dwFlags & WHDR_DONE) {
-      waveOutUnprepareHeader(h_wave_out_, &hdr, sizeof(WAVEHDR));
-    } else {
-      // Buffer still in playback queue, advance to next
+  for (int retry = 0; retry < 50; ++retry) {
+    for (size_t attempt = 0; attempt < kNumWaveBuffers; ++attempt) {
+      WAVEHDR& candidate = wave_headers_[idx];
+      if (!(candidate.dwFlags & WHDR_PREPARED) || (candidate.dwFlags & WHDR_DONE)) {
+        found = true;
+        break;
+      }
       idx = (idx + 1) % kNumWaveBuffers;
     }
+    if (found) break;
+
+    // All buffers in flight; unlock briefly to allow sound hardware DMA to complete
+    lock.unlock();
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    lock.lock();
+    if (!h_wave_out_) return;
+  }
+
+  WAVEHDR& hdr = wave_headers_[idx];
+  if (hdr.dwFlags & WHDR_PREPARED) {
+    waveOutUnprepareHeader(h_wave_out_, &hdr, sizeof(WAVEHDR));
+    hdr.dwFlags = 0;
   }
 
   auto& buf = wave_buffer_data_[idx];
@@ -308,14 +322,13 @@ bool AudioDecoder::DecodeStream(const uint8_t* in_data, size_t in_size) {
     }
   }
 
-  // If packet starts with ApowerMirror 4-byte audio tag [00 00 00 02] followed by ADTS syncword [FF Fx], skip 4 bytes
-  if (cur_size >= 6 && cur_ptr[0] == 0x00 && cur_ptr[1] == 0x00 && cur_ptr[2] == 0x00 && cur_ptr[3] == 0x02 &&
-      cur_ptr[4] == 0xFF && (cur_ptr[5] & 0xF0) == 0xF0) {
-    cur_ptr += 4;
-    cur_size -= 4;
-  }
-
   while (cur_size > 0) {
+    // Strip 4-byte ApowerMirror tag [00 00 00 02] before each ADTS frame
+    while (cur_size >= 4 && cur_ptr[0] == 0x00 && cur_ptr[1] == 0x00 && cur_ptr[2] == 0x00 && cur_ptr[3] == 0x02) {
+      cur_ptr += 4;
+      cur_size -= 4;
+    }
+
     uint8_t* poutbuf = nullptr;
     int poutbuf_size = 0;
 
@@ -324,7 +337,7 @@ bool AudioDecoder::DecodeStream(const uint8_t* in_data, size_t in_size) {
         cur_ptr, cur_size,
         kAvNoPtsValue, kAvNoPtsValue, 0);
 
-    if (bytes_consumed < 0) {
+    if (bytes_consumed <= 0) {
       break;
     }
 
@@ -370,11 +383,11 @@ bool AudioDecoder::DecodeStream(const uint8_t* in_data, size_t in_size) {
         if (sample_rate <= 0) sample_rate = 44100;
         if (channels <= 0) channels = 2;
 
-        if (!h_wave_out_ || sample_rate != static_cast<int>(current_sample_rate_) || channels != static_cast<int>(current_channels_)) {
-          InitWaveOut(static_cast<uint32_t>(sample_rate), static_cast<uint32_t>(channels));
+        if (!h_wave_out_ || sample_rate != static_cast<int>(current_sample_rate_) || current_channels_ != 2) {
+          InitWaveOut(static_cast<uint32_t>(sample_rate), 2);
         }
 
-        // Convert PCM samples to 16-bit interleaved stereo format
+        // Convert PCM samples to 16-bit interleaved stereo format (always output 2 channels)
         // Format 8 = AV_SAMPLE_FMT_FLTP (Planar 32-bit Float - default for AAC)
         // Format 3 = AV_SAMPLE_FMT_FLT (Interleaved 32-bit Float)
         // Format 1 = AV_SAMPLE_FMT_S16 (Interleaved 16-bit Integer)
@@ -382,31 +395,48 @@ bool AudioDecoder::DecodeStream(const uint8_t* in_data, size_t in_size) {
         if (f->format == 8 /* AV_SAMPLE_FMT_FLTP */) {
           const float* left = reinterpret_cast<const float*>(f->data[0]);
           const float* right = (channels > 1 && f->data[1]) ? reinterpret_cast<const float*>(f->data[1]) : left;
-          std::vector<int16_t> pcm(f->nb_samples * channels);
+          std::vector<int16_t> pcm(f->nb_samples * 2);
           for (int i = 0; i < f->nb_samples; ++i) {
             float l = left[i];
-            float r = right[i];
+            float r = (channels > 1) ? right[i] : l;
             pcm[i * 2] = static_cast<int16_t>(std::clamp(l, -1.0f, 1.0f) * 32767.0f);
             pcm[i * 2 + 1] = static_cast<int16_t>(std::clamp(r, -1.0f, 1.0f) * 32767.0f);
           }
           PlayPcm(pcm.data(), pcm.size());
         } else if (f->format == 3 /* AV_SAMPLE_FMT_FLT */) {
           const float* samples = reinterpret_cast<const float*>(f->data[0]);
-          std::vector<int16_t> pcm(f->nb_samples * channels);
-          for (size_t i = 0; i < pcm.size(); ++i) {
-            pcm[i] = static_cast<int16_t>(std::clamp(samples[i], -1.0f, 1.0f) * 32767.0f);
+          std::vector<int16_t> pcm(f->nb_samples * 2);
+          if (channels == 1) {
+            for (int i = 0; i < f->nb_samples; ++i) {
+              int16_t s = static_cast<int16_t>(std::clamp(samples[i], -1.0f, 1.0f) * 32767.0f);
+              pcm[i * 2] = s;
+              pcm[i * 2 + 1] = s;
+            }
+          } else {
+            for (size_t i = 0; i < pcm.size(); ++i) {
+              pcm[i] = static_cast<int16_t>(std::clamp(samples[i], -1.0f, 1.0f) * 32767.0f);
+            }
           }
           PlayPcm(pcm.data(), pcm.size());
         } else if (f->format == 1 /* AV_SAMPLE_FMT_S16 */) {
           const int16_t* samples = reinterpret_cast<const int16_t*>(f->data[0]);
-          PlayPcm(samples, f->nb_samples * channels);
+          if (channels == 1) {
+            std::vector<int16_t> pcm(f->nb_samples * 2);
+            for (int i = 0; i < f->nb_samples; ++i) {
+              pcm[i * 2] = samples[i];
+              pcm[i * 2 + 1] = samples[i];
+            }
+            PlayPcm(pcm.data(), pcm.size());
+          } else {
+            PlayPcm(samples, f->nb_samples * channels);
+          }
         } else if (f->format == 6 /* AV_SAMPLE_FMT_S16P */) {
           const int16_t* left = reinterpret_cast<const int16_t*>(f->data[0]);
           const int16_t* right = (channels > 1 && f->data[1]) ? reinterpret_cast<const int16_t*>(f->data[1]) : left;
-          std::vector<int16_t> pcm(f->nb_samples * channels);
+          std::vector<int16_t> pcm(f->nb_samples * 2);
           for (int i = 0; i < f->nb_samples; ++i) {
             pcm[i * 2] = left[i];
-            pcm[i * 2 + 1] = right[i];
+            pcm[i * 2 + 1] = (channels > 1) ? right[i] : left[i];
           }
           PlayPcm(pcm.data(), pcm.size());
         }
