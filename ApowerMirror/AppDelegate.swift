@@ -67,7 +67,10 @@ class AppDelegate: UIResponder, UIApplicationDelegate, MMWormholeManagerDelegate
     // MARK: - Lifecycle & Background Task Keepalive
 
     func applicationDidEnterBackground(_ application: UIApplication) {
-        NSLog("[AppDelegate] Application entered background -> requesting background task assertion")
+        NSLog("[AppDelegate] Application entered background -> requesting background assertion")
+        if UIScreen.main.isCaptured {
+            SilentAudioKeepAlive.shared.start()
+        }
 
         backgroundTask = application.beginBackgroundTask(withName: "com.apowermirror.keepalive") { [weak self] in
             guard let self = self else { return }

@@ -19,7 +19,16 @@ public final class BroadcastPickerManager {
 
     // MARK: - Properties
     public weak var delegate: BroadcastPickerManagerDelegate?
-    private var extensionBundleId: String {
+    public var extensionBundleId: String {
+        if let pluginsUrl = Bundle.main.builtInPlugInsURL,
+           let items = try? FileManager.default.contentsOfDirectory(at: pluginsUrl, includingPropertiesForKeys: nil) {
+            for item in items where item.pathExtension == "appex" {
+                if let extBundle = Bundle(url: item), let extId = extBundle.bundleIdentifier {
+                    NSLog("[BroadcastPickerManager] Discovered embedded extension bundle ID: %@", extId)
+                    return extId
+                }
+            }
+        }
         if let mainId = Bundle.main.bundleIdentifier, !mainId.isEmpty {
             return "\(mainId).ApowerMirrorUpload"
         }
@@ -81,6 +90,19 @@ public final class BroadcastPickerManager {
             guard let targetView = window else { return }
             self.launchBroadcastPicker(from: targetView)
         }
+    }
+
+    /// Signals the ReplayKit Broadcast Extension to finish and stop recording via Darwin Notification
+    public func stopBroadcast() {
+        let notificationName = "com.apowermirror.broadcast.StopBroadcast" as CFString
+        CFNotificationCenterPostNotification(
+            CFNotificationCenterGetDarwinNotifyCenter(),
+            CFNotificationName(notificationName),
+            nil,
+            nil,
+            true
+        )
+        NSLog("[BroadcastPickerManager] Dispatched StopBroadcast Darwin notification to Extension")
     }
 
     // MARK: - Screen Capture Observation

@@ -2,36 +2,34 @@
 //  SampleHandler.swift
 //  ApowerMirrorUpload / AppleCast
 //
-//  Reconstructed 1:1 from ApowerMirrorUpload Mach-O binary & WXCastiOSSender
+//  ReplayKit Broadcast Upload Extension
 //  Subclass: RPBroadcastSampleHandler
+//  Pure POSIX BSD Socket streaming to Main App loopback IPC (127.0.0.1:8888)
 //  Hardened for iOS 18: Immediate XPC handshake return, Zero-Jetsam OOM,
-//  Outbound client stream piping directly to Main App's 127.0.0.1:25334 bridge.
+//  SO_NOSIGPIPE protection against pipe termination signals.
 //
 
 import ReplayKit
 import VideoToolbox
 import CoreMedia
-import Network
 import Darwin
 
 @objcMembers
 public class SampleHandler: RPBroadcastSampleHandler {
 
     // MARK: - Constants
-    private let appGroupName = "group.apowersoft.mirror"
-    private let kDefaultMirrorPort: UInt16 = 25334 // /mirror.do (Video)
+    private static let kIpcPort: UInt16 = 8888
+    private static let kStopNotification = "com.apowermirror.broadcast.StopBroadcast"
 
     // MARK: - Encoders & Network Transport
     private var videoEncoder: VideoEncoder?
     private var isBroadcasting = false
-    private var mainAppConnection: NWConnection?
     private var bsdClientSocket: Int32 = -1
+    private let socketLock = NSLock()
 
-    private let networkQueue = DispatchQueue(label: "com.apowermirror.network.queue", qos: .userInteractive)
-    private let frameProcessingQueue = DispatchQueue(label: "com.apowermirror.frame.queue", qos: .userInteractive)
-
+    private let networkQueue = DispatchQueue(label: "com.apowermirror.upload.network", qos: .userInteractive)
     private var targetFps: Int32 = 60
-    private var targetBitrate: Int32 = 3_500_000
+    private var targetBitrate: Int32 = 4_000_000
 
     // MARK: - Lifecycle
 
@@ -42,24 +40,22 @@ public class SampleHandler: RPBroadcastSampleHandler {
     public override func broadcastStarted(withSetupInfo setupInfo: [String : NSObject]?) {
         // =========================================================================
         // CRITICAL iOS 18 REQUIREMENT:
-        // Return from broadcastStarted in < 50ms so replayd finishes XPC handshake.
-        // Calling super turns the circle pulsating RED and starts frame ingestion.
+        // Must return in < 20ms so replayd XPC watchdog finishes the handshake.
+        // Calling super turns the indicator pulsating RED and starts frame ingestion.
         // =========================================================================
         super.broadcastStarted(withSetupInfo: setupInfo)
         isBroadcasting = true
 
-        NSLog("[SampleHandler] ReplayKit broadcast started -> Acknowledging XPC handshake")
+        NSLog("[SampleHandler] ReplayKit broadcast started -> XPC handshake acknowledged")
 
         // 1. Notify Main App via Darwin Notification Center
         notifyMainApp(event: "BroadcastStarted")
 
-        // 2. Read preferences from App Group defaults if available
-        let defaults = UserDefaults(suiteName: appGroupName)
-        targetFps = Int32(defaults?.integer(forKey: "kGroupFps") ?? 60)
-        targetBitrate = Int32(defaults?.integer(forKey: "kGroupBitrate") ?? 3_500_000)
+        // 2. Setup observer to stop broadcast when user taps Stop in Main App
+        setupDarwinStopReceiver()
 
-        // 3. Connect as outbound client to Main App's streaming engine on 127.0.0.1:25334
-        connectToMainAppBridge(port: kDefaultMirrorPort)
+        // 3. Connect non-blocking BSD socket to Main App IPC on 127.0.0.1:8888
+        connectToMainAppIPC()
     }
 
     public override func broadcastPaused() {
@@ -78,24 +74,14 @@ public class SampleHandler: RPBroadcastSampleHandler {
         super.broadcastFinished()
         isBroadcasting = false
 
-        NSLog("[SampleHandler] Broadcast finished -> cleaning up encoders and connections")
+        NSLog("[SampleHandler] Broadcast finished -> cleaning up encoders and sockets")
 
-        // Invalidate and free encoders
+        // Invalidate and free video encoder
         videoEncoder?.invalidate()
         videoEncoder = nil
 
-        // Clean up outbound bridge connection
-        networkQueue.async { [weak self] in
-            guard let self = self else { return }
-            self.mainAppConnection?.cancel()
-            self.mainAppConnection = nil
-        }
-
         // Clean up BSD socket
-        if bsdClientSocket >= 0 {
-            close(bsdClientSocket)
-            bsdClientSocket = -1
-        }
+        closeSocket()
 
         // Notify Main App that broadcast finished
         notifyMainApp(event: "Finish")
@@ -107,18 +93,18 @@ public class SampleHandler: RPBroadcastSampleHandler {
     public override func processSampleBuffer(_ sampleBuffer: CMSampleBuffer, with sampleBufferType: RPSampleBufferType) {
         guard isBroadcasting else { return }
 
-        // Wrap in autoreleasepool to prevent memory retention spikes
+        // Wrap in autoreleasepool to prevent memory spikes under high frame rates
         autoreleasepool {
             switch sampleBufferType {
             case .video:
-                // Lazily initialize VideoEncoder on the very first video frame
+                // Lazily initialize hardware VideoEncoder on the very first video frame
                 if videoEncoder == nil {
                     videoEncoder = VideoEncoder(bitrate: targetBitrate, fps: targetFps) { [weak self] (packet, isKeyFrame, isEndFrame) in
-                        self?.broadcastDataToBridge(packet)
+                        self?.sendDataToMainApp(packet)
                     }
 
                     videoEncoder?.setDimensionChangeHandler { [weak self] width, height, rotation in
-                        self?.notifyDesktopGeometryChanged(width: width, height: height, rotation: rotation)
+                        self?.sendGeometryChange(width: width, height: height, rotation: rotation)
                     }
                 }
 
@@ -140,88 +126,118 @@ public class SampleHandler: RPBroadcastSampleHandler {
         }
     }
 
-    // MARK: - Outbound Client Streaming Engine (to 127.0.0.1:25334)
+    // MARK: - Outbound POSIX BSD Socket IPC (to 127.0.0.1:8888)
 
-    private func connectToMainAppBridge(port: UInt16) {
+    private func connectToMainAppIPC() {
         networkQueue.async { [weak self] in
             guard let self = self, self.isBroadcasting else { return }
 
-            // 1. Attempt NWConnection (outbound)
-            let tcpOptions = NWProtocolTCP.Options()
-            tcpOptions.noDelay = true
-            let params = NWParameters(tls: nil, tcp: tcpOptions)
+            self.socketLock.lock()
+            if self.bsdClientSocket >= 0 {
+                close(self.bsdClientSocket)
+                self.bsdClientSocket = -1
+            }
+            self.socketLock.unlock()
 
-            guard let endpointPort = NWEndpoint.Port(rawValue: port) else { return }
-            let conn = NWConnection(host: "127.0.0.1", port: endpointPort, using: params)
+            let sock = socket(AF_INET, SOCK_STREAM, 0)
+            guard sock >= 0 else {
+                NSLog("[SampleHandler] Failed to create BSD socket: errno %d", errno)
+                return
+            }
 
-            conn.stateUpdateHandler = { state in
-                switch state {
-                case .ready:
-                    NSLog("[SampleHandler] Connected to Main App streaming bridge on 127.0.0.1:%d", port)
-                case .failed(let err):
-                    NSLog("[SampleHandler] NWConnection bridge note: %@ (attempting BSD fallback)", err.localizedDescription)
-                default:
-                    break
+            // CRITICAL: Prevent SIGPIPE signal termination when peer closes connection
+            var noSigpipe: Int32 = 1
+            setsockopt(sock, SOL_SOCKET, SO_NOSIGPIPE, &noSigpipe, socklen_t(MemoryLayout<Int32>.size))
+
+            // Disable Nagle algorithm for real-time low-latency packet streaming
+            var noDelay: Int32 = 1
+            setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, &noDelay, socklen_t(MemoryLayout<Int32>.size))
+
+            // Expand socket send buffer to 2 MB to absorb frame bursts
+            var sndBuf: Int32 = 2 * 1024 * 1024
+            setsockopt(sock, SOL_SOCKET, SO_SNDBUF, &sndBuf, socklen_t(MemoryLayout<Int32>.size))
+
+            // Set sending timeout to 1 second so frame thread is never blocked
+            var timeout = timeval(tv_sec: 1, tv_usec: 0)
+            setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
+
+            var addr = sockaddr_in()
+            addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+            addr.sin_family = sa_family_t(AF_INET)
+            addr.sin_port = SampleHandler.kIpcPort.bigEndian
+            inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr)
+
+            let res = withUnsafePointer(to: &addr) {
+                $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                    connect(sock, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
                 }
             }
 
-            conn.start(queue: self.networkQueue)
-            self.mainAppConnection = conn
-
-            // 2. Direct BSD Socket connection (outbound fallback)
-            let sock = socket(AF_INET, SOCK_STREAM, 0)
-            if sock >= 0 {
-                var nd: Int32 = 1
-                setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, &nd, socklen_t(MemoryLayout<Int32>.size))
-
-                var addr = sockaddr_in()
-                addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
-                addr.sin_family = sa_family_t(AF_INET)
-                addr.sin_port = port.bigEndian
-                inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr)
-
-                let res = withUnsafePointer(to: &addr) {
-                    $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-                        connect(sock, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+            if res == 0 {
+                self.socketLock.lock()
+                self.bsdClientSocket = sock
+                self.socketLock.unlock()
+                NSLog("[SampleHandler] Connected to Main App IPC on 127.0.0.1:%d", SampleHandler.kIpcPort)
+            } else {
+                NSLog("[SampleHandler] Connect to 127.0.0.1:%d failed (errno: %d), retrying in 250ms...", SampleHandler.kIpcPort, errno)
+                close(sock)
+                // Retry connection if broadcast is still active
+                if self.isBroadcasting {
+                    self.networkQueue.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+                        self?.connectToMainAppIPC()
                     }
                 }
+            }
+        }
+    }
 
-                if res == 0 {
-                    self.bsdClientSocket = sock
-                    NSLog("[SampleHandler] Connected via BSD client socket to 127.0.0.1:%d", port)
-                } else {
-                    close(sock)
+    private func sendDataToMainApp(_ data: Data) {
+        socketLock.lock()
+        let sock = bsdClientSocket
+        socketLock.unlock()
+
+        guard sock >= 0 else { return }
+
+        data.withUnsafeBytes { rawBuf in
+            guard let basePtr = rawBuf.baseAddress else { return }
+            var totalSent = 0
+            let totalLength = data.count
+
+            while totalSent < totalLength {
+                let bytesToSend = totalLength - totalSent
+                let sent = send(sock, basePtr.advanced(by: totalSent), bytesToSend, 0)
+                if sent <= 0 {
+                    // Send failed (EPIPE / ECONNRESET)
+                    NSLog("[SampleHandler] Socket send failed (%d), reconnecting...", errno)
+                    closeSocket()
+                    connectToMainAppIPC()
+                    break
                 }
+                totalSent += sent
             }
         }
     }
 
-    private func broadcastDataToBridge(_ data: Data) {
-        // 1. Dispatch via NWConnection
-        if let conn = mainAppConnection, conn.state == .ready {
-            conn.send(content: data, completion: .idempotent)
-        }
-
-        // 2. Dispatch via BSD client socket
-        if bsdClientSocket >= 0 {
-            data.withUnsafeBytes { rawBuf in
-                guard let basePtr = rawBuf.baseAddress else { return }
-                _ = send(self.bsdClientSocket, basePtr, data.count, 0)
-            }
-        }
-    }
-
-    private func notifyDesktopGeometryChanged(width: Int32, height: Int32, rotation: Int32) {
+    private func sendGeometryChange(width: Int32, height: Int32, rotation: Int32) {
         let rotationMsg = "cmd-Rotation-Resp:\(rotation)\n"
         let resolutionMsg = "cmd-Resolution-Resp:\(width)_\(height)\n"
 
         if let rotData = rotationMsg.data(using: .utf8), let resData = resolutionMsg.data(using: .utf8) {
-            broadcastDataToBridge(rotData)
-            broadcastDataToBridge(resData)
+            sendDataToMainApp(rotData)
+            sendDataToMainApp(resData)
         }
     }
 
-    // MARK: - Darwin Notification (MMWormhole Inter-Process Communication)
+    private func closeSocket() {
+        socketLock.lock()
+        defer { socketLock.unlock() }
+        if bsdClientSocket >= 0 {
+            close(bsdClientSocket)
+            bsdClientSocket = -1
+        }
+    }
+
+    // MARK: - Darwin Notification Inter-Process Communication
 
     private func notifyMainApp(event: String) {
         let notificationName = "com.apowermirror.broadcast.\(event)" as CFString
@@ -231,6 +247,22 @@ public class SampleHandler: RPBroadcastSampleHandler {
             nil,
             nil,
             true
+        )
+    }
+
+    private func setupDarwinStopReceiver() {
+        CFNotificationCenterAddObserver(
+            CFNotificationCenterGetDarwinNotifyCenter(),
+            Unmanaged.passUnretained(self).toOpaque(),
+            { _, observer, _, _, _ in
+                guard let obs = observer else { return }
+                let handler = Unmanaged<SampleHandler>.fromOpaque(obs).takeUnretainedValue()
+                NSLog("[SampleHandler] Received StopBroadcast notification from Main App")
+                handler.finishBroadcastWithError(nil)
+            },
+            SampleHandler.kStopNotification as CFString,
+            nil,
+            .deliverImmediately
         )
     }
 }

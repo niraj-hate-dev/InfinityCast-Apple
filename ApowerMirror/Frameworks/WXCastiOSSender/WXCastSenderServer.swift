@@ -27,6 +27,7 @@ public final class WXCastSenderServer {
     // MARK: - Constants
     public static let defaultChannelPort: UInt16 = 25333 // 0x62F5 (/channel.do)
     public static let defaultMirrorPort: UInt16 = 25334  // 0x62F6 (/mirror.do)
+    public static let defaultIpcPort: UInt16 = 8888     // Internal IPC from Broadcast Extension
 
     // MARK: - Properties
     public weak var delegate: WXCastSenderServerDelegate?
@@ -44,6 +45,11 @@ public final class WXCastSenderServer {
     private var bsdClientSockets: [Int32] = []
     private let bsdSocketLock = NSLock()
 
+    // Internal IPC Server for ReplayKit Extension (Port 8888)
+    private var ipcListenSocket: Int32 = -1
+    private var ipcClientSockets: [Int32] = []
+    private let ipcSocketLock = NSLock()
+
     private let serverQueue = DispatchQueue(label: "com.apowermirror.server.queue", qos: .userInteractive)
     private var isRunning = false
 
@@ -53,15 +59,16 @@ public final class WXCastSenderServer {
 
     // MARK: - Lifecycle
 
-    /// Starts both Control (25333) and Video Mirror (25334) server engines
-    public func start(channelPort: UInt16 = defaultChannelPort, mirrorPort: UInt16 = defaultMirrorPort) {
+    /// Starts Control (25333), Video Mirror (25334), and Extension IPC (8888) server engines
+    public func start(channelPort: UInt16 = defaultChannelPort, mirrorPort: UInt16 = defaultMirrorPort, ipcPort: UInt16 = defaultIpcPort) {
         serverQueue.async { [weak self] in
             guard let self = self, !self.isRunning else { return }
             self.isRunning = true
 
             self.setupChannelListener(port: channelPort)
             self.setupMirrorListener(port: mirrorPort)
-            NSLog("[WXCastSenderServer] Control active on 0.0.0.0:%d, Video Stream active on 0.0.0.0:%d", channelPort, mirrorPort)
+            self.setupIpcListener(port: ipcPort)
+            NSLog("[WXCastSenderServer] Control active on 0.0.0.0:%d, Video Stream active on 0.0.0.0:%d, Extension IPC active on 127.0.0.1:%d", channelPort, mirrorPort, ipcPort)
         }
     }
 
@@ -93,6 +100,18 @@ public final class WXCastSenderServer {
             }
             self.bsdClientSockets.removeAll()
             self.bsdSocketLock.unlock()
+
+            // Close IPC Sockets
+            self.ipcSocketLock.lock()
+            if self.ipcListenSocket >= 0 {
+                close(self.ipcListenSocket)
+                self.ipcListenSocket = -1
+            }
+            for fd in self.ipcClientSockets {
+                close(fd)
+            }
+            self.ipcClientSockets.removeAll()
+            self.ipcSocketLock.unlock()
 
             NSLog("[WXCastSenderServer] Stopped all listeners and closed client connections")
         }
@@ -344,6 +363,114 @@ public final class WXCastSenderServer {
                     deadFds.forEach { close($0) }
                 }
             }
+        }
+    }
+
+    // MARK: - ReplayKit Extension IPC Server (Port 8888 on 127.0.0.1)
+
+    private func setupIpcListener(port: UInt16) {
+        serverQueue.async { [weak self] in
+            guard let self = self, self.ipcListenSocket == -1 else { return }
+
+            let sock = socket(AF_INET, SOCK_STREAM, 0)
+            guard sock >= 0 else {
+                NSLog("[WXCastSenderServer] IPC socket creation failed: %d", errno)
+                return
+            }
+
+            var reuse: Int32 = 1
+            setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &reuse, socklen_t(MemoryLayout<Int32>.size))
+            setsockopt(sock, SOL_SOCKET, SO_REUSEPORT, &reuse, socklen_t(MemoryLayout<Int32>.size))
+
+            var noDelay: Int32 = 1
+            setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, &noDelay, socklen_t(MemoryLayout<Int32>.size))
+
+            var rcvBuf: Int32 = 2 * 1024 * 1024
+            setsockopt(sock, SOL_SOCKET, SO_RCVBUF, &rcvBuf, socklen_t(MemoryLayout<Int32>.size))
+
+            var addr = sockaddr_in()
+            addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+            addr.sin_family = sa_family_t(AF_INET)
+            addr.sin_port = port.bigEndian
+            inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr)
+
+            let bindRes = withUnsafePointer(to: &addr) {
+                $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                    bind(sock, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+                }
+            }
+
+            guard bindRes >= 0 else {
+                NSLog("[WXCastSenderServer] IPC socket bind note on port %d: %d", port, errno)
+                close(sock)
+                return
+            }
+
+            guard listen(sock, 5) >= 0 else {
+                NSLog("[WXCastSenderServer] IPC socket listen error: %d", errno)
+                close(sock)
+                return
+            }
+
+            self.ipcSocketLock.lock()
+            self.ipcListenSocket = sock
+            self.ipcSocketLock.unlock()
+
+            NSLog("[WXCastSenderServer] IPC socket listening for ReplayKit Extension on 127.0.0.1:%d", port)
+
+            DispatchQueue.global(qos: .userInteractive).async { [weak self] in
+                while let self = self, self.isRunning, self.ipcListenSocket >= 0 {
+                    var clientAddr = sockaddr_in()
+                    var addrLen = socklen_t(MemoryLayout<sockaddr_in>.size)
+                    let clientFd = withUnsafeMutablePointer(to: &clientAddr) {
+                        $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                            accept(self.ipcListenSocket, $0, &addrLen)
+                        }
+                    }
+
+                    guard clientFd >= 0 else { break }
+
+                    var noSigpipe: Int32 = 1
+                    setsockopt(clientFd, SOL_SOCKET, SO_NOSIGPIPE, &noSigpipe, socklen_t(MemoryLayout<Int32>.size))
+
+                    var nd: Int32 = 1
+                    setsockopt(clientFd, IPPROTO_TCP, TCP_NODELAY, &nd, socklen_t(MemoryLayout<Int32>.size))
+
+                    self.ipcSocketLock.lock()
+                    self.ipcClientSockets.append(clientFd)
+                    self.ipcSocketLock.unlock()
+
+                    NSLog("[WXCastSenderServer] Broadcast Extension connected to IPC on port %d (fd: %d)!", port, clientFd)
+                    self.startIpcReceiveLoop(clientFd: clientFd)
+                }
+            }
+        }
+    }
+
+    private func startIpcReceiveLoop(clientFd: Int32) {
+        DispatchQueue.global(qos: .userInteractive).async { [weak self] in
+            guard let self = self else { return }
+            var buffer = [UInt8](repeating: 0, count: 65536)
+
+            while self.isRunning {
+                let bytesRead = recv(clientFd, &buffer, buffer.count, 0)
+                if bytesRead > 0 {
+                    let packetData = Data(bytes: buffer, count: bytesRead)
+                    // Forward received video packet immediately to Desktop receiver on port 25334!
+                    self.sendVideoData(packetData)
+                } else if bytesRead <= 0 {
+                    if errno == EAGAIN || errno == EWOULDBLOCK {
+                        continue
+                    }
+                    NSLog("[WXCastSenderServer] Broadcast Extension disconnected from IPC (fd: %d)", clientFd)
+                    break
+                }
+            }
+
+            self.ipcSocketLock.lock()
+            self.ipcClientSockets.removeAll { $0 == clientFd }
+            self.ipcSocketLock.unlock()
+            close(clientFd)
         }
     }
 
