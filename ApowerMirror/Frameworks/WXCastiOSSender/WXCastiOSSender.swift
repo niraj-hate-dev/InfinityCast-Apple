@@ -41,15 +41,15 @@ public final class WXCastiOSSender: WXCastSenderServerDelegate {
 
     // MARK: - Service Lifecycle
 
-    public func startMirrorService(channelPort: UInt16 = 25333, mirrorPort: UInt16 = 25334, result: ((Bool) -> Void)? = nil) {
+    public func startMirrorService(channelPort: UInt16 = 25333, mirrorPort: UInt16 = 25334, audioPort: UInt16 = 25335, result: ((Bool) -> Void)? = nil) {
         self.channelPort = channelPort
         self.mirrorPort = mirrorPort
         self.isMirroring = true
 
-        // The Main App binds BOTH channelPort (25333) and mirrorPort (25334)
-        server.start(channelPort: channelPort, mirrorPort: mirrorPort)
+        // The Main App binds channelPort (25333), mirrorPort (25334), and audioPort (25335)
+        server.start(channelPort: channelPort, mirrorPort: mirrorPort, audioPort: audioPort)
         result?(true)
-        NSLog("[WXCastiOSSender] Service started -> Channel: %d, Mirror: %d", channelPort, mirrorPort)
+        NSLog("[WXCastiOSSender] Service started -> Channel: %d, Mirror: %d, Audio: %d", channelPort, mirrorPort, audioPort)
     }
 
     public func sendVideoData(_ data: Data) {

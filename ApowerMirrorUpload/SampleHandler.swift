@@ -19,13 +19,17 @@ public class SampleHandler: RPBroadcastSampleHandler {
 
     // MARK: - Constants
     private static let kIpcPort: UInt16 = 8888
+    private static let kAudioIpcPort: UInt16 = 8889
     private static let kStopNotification = "com.apowermirror.broadcast.StopBroadcast"
 
     // MARK: - Encoders & Network Transport
     private var videoEncoder: VideoEncoder?
+    private var audioEncoder: AudioEncoder?
     private var isBroadcasting = false
     private var bsdClientSocket: Int32 = -1
+    private var audioBsdClientSocket: Int32 = -1
     private let socketLock = NSLock()
+    private let audioSocketLock = NSLock()
 
     private let networkQueue = DispatchQueue(label: "com.apowermirror.upload.network", qos: .userInteractive)
     private var targetFps: Int32 = 60
@@ -54,8 +58,9 @@ public class SampleHandler: RPBroadcastSampleHandler {
         // 2. Setup observer to stop broadcast when user taps Stop in Main App
         setupDarwinStopReceiver()
 
-        // 3. Connect non-blocking BSD socket to Main App IPC on 127.0.0.1:8888
+        // 3. Connect non-blocking BSD sockets to Main App IPC on 127.0.0.1:8888 (Video) & 8889 (Audio)
         connectToMainAppIPC()
+        connectToAudioIPC()
     }
 
     public override func broadcastPaused() {
@@ -80,8 +85,13 @@ public class SampleHandler: RPBroadcastSampleHandler {
         videoEncoder?.invalidate()
         videoEncoder = nil
 
-        // Clean up BSD socket
+        // Invalidate and free audio encoder
+        audioEncoder?.invalidate()
+        audioEncoder = nil
+
+        // Clean up BSD sockets
         closeSocket()
+        closeAudioSocket()
 
         // Notify Main App that broadcast finished
         notifyMainApp(event: "Finish")
@@ -117,7 +127,17 @@ public class SampleHandler: RPBroadcastSampleHandler {
                 // Feed CVPixelBuffer to hardware encoder
                 videoEncoder?.encode(sampleBuffer: sampleBuffer, orientation: orientation)
 
-            case .audioApp, .audioMic:
+            case .audioApp:
+                // Lazily initialize AudioEncoder on the first audio frame
+                if audioEncoder == nil {
+                    audioEncoder = AudioEncoder(sampleRate: 44100.0, channels: 2) { [weak self] packet in
+                        self?.sendAudioDataToMainApp(packet)
+                    }
+                }
+                audioEncoder?.encode(sampleBuffer: sampleBuffer)
+
+            case .audioMic:
+                // Microphone audio ignored to prevent ASBD sampling conflicts with app audio
                 break
 
             @unknown default:
@@ -230,6 +250,99 @@ public class SampleHandler: RPBroadcastSampleHandler {
         if bsdClientSocket >= 0 {
             close(bsdClientSocket)
             bsdClientSocket = -1
+        }
+    }
+
+    // MARK: - Outbound Audio POSIX BSD Socket IPC (to 127.0.0.1:8889)
+
+    private func connectToAudioIPC() {
+        networkQueue.async { [weak self] in
+            guard let self = self, self.isBroadcasting else { return }
+
+            self.audioSocketLock.lock()
+            if self.audioBsdClientSocket >= 0 {
+                close(self.audioBsdClientSocket)
+                self.audioBsdClientSocket = -1
+            }
+            self.audioSocketLock.unlock()
+
+            let sock = socket(AF_INET, SOCK_STREAM, 0)
+            guard sock >= 0 else {
+                NSLog("[SampleHandler] Failed to create audio BSD socket: errno %d", errno)
+                return
+            }
+
+            var noSigpipe: Int32 = 1
+            setsockopt(sock, SOL_SOCKET, SO_NOSIGPIPE, &noSigpipe, socklen_t(MemoryLayout<Int32>.size))
+
+            var noDelay: Int32 = 1
+            setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, &noDelay, socklen_t(MemoryLayout<Int32>.size))
+
+            var sndBuf: Int32 = 512 * 1024
+            setsockopt(sock, SOL_SOCKET, SO_SNDBUF, &sndBuf, socklen_t(MemoryLayout<Int32>.size))
+
+            var timeout = timeval(tv_sec: 1, tv_usec: 0)
+            setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
+
+            var addr = sockaddr_in()
+            addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+            addr.sin_family = sa_family_t(AF_INET)
+            addr.sin_port = SampleHandler.kAudioIpcPort.bigEndian
+            inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr)
+
+            let res = withUnsafePointer(to: &addr) {
+                $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                    connect(sock, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+                }
+            }
+
+            if res == 0 {
+                self.audioSocketLock.lock()
+                self.audioBsdClientSocket = sock
+                self.audioSocketLock.unlock()
+                NSLog("[SampleHandler] Connected to Main App Audio IPC on 127.0.0.1:%d", SampleHandler.kAudioIpcPort)
+            } else {
+                close(sock)
+                if self.isBroadcasting {
+                    self.networkQueue.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+                        self?.connectToAudioIPC()
+                    }
+                }
+            }
+        }
+    }
+
+    private func sendAudioDataToMainApp(_ data: Data) {
+        audioSocketLock.lock()
+        let sock = audioBsdClientSocket
+        audioSocketLock.unlock()
+
+        guard sock >= 0 else { return }
+
+        data.withUnsafeBytes { rawBuf in
+            guard let basePtr = rawBuf.baseAddress else { return }
+            var totalSent = 0
+            let totalLength = data.count
+
+            while totalSent < totalLength {
+                let bytesToSend = totalLength - totalSent
+                let sent = send(sock, basePtr.advanced(by: totalSent), bytesToSend, 0)
+                if sent <= 0 {
+                    closeAudioSocket()
+                    connectToAudioIPC()
+                    break
+                }
+                totalSent += sent
+            }
+        }
+    }
+
+    private func closeAudioSocket() {
+        audioSocketLock.lock()
+        defer { audioSocketLock.unlock() }
+        if audioBsdClientSocket >= 0 {
+            close(audioBsdClientSocket)
+            audioBsdClientSocket = -1
         }
     }
 

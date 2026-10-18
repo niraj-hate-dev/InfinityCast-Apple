@@ -25,6 +25,7 @@ public final class AudioEncoder {
 
     private var sampleRate: Double = 44100.0
     private var channels: UInt32 = 2
+    private var bytesPerInputFrame: Int = 4
     private var aacPacketMaxSize: UInt32 = 1024
 
     // MARK: - Initialization
@@ -32,6 +33,7 @@ public final class AudioEncoder {
     public init(sampleRate: Double = 44100.0, channels: UInt32 = 2, handler: @escaping EncodedAudioHandler) {
         self.sampleRate = sampleRate
         self.channels = channels
+        self.bytesPerInputFrame = Int(channels * 2)
         self.packetHandler = handler
     }
 
@@ -77,6 +79,7 @@ public final class AudioEncoder {
         var sourceFormat = asbd.pointee
         self.sampleRate = sourceFormat.mSampleRate
         self.channels = sourceFormat.mChannelsPerFrame
+        self.bytesPerInputFrame = sourceFormat.mBytesPerFrame > 0 ? Int(sourceFormat.mBytesPerFrame) : Int(sourceFormat.mChannelsPerFrame * 2)
 
         var destinationFormat = AudioStreamBasicDescription(
             mSampleRate: sourceFormat.mSampleRate,
@@ -140,19 +143,20 @@ public final class AudioEncoder {
         let totalBytes: Int
         var bytesConsumed: Int
         let channels: UInt32
+        let bytesPerFrame: Int
 
-        init(sourceData: UnsafeRawPointer, totalBytes: Int, channels: UInt32) {
+        init(sourceData: UnsafeRawPointer, totalBytes: Int, channels: UInt32, bytesPerFrame: Int) {
             self.sourceData = sourceData
             self.totalBytes = totalBytes
             self.bytesConsumed = 0
             self.channels = channels
+            self.bytesPerFrame = bytesPerFrame
         }
     }
 
     private func convertPcmToAac() {
         guard let converter = audioConverter else { return }
 
-        let bytesPerInputFrame = Int(channels * 2) // 16-bit PCM = 2 bytes per sample
         let bytesNeededPerAacPacket = 1024 * bytesPerInputFrame
 
         while pcmBuffer.count >= bytesNeededPerAacPacket {
@@ -171,7 +175,7 @@ public final class AudioEncoder {
 
                 return chunk.withUnsafeBytes { chunkRawBuf -> OSStatus in
                     guard let chunkPtr = chunkRawBuf.baseAddress else { return -1 }
-                    let context = ConverterContext(sourceData: chunkPtr, totalBytes: bytesNeededPerAacPacket, channels: self.channels)
+                    let context = ConverterContext(sourceData: chunkPtr, totalBytes: bytesNeededPerAacPacket, channels: self.channels, bytesPerFrame: self.bytesPerInputFrame)
 
                     let callback: AudioConverterComplexInputDataProc = { (
                         _,
@@ -197,8 +201,7 @@ public final class AudioEncoder {
                         ioData.pointee.mBuffers.mDataByteSize = UInt32(remaining)
                         ioData.pointee.mBuffers.mData = UnsafeMutableRawPointer(mutating: ctx.sourceData.advanced(by: ctx.bytesConsumed))
 
-                        let bytesPerSample = Int(ctx.channels * 2)
-                        ioNumberDataPackets.pointee = UInt32(remaining / bytesPerSample)
+                        ioNumberDataPackets.pointee = UInt32(remaining / ctx.bytesPerFrame)
                         ctx.bytesConsumed += remaining
                         return noErr
                     }
@@ -222,12 +225,11 @@ public final class AudioEncoder {
                     // 1. Generate 7-byte ADTS Header (ASM @ 0xe56c)
                     let adtsHeader = createAdtsHeader(packetLength: aacSize)
 
-                    // 2. Wrap in ApowerMirror 4-byte Audio Tag: [00 00 00 02] (ASM @ 0x10680)
-                    var packet = Data([0x00, 0x00, 0x00, 0x02])
-                    packet.append(adtsHeader)
+                    // 2. Wrap in pure ADTS AAC frame
+                    var packet = Data(adtsHeader)
                     packet.append(rawAac)
 
-                    // Dispatch packet to /mirrorVoice.do
+                    // Dispatch packet to Audio handler
                     packetHandler(packet)
                 }
             }

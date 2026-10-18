@@ -27,7 +27,9 @@ public final class WXCastSenderServer {
     // MARK: - Constants
     public static let defaultChannelPort: UInt16 = 25333 // 0x62F5 (/channel.do)
     public static let defaultMirrorPort: UInt16 = 25334  // 0x62F6 (/mirror.do)
-    public static let defaultIpcPort: UInt16 = 8888     // Internal IPC from Broadcast Extension
+    public static let defaultAudioPort: UInt16 = 25335   // 0x62F7 (/mirrorVoice.do)
+    public static let defaultIpcPort: UInt16 = 8888      // Internal Video IPC from Broadcast Extension
+    public static let defaultAudioIpcPort: UInt16 = 8889 // Internal Audio IPC from Broadcast Extension
     private static let forceKeyframeNotificationName = "com.apowermirror.forceKeyframe" as CFString
 
     // MARK: - Properties
@@ -41,15 +43,29 @@ public final class WXCastSenderServer {
     private var mirrorListener: NWListener?
     private var mirrorClients: [NWConnection] = []
 
-    // BSD Sockets Engine for Port 25334 (Fail-safe direct socket stream)
+    // Audio Stream (Port 25335)
+    private var audioListener: NWListener?
+    private var audioClients: [NWConnection] = []
+
+    // BSD Sockets Engine for Port 25334 (Fail-safe direct video socket stream)
     private var bsdListenSocket: Int32 = -1
     private var bsdClientSockets: [Int32] = []
     private let bsdSocketLock = NSLock()
 
-    // Internal IPC Server for ReplayKit Extension (Port 8888)
+    // BSD Sockets Engine for Port 25335 (Fail-safe direct audio socket stream)
+    private var bsdAudioListenSocket: Int32 = -1
+    private var bsdAudioClientSockets: [Int32] = []
+    private let bsdAudioSocketLock = NSLock()
+
+    // Internal Video IPC Server for ReplayKit Extension (Port 8888)
     private var ipcListenSocket: Int32 = -1
     private var ipcClientSockets: [Int32] = []
     private let ipcSocketLock = NSLock()
+
+    // Internal Audio IPC Server for ReplayKit Extension (Port 8889)
+    private var audioIpcListenSocket: Int32 = -1
+    private var audioIpcClientSockets: [Int32] = []
+    private let audioIpcSocketLock = NSLock()
 
     // Cached H.264 Parameter Sets (Annex-B SPS & PPS) for late-joining desktop clients
     private var cachedSps: Data?
@@ -65,16 +81,18 @@ public final class WXCastSenderServer {
 
     // MARK: - Lifecycle
 
-    /// Starts Control (25333), Video Mirror (25334), and Extension IPC (8888) server engines
-    public func start(channelPort: UInt16 = defaultChannelPort, mirrorPort: UInt16 = defaultMirrorPort, ipcPort: UInt16 = defaultIpcPort) {
+    /// Starts Control (25333), Video (25334), Audio (25335), Video IPC (8888), and Audio IPC (8889) server engines
+    public func start(channelPort: UInt16 = defaultChannelPort, mirrorPort: UInt16 = defaultMirrorPort, audioPort: UInt16 = defaultAudioPort, ipcPort: UInt16 = defaultIpcPort, audioIpcPort: UInt16 = defaultAudioIpcPort) {
         serverQueue.async { [weak self] in
             guard let self = self, !self.isRunning else { return }
             self.isRunning = true
 
             self.setupChannelListener(port: channelPort)
             self.setupMirrorListener(port: mirrorPort)
+            self.setupAudioMirrorListener(port: audioPort)
             self.setupIpcListener(port: ipcPort)
-            NSLog("[WXCastSenderServer] Control active on 0.0.0.0:%d, Video Stream active on 0.0.0.0:%d, Extension IPC active on 127.0.0.1:%d", channelPort, mirrorPort, ipcPort)
+            self.setupAudioIpcListener(port: audioIpcPort)
+            NSLog("[WXCastSenderServer] Control (0.0.0.0:%d), Video (0.0.0.0:%d), Audio (0.0.0.0:%d), Video IPC (127.0.0.1:%d), Audio IPC (127.0.0.1:%d) active", channelPort, mirrorPort, audioPort, ipcPort, audioIpcPort)
         }
     }
 
@@ -95,7 +113,13 @@ public final class WXCastSenderServer {
             self.mirrorClients.forEach { $0.cancel() }
             self.mirrorClients.removeAll()
 
-            // Close BSD Sockets
+            // Stop Audio Listener & Clients
+            self.audioListener?.cancel()
+            self.audioListener = nil
+            self.audioClients.forEach { $0.cancel() }
+            self.audioClients.removeAll()
+
+            // Close BSD Video Sockets
             self.bsdSocketLock.lock()
             if self.bsdListenSocket >= 0 {
                 close(self.bsdListenSocket)
@@ -107,7 +131,19 @@ public final class WXCastSenderServer {
             self.bsdClientSockets.removeAll()
             self.bsdSocketLock.unlock()
 
-            // Close IPC Sockets
+            // Close BSD Audio Sockets
+            self.bsdAudioSocketLock.lock()
+            if self.bsdAudioListenSocket >= 0 {
+                close(self.bsdAudioListenSocket)
+                self.bsdAudioListenSocket = -1
+            }
+            for fd in self.bsdAudioClientSockets {
+                close(fd)
+            }
+            self.bsdAudioClientSockets.removeAll()
+            self.bsdAudioSocketLock.unlock()
+
+            // Close Video IPC Sockets
             self.ipcSocketLock.lock()
             if self.ipcListenSocket >= 0 {
                 close(self.ipcListenSocket)
@@ -118,6 +154,18 @@ public final class WXCastSenderServer {
             }
             self.ipcClientSockets.removeAll()
             self.ipcSocketLock.unlock()
+
+            // Close Audio IPC Sockets
+            self.audioIpcSocketLock.lock()
+            if self.audioIpcListenSocket >= 0 {
+                close(self.audioIpcListenSocket)
+                self.audioIpcListenSocket = -1
+            }
+            for fd in self.audioIpcClientSockets {
+                close(fd)
+            }
+            self.audioIpcClientSockets.removeAll()
+            self.audioIpcSocketLock.unlock()
 
             NSLog("[WXCastSenderServer] Stopped all listeners and closed client connections")
         }
@@ -218,7 +266,7 @@ public final class WXCastSenderServer {
     }
 
     public var isAnyClientConnected: Bool {
-        return !channelClients.isEmpty || !mirrorClients.isEmpty || !bsdClientSockets.isEmpty
+        return !channelClients.isEmpty || !mirrorClients.isEmpty || !bsdClientSockets.isEmpty || !audioClients.isEmpty || !bsdAudioClientSockets.isEmpty
     }
 
     private func handleChannelConnection(_ connection: NWConnection) {
@@ -318,15 +366,27 @@ public final class WXCastSenderServer {
             guard let self = self, let conn = connection, let data = data, !data.isEmpty else { return }
 
             if let text = String(data: data, encoding: .utf8), text.contains("GET ") {
-                let response = "HTTP/1.1 200 OK\r\nContent-Type: video/h264\r\nConnection: keep-alive\r\n\r\n"
-                if let respData = response.data(using: .utf8) {
-                    conn.send(content: respData, completion: .idempotent)
+                if text.contains("mirrorVoice") {
+                    self.serverQueue.async {
+                        self.mirrorClients.removeAll { $0 === conn }
+                        self.audioClients.append(conn)
+                    }
+                    let response = "HTTP/1.1 200 OK\r\nContent-Type: audio/aac\r\nConnection: keep-alive\r\n\r\n"
+                    if let respData = response.data(using: .utf8) {
+                        conn.send(content: respData, completion: .idempotent)
+                    }
+                    NSLog("[WXCastSenderServer] Acknowledged HTTP /mirrorVoice.do request on 25334")
+                } else {
+                    let response = "HTTP/1.1 200 OK\r\nContent-Type: video/h264\r\nConnection: keep-alive\r\n\r\n"
+                    if let respData = response.data(using: .utf8) {
+                        conn.send(content: respData, completion: .idempotent)
+                    }
+                    if let headerData = self.getCachedParameterSetsData() {
+                        conn.send(content: headerData, completion: .idempotent)
+                    }
+                    self.requestEncoderKeyframeRefresh()
+                    NSLog("[WXCastSenderServer] Acknowledged HTTP /mirror.do stream request and dispatched SPS/PPS")
                 }
-                if let headerData = self.getCachedParameterSetsData() {
-                    conn.send(content: headerData, completion: .idempotent)
-                }
-                self.requestEncoderKeyframeRefresh()
-                NSLog("[WXCastSenderServer] Acknowledged HTTP /mirror.do stream request and dispatched SPS/PPS")
             }
         }
     }
@@ -466,6 +526,179 @@ public final class WXCastSenderServer {
         }
     }
 
+    // MARK: - Audio Mirror Server (/mirrorVoice.do on 25335)
+
+    private func setupAudioMirrorListener(port: UInt16) {
+        // 1. Setup BSD socket server for port 25335
+        setupBsdAudioServer(port: port)
+
+        // 2. Setup NWListener on port 25335
+        do {
+            let tcpOptions = NWProtocolTCP.Options()
+            tcpOptions.noDelay = true
+            tcpOptions.enableKeepalive = true
+            let params = NWParameters(tls: nil, tcp: tcpOptions)
+            params.allowLocalEndpointReuse = true
+
+            let listener = try NWListener(using: params, on: NWEndpoint.Port(rawValue: port)!)
+            listener.newConnectionHandler = { [weak self] connection in
+                self?.handleAudioConnection(connection)
+            }
+            listener.stateUpdateHandler = { state in
+                switch state {
+                case .ready:
+                    NSLog("[WXCastSenderServer] Successfully bound Audio Mirror listener to 0.0.0.0:%d", port)
+                case .failed(let err):
+                    NSLog("[WXCastSenderServer] Audio listener state note: %@ (BSD socket active)", err.localizedDescription)
+                default:
+                    break
+                }
+            }
+            listener.start(queue: serverQueue)
+            self.audioListener = listener
+        } catch {
+            NSLog("[WXCastSenderServer] Failed to bind Audio Listener on port %d: %@", port, error.localizedDescription)
+        }
+    }
+
+    private func handleAudioConnection(_ connection: NWConnection) {
+        connection.stateUpdateHandler = { [weak self, weak connection] state in
+            guard let self = self, let conn = connection else { return }
+            switch state {
+            case .ready:
+                self.serverQueue.async {
+                    self.audioClients.append(conn)
+                    let endpoint = String(describing: conn.endpoint)
+                    NSLog("[WXCastSenderServer] Desktop Audio client connected on 25335: %@", endpoint)
+                }
+            case .failed, .cancelled:
+                self.serverQueue.async {
+                    self.audioClients.removeAll { $0 === conn }
+                    NSLog("[WXCastSenderServer] Desktop Audio client disconnected on 25335")
+                }
+            default:
+                break
+            }
+        }
+        connection.start(queue: serverQueue)
+    }
+
+    private func setupBsdAudioServer(port: UInt16) {
+        serverQueue.async { [weak self] in
+            guard let self = self, self.bsdAudioListenSocket == -1 else { return }
+
+            let sock = socket(AF_INET, SOCK_STREAM, 0)
+            guard sock >= 0 else {
+                NSLog("[WXCastSenderServer] BSD Audio socket creation failed: %d", errno)
+                return
+            }
+
+            var reuse: Int32 = 1
+            setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &reuse, socklen_t(MemoryLayout<Int32>.size))
+            setsockopt(sock, SOL_SOCKET, SO_REUSEPORT, &reuse, socklen_t(MemoryLayout<Int32>.size))
+
+            var noDelay: Int32 = 1
+            setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, &noDelay, socklen_t(MemoryLayout<Int32>.size))
+
+            var addr = sockaddr_in()
+            addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+            addr.sin_family = sa_family_t(AF_INET)
+            addr.sin_port = port.bigEndian
+            addr.sin_addr.s_addr = in_addr_t(0) // 0.0.0.0
+
+            let bindRes = withUnsafePointer(to: &addr) {
+                $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                    bind(sock, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+                }
+            }
+
+            guard bindRes >= 0 else {
+                NSLog("[WXCastSenderServer] BSD Audio socket bind note on port %d: %d", port, errno)
+                close(sock)
+                return
+            }
+
+            guard listen(sock, 5) >= 0 else {
+                NSLog("[WXCastSenderServer] BSD Audio socket listen error: %d", errno)
+                close(sock)
+                return
+            }
+
+            self.bsdAudioSocketLock.lock()
+            self.bsdAudioListenSocket = sock
+            self.bsdAudioSocketLock.unlock()
+
+            NSLog("[WXCastSenderServer] BSD Audio Mirror socket listening on 0.0.0.0:%d", port)
+
+            DispatchQueue.global(qos: .utility).async { [weak self] in
+                while let self = self, self.isRunning, self.bsdAudioListenSocket >= 0 {
+                    var clientAddr = sockaddr_in()
+                    var addrLen = socklen_t(MemoryLayout<sockaddr_in>.size)
+                    let clientFd = withUnsafeMutablePointer(to: &clientAddr) {
+                        $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                            accept(self.bsdAudioListenSocket, $0, &addrLen)
+                        }
+                    }
+
+                    guard clientFd >= 0 else { break }
+
+                    var noSigpipe: Int32 = 1
+                    setsockopt(clientFd, SOL_SOCKET, SO_NOSIGPIPE, &noSigpipe, socklen_t(MemoryLayout<Int32>.size))
+
+                    var nd: Int32 = 1
+                    setsockopt(clientFd, IPPROTO_TCP, TCP_NODELAY, &nd, socklen_t(MemoryLayout<Int32>.size))
+
+                    self.bsdAudioSocketLock.lock()
+                    self.bsdAudioClientSockets.append(clientFd)
+                    self.bsdAudioSocketLock.unlock()
+
+                    NSLog("[WXCastSenderServer] Desktop connected to BSD Audio socket on port %d (fd: %d)", port, clientFd)
+                }
+            }
+        }
+    }
+
+    // MARK: - Audio Dispatcher (Port 25335 & Port 25334 /mirrorVoice)
+
+    public func sendAudioData(_ data: Data) {
+        // 1. Dispatch via NWConnection audio clients
+        serverQueue.async { [weak self] in
+            guard let self = self else { return }
+            for client in self.audioClients {
+                client.send(content: data, completion: .idempotent)
+            }
+        }
+
+        // 2. Dispatch via BSD audio sockets
+        bsdAudioSocketLock.lock()
+        let clientFds = bsdAudioClientSockets
+        bsdAudioSocketLock.unlock()
+
+        if !clientFds.isEmpty {
+            data.withUnsafeBytes { rawBuf in
+                guard let basePtr = rawBuf.baseAddress else { return }
+                var deadFds: [Int32] = []
+                for fd in clientFds {
+                    var totalSent = 0
+                    while totalSent < data.count {
+                        let sent = send(fd, basePtr.advanced(by: totalSent), data.count - totalSent, 0)
+                        if sent <= 0 {
+                            deadFds.append(fd)
+                            break
+                        }
+                        totalSent += sent
+                    }
+                }
+                if !deadFds.isEmpty {
+                    self.bsdAudioSocketLock.lock()
+                    self.bsdAudioClientSockets.removeAll { deadFds.contains($0) }
+                    self.bsdAudioSocketLock.unlock()
+                    deadFds.forEach { close($0) }
+                }
+            }
+        }
+    }
+
     // MARK: - ReplayKit Extension IPC Server (Port 8888 on 127.0.0.1)
 
     private func setupIpcListener(port: UInt16) {
@@ -574,6 +807,116 @@ public final class WXCastSenderServer {
             self.ipcSocketLock.lock()
             self.ipcClientSockets.removeAll { $0 == clientFd }
             self.ipcSocketLock.unlock()
+            close(clientFd)
+        }
+    }
+
+    // MARK: - ReplayKit Extension Audio IPC Server (Port 8889 on 127.0.0.1)
+
+    private func setupAudioIpcListener(port: UInt16) {
+        serverQueue.async { [weak self] in
+            guard let self = self, self.audioIpcListenSocket == -1 else { return }
+
+            let sock = socket(AF_INET, SOCK_STREAM, 0)
+            guard sock >= 0 else {
+                NSLog("[WXCastSenderServer] Audio IPC socket creation failed: %d", errno)
+                return
+            }
+
+            var reuse: Int32 = 1
+            setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &reuse, socklen_t(MemoryLayout<Int32>.size))
+            setsockopt(sock, SOL_SOCKET, SO_REUSEPORT, &reuse, socklen_t(MemoryLayout<Int32>.size))
+
+            var noDelay: Int32 = 1
+            setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, &noDelay, socklen_t(MemoryLayout<Int32>.size))
+
+            var rcvBuf: Int32 = 1024 * 1024
+            setsockopt(sock, SOL_SOCKET, SO_RCVBUF, &rcvBuf, socklen_t(MemoryLayout<Int32>.size))
+
+            var addr = sockaddr_in()
+            addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+            addr.sin_family = sa_family_t(AF_INET)
+            addr.sin_port = port.bigEndian
+            inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr)
+
+            let bindRes = withUnsafePointer(to: &addr) {
+                $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                    bind(sock, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+                }
+            }
+
+            guard bindRes >= 0 else {
+                NSLog("[WXCastSenderServer] Audio IPC socket bind note on port %d: %d", port, errno)
+                close(sock)
+                return
+            }
+
+            guard listen(sock, 5) >= 0 else {
+                NSLog("[WXCastSenderServer] Audio IPC socket listen error: %d", errno)
+                close(sock)
+                return
+            }
+
+            self.audioIpcSocketLock.lock()
+            self.audioIpcListenSocket = sock
+            self.audioIpcSocketLock.unlock()
+
+            NSLog("[WXCastSenderServer] Audio IPC socket listening for ReplayKit Extension on 127.0.0.1:%d", port)
+
+            DispatchQueue.global(qos: .userInteractive).async { [weak self] in
+                while let self = self, self.isRunning, self.audioIpcListenSocket >= 0 {
+                    var clientAddr = sockaddr_in()
+                    var addrLen = socklen_t(MemoryLayout<sockaddr_in>.size)
+                    let clientFd = withUnsafeMutablePointer(to: &clientAddr) {
+                        $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                            accept(self.audioIpcListenSocket, $0, &addrLen)
+                        }
+                    }
+
+                    guard clientFd >= 0 else { break }
+
+                    var noSigpipe: Int32 = 1
+                    setsockopt(clientFd, SOL_SOCKET, SO_NOSIGPIPE, &noSigpipe, socklen_t(MemoryLayout<Int32>.size))
+
+                    var nd: Int32 = 1
+                    setsockopt(clientFd, IPPROTO_TCP, TCP_NODELAY, &nd, socklen_t(MemoryLayout<Int32>.size))
+
+                    self.audioIpcSocketLock.lock()
+                    self.audioIpcClientSockets.append(clientFd)
+                    self.audioIpcSocketLock.unlock()
+
+                    NSLog("[WXCastSenderServer] Broadcast Extension connected to Audio IPC on port %d (fd: %d)!", port, clientFd)
+                    self.startAudioIpcReceiveLoop(clientFd: clientFd)
+                }
+            }
+        }
+    }
+
+    private func startAudioIpcReceiveLoop(clientFd: Int32) {
+        DispatchQueue.global(qos: .userInteractive).async { [weak self] in
+            guard let self = self else { return }
+            var buffer = [UInt8](repeating: 0, count: 16384)
+
+            while self.isRunning {
+                let bytesRead = buffer.withUnsafeMutableBytes { rawBuf in
+                    recv(clientFd, rawBuf.baseAddress, rawBuf.count, 0)
+                }
+
+                if bytesRead > 0 {
+                    let packetData = Data(buffer[0..<bytesRead])
+                    self.sendAudioData(packetData)
+                } else if bytesRead <= 0 {
+                    if errno == EAGAIN || errno == EWOULDBLOCK {
+                        continue
+                    }
+                    NSLog("[WXCastSenderServer] Broadcast Extension disconnected from Audio IPC (fd: %d)", clientFd)
+                    break
+                }
+            }
+
+            self.audioIpcSocketLock.lock()
+            self.audioIpcClientSockets.removeAll { $0 == clientFd }
+            self.audioIpcSocketLock.unlock()
             close(clientFd)
         }
     }
