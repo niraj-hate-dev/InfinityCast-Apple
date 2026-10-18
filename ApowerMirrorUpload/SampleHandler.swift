@@ -130,6 +130,7 @@ public class SampleHandler: RPBroadcastSampleHandler {
             case .audioApp:
                 // Lazily initialize AudioEncoder on the first audio frame
                 if audioEncoder == nil {
+                    NSLog("[SampleHandler] First .audioApp frame received -> Initializing AudioEncoder")
                     audioEncoder = AudioEncoder(sampleRate: 44100.0, channels: 2) { [weak self] packet in
                         self?.sendAudioDataToMainApp(packet)
                     }

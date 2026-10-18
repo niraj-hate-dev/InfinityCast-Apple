@@ -90,7 +90,7 @@ public final class WXCastSenderServer {
 
             self.setupChannelListener(port: channelPort)
             self.setupMirrorListener(port: mirrorPort)
-            self.setupAudioMirrorListener(port: audioPort)
+            self.setupBsdAudioServer(port: audioPort)
             self.setupIpcListener(port: ipcPort)
             self.setupAudioIpcListener(port: audioIpcPort)
             NSLog("[WXCastSenderServer] Control (0.0.0.0:%d), Video (0.0.0.0:%d), Audio (0.0.0.0:%d), Video IPC (127.0.0.1:%d), Audio IPC (127.0.0.1:%d) active", channelPort, mirrorPort, audioPort, ipcPort, audioIpcPort)
