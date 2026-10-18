@@ -172,7 +172,7 @@ bool VideoDecoder::LoadFfmpegSymbols() {
   g_ffmpeg.receive_frame = (FnAvcodecReceiveFrame)GetProcAddress(avcodec_module_, "avcodec_receive_frame");
 
   const char* kAvutilNames[] = {
-      "avutil-59.dll", "avutil-58.dll", "avutil-57.dll",
+      "avutil-60.dll", "avutil-59.dll", "avutil-58.dll", "avutil-57.dll",
       "avutil-56.dll", "avutil.dll"
   };
   for (const char* dll_name : kAvutilNames) {
@@ -239,20 +239,94 @@ bool VideoDecoder::DecodePacket(const DemuxedVideoPacket& packet) {
 
     const int send_res = g_ffmpeg.send_packet(av_codec_ctx_, av_packet_);
     if (send_res >= 0 && g_ffmpeg.receive_frame && av_frame_) {
-      const int recv_res = g_ffmpeg.receive_frame(av_codec_ctx_, av_frame_);
-      if (recv_res >= 0) {
-        // Frame successfully decoded onto GPU texture!
-        if (texture_bridge_ && shared_handle_) {
-          texture_bridge_->PushD3D11Texture(shared_texture_.Get(), shared_handle_, width_, height_);
-        }
+      int recv_res = g_ffmpeg.receive_frame(av_codec_ctx_, av_frame_);
+      bool frame_rendered = false;
+      while (recv_res >= 0) {
+        // Frame successfully decoded! Render directly onto Direct3D 11 surface
+        RenderDecodedFrame(av_frame_);
+        frame_rendered = true;
+        recv_res = g_ffmpeg.receive_frame(av_codec_ctx_, av_frame_);
+      }
+      if (frame_rendered) {
         return true;
       }
     }
   }
 
-  // If incoming video frame is received, update hardware canvas
+  // If incoming video frame is received before decoder warms up, update hardware canvas
   RenderTestPatternFrame(packet.seq);
   return true;
+}
+
+void VideoDecoder::RenderDecodedFrame(void* av_frame) {
+  if (!d3d11_context_ || !av_frame) return;
+
+  uint8_t* y_plane = *(reinterpret_cast<uint8_t**>(reinterpret_cast<uint8_t*>(av_frame) + 0));
+  uint8_t* u_plane = *(reinterpret_cast<uint8_t**>(reinterpret_cast<uint8_t*>(av_frame) + 8));
+  uint8_t* v_plane = *(reinterpret_cast<uint8_t**>(reinterpret_cast<uint8_t*>(av_frame) + 16));
+
+  int y_stride = *(reinterpret_cast<int*>(reinterpret_cast<uint8_t*>(av_frame) + 64));
+  int u_stride = *(reinterpret_cast<int*>(reinterpret_cast<uint8_t*>(av_frame) + 68));
+  int v_stride = *(reinterpret_cast<int*>(reinterpret_cast<uint8_t*>(av_frame) + 72));
+
+  int frame_w = *(reinterpret_cast<int*>(reinterpret_cast<uint8_t*>(av_frame) + 104));
+  int frame_h = *(reinterpret_cast<int*>(reinterpret_cast<uint8_t*>(av_frame) + 108));
+
+  if (!y_plane || !u_plane || !v_plane || frame_w <= 0 || frame_h <= 0) {
+    return;
+  }
+
+  // Dynamically re-create shared texture surface if resolution changed
+  if (static_cast<size_t>(frame_w) != width_ || static_cast<size_t>(frame_h) != height_ || !shared_texture_) {
+    width_ = static_cast<size_t>(frame_w);
+    height_ = static_cast<size_t>(frame_h);
+    CreateSharedTexture(width_, height_);
+  }
+
+  if (!shared_texture_) return;
+
+  std::vector<uint32_t> bgra(width_ * height_);
+
+  // Fast YUV420P to BGRA conversion
+  for (size_t y = 0; y < height_; ++y) {
+    const uint8_t* y_row = y_plane + y * y_stride;
+    const uint8_t* u_row = u_plane + (y / 2) * u_stride;
+    const uint8_t* v_row = v_plane + (y / 2) * v_stride;
+    uint32_t* dst_row = bgra.data() + y * width_;
+
+    for (size_t x = 0; x < width_; ++x) {
+      const int Y = static_cast<int>(y_row[x]);
+      const int U = static_cast<int>(u_row[x / 2]);
+      const int V = static_cast<int>(v_row[x / 2]);
+
+      const int c = Y - 16;
+      const int d = U - 128;
+      const int e = V - 128;
+
+      int r = (298 * c + 409 * e + 128) >> 8;
+      int g = (298 * c - 100 * d - 208 * e + 128) >> 8;
+      int b = (298 * c + 516 * d + 128) >> 8;
+
+      r = r < 0 ? 0 : (r > 255 ? 255 : r);
+      g = g < 0 ? 0 : (g > 255 ? 255 : g);
+      b = b < 0 ? 0 : (b > 255 ? 255 : b);
+
+      dst_row[x] = (0xFF << 24) | (r << 16) | (g << 8) | b;
+    }
+  }
+
+  const size_t row_pitch = width_ * 4;
+  d3d11_context_->UpdateSubresource(
+      shared_texture_.Get(),
+      0,
+      nullptr,
+      bgra.data(),
+      static_cast<UINT>(row_pitch),
+      0);
+
+  if (texture_bridge_ && shared_handle_) {
+    texture_bridge_->PushD3D11Texture(shared_texture_.Get(), shared_handle_, width_, height_);
+  }
 }
 
 void VideoDecoder::RenderTestPatternFrame(uint32_t frame_index) {

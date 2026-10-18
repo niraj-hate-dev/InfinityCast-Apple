@@ -51,6 +51,7 @@ class VideoDecoder {
  private:
   bool CreateSharedTexture(size_t width, size_t height);
   bool LoadFfmpegSymbols();
+  void RenderDecodedFrame(void* av_frame);
 
   TextureBridge* texture_bridge_ = nullptr;
   size_t width_ = 1920;
