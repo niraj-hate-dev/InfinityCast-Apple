@@ -351,9 +351,14 @@ public final class WXCastSenderServer {
                 guard let basePtr = rawBuf.baseAddress else { return }
                 var deadFds: [Int32] = []
                 for fd in clientFds {
-                    let sent = send(fd, basePtr, data.count, 0)
-                    if sent <= 0 {
-                        deadFds.append(fd)
+                    var totalSent = 0
+                    while totalSent < data.count {
+                        let sent = send(fd, basePtr.advanced(by: totalSent), data.count - totalSent, 0)
+                        if sent <= 0 {
+                            deadFds.append(fd)
+                            break
+                        }
+                        totalSent += sent
                     }
                 }
                 if !deadFds.isEmpty {
