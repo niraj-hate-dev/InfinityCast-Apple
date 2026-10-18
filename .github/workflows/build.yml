@@ -151,3 +151,44 @@ jobs:
           name: AppleCast-iOS-Unsigned
           path: build/ios/ipa/AppleCast-iOS-Unsigned.ipa
           retention-days: 14
+
+  # ==============================================================
+  # Job 3: Automated GitHub Release (Direct Downloads)
+  # ==============================================================
+  publish-release:
+    name: Publish Release (Direct Downloads)
+    needs: [build-windows, build-ios]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: write
+    steps:
+      - name: Download Windows Binary Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: AppleCast-Windows-x64
+          path: release-binaries
+
+      - name: Download iOS IPA Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: AppleCast-iOS-Unsigned
+          path: release-binaries
+
+      - name: Create or Update GitHub Release
+        uses: softprops/action-gh-release@v2
+        continue-on-error: true
+        with:
+          tag_name: latest
+          name: "AppleCast Latest Release"
+          body: |
+            ### AppleCast Automated Build
+            
+            Direct downloads:
+            - **iOS Sideloadable IPA:** `AppleCast-iOS-Unsigned.ipa`
+            - **Windows Host Client:** `AppleCast-Windows-x64.zip`
+          files: |
+            release-binaries/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
