@@ -24,50 +24,30 @@ public final class SilentAudioKeepAlive {
     }
 
     private func prepareSilentPlayer() {
-        // Minimal valid 44-byte PCM WAV file containing silence
-        let sampleRate: UInt32 = 8000
-        let channels: UInt16 = 1
-        let bitsPerSample: UInt16 = 16
-        let byteRate = sampleRate * UInt32(channels) * UInt32(bitsPerSample / 8)
-        let blockAlign = channels * (bitsPerSample / 8)
-        let numSamples = sampleRate // 1 second of silence
-        let dataSize = numSamples * UInt32(blockAlign)
-        let totalSize = 36 + dataSize
+        // Standard 44-byte PCM WAV header for 8000Hz 16-bit mono + 2048 bytes of silence
+        let wavHeader: [UInt8] = [
+            0x52, 0x49, 0x46, 0x46, // "RIFF"
+            0x24, 0x08, 0x00, 0x00, // total size - 8 (2084 bytes)
+            0x57, 0x41, 0x56, 0x45, // "WAVE"
+            0x66, 0x6D, 0x74, 0x20, // "fmt "
+            0x10, 0x00, 0x00, 0x00, // subchunk1 size (16)
+            0x01, 0x00,             // audio format (1 = PCM)
+            0x01, 0x00,             // num channels (1)
+            0x40, 0x1F, 0x00, 0x00, // sample rate (8000 Hz)
+            0x80, 0x3E, 0x00, 0x00, // byte rate (16000 B/s)
+            0x02, 0x00,             // block align (2)
+            0x10, 0x00,             // bits per sample (16)
+            0x64, 0x61, 0x74, 0x61, // "data"
+            0x00, 0x08, 0x00, 0x00  // data size (2048 bytes of silence)
+        ]
 
-        var wavData = Data()
-        // RIFF chunk descriptor
-        wavData.append(contentsOf: [0x52, 0x49, 0x46, 0x46]) // "RIFF"
-        var chunkSize = totalSize
-        wavData.append(Data(bytes: &chunkSize, count: 4))
-        wavData.append(contentsOf: [0x57, 0x41, 0x56, 0x45]) // "WAVE"
-
-        // "fmt " sub-chunk
-        wavData.append(contentsOf: [0x66, 0x6D, 0x74, 0x20]) // "fmt "
-        var subchunk1Size: UInt32 = 16
-        wavData.append(Data(bytes: &subchunk1Size, count: 4))
-        var audioFormat: UInt16 = 1 // PCM
-        wavData.append(Data(bytes: &audioFormat, count: 2))
-        var ch = channels
-        wavData.append(Data(bytes: &ch, count: 2))
-        var sr = sampleRate
-        wavData.append(Data(bytes: &sr, count: 4))
-        var br = byteRate
-        wavData.append(Data(bytes: &br, count: 4))
-        var ba = blockAlign
-        wavData.append(Data(bytes: &ba, count: 2))
-        var bps = bitsPerSample
-        wavData.append(Data(bytes: &bps, count: 2))
-
-        // "data" sub-chunk
-        wavData.append(contentsOf: [0x64, 0x61, 0x74, 0x61]) // "data"
-        var dSize = dataSize
-        wavData.append(Data(bytes: &dSize, count: 4))
-        wavData.append(Data(count: Int(dataSize))) // Zero bytes = absolute silence
+        var wavData = Data(wavHeader)
+        wavData.append(Data(repeating: 0, count: 2048))
 
         do {
             let player = try AVAudioPlayer(data: wavData)
             player.numberOfLoops = -1 // Infinite loop
-            player.volume = 0.0 // Muted
+            player.volume = 0.0 // Muted silence
             player.prepareToPlay()
             self.audioPlayer = player
         } catch {

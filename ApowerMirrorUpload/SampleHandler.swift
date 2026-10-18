@@ -257,8 +257,12 @@ public class SampleHandler: RPBroadcastSampleHandler {
             { _, observer, _, _, _ in
                 guard let obs = observer else { return }
                 let handler = Unmanaged<SampleHandler>.fromOpaque(obs).takeUnretainedValue()
-                NSLog("[SampleHandler] Received StopBroadcast notification from Main App")
-                handler.finishBroadcastWithError(nil)
+                let error = NSError(
+                    domain: "com.apowermirror.ScreenShare",
+                    code: -1,
+                    userInfo: [NSLocalizedFailureReasonErrorKey: "Screen mirror broadcast stopped by user."]
+                )
+                handler.finishBroadcastWithError(error)
             },
             SampleHandler.kStopNotification as CFString,
             nil,

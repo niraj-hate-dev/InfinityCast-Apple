@@ -453,9 +453,12 @@ public final class WXCastSenderServer {
             var buffer = [UInt8](repeating: 0, count: 65536)
 
             while self.isRunning {
-                let bytesRead = recv(clientFd, &buffer, buffer.count, 0)
+                let bytesRead = buffer.withUnsafeMutableBytes { rawBuf in
+                    recv(clientFd, rawBuf.baseAddress, rawBuf.count, 0)
+                }
+
                 if bytesRead > 0 {
-                    let packetData = Data(bytes: buffer, count: bytesRead)
+                    let packetData = Data(buffer[0..<bytesRead])
                     // Forward received video packet immediately to Desktop receiver on port 25334!
                     self.sendVideoData(packetData)
                 } else if bytesRead <= 0 {
