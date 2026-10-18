@@ -67,9 +67,10 @@ public final class WXCastSenderServer {
     private var audioIpcClientSockets: [Int32] = []
     private let audioIpcSocketLock = NSLock()
 
-    // Cached H.264 Parameter Sets (Annex-B SPS & PPS) for late-joining desktop clients
+    // Cached H.264 Parameter Sets (Annex-B SPS, PPS, & IDR) for late-joining desktop clients
     private var cachedSps: Data?
     private var cachedPps: Data?
+    private var cachedIdr: Data?
     private let parameterSetLock = NSLock()
 
     private let serverQueue = DispatchQueue(label: "com.apowermirror.server.queue", qos: .userInteractive)
@@ -188,9 +189,12 @@ public final class WXCastSenderServer {
         parameterSetLock.lock()
         defer { parameterSetLock.unlock() }
         guard let sps = cachedSps, let pps = cachedPps else { return nil }
-        var combined = Data(capacity: sps.count + pps.count)
+        var combined = Data(capacity: sps.count + pps.count + (cachedIdr?.count ?? 0))
         combined.append(sps)
         combined.append(pps)
+        if let idr = cachedIdr {
+            combined.append(idr)
+        }
         return combined
     }
 
@@ -219,7 +223,7 @@ public final class WXCastSenderServer {
                 guard headerIndex < count else { continue }
 
                 let nalType = base[headerIndex] & 0x1F
-                if nalType == 7 || nalType == 8 {
+                if nalType == 7 || nalType == 8 || nalType == 5 {
                     let endOffset = (idx + 1 < nalStarts.count) ? nalStarts[idx + 1] : count
                     let nalData = Data(bytes: base.advanced(by: startOffset), count: endOffset - startOffset)
 
@@ -228,6 +232,8 @@ public final class WXCastSenderServer {
                         cachedSps = nalData
                     } else if nalType == 8 {
                         cachedPps = nalData
+                    } else if nalType == 5 {
+                        cachedIdr = nalData
                     }
                     parameterSetLock.unlock()
                 }
@@ -299,27 +305,24 @@ public final class WXCastSenderServer {
     // MARK: - Video Mirror Server (/mirror.do on 25334)
 
     private func setupMirrorListener(port: UInt16) {
-        // 1. Setup BSD socket server for port 25334 (instant, zero privacy prompt)
-        setupBsdMirrorServer(port: port)
-
-        // 2. Setup NWListener on port 25334
         do {
             let tcpOptions = NWProtocolTCP.Options()
             tcpOptions.noDelay = true
             tcpOptions.enableKeepalive = true
             let params = NWParameters(tls: nil, tcp: tcpOptions)
-            params.allowLocalEndpointReuse = true
+            params.allowLocalEndpointReuse = false
 
             let listener = try NWListener(using: params, on: NWEndpoint.Port(rawValue: port)!)
             listener.newConnectionHandler = { [weak self] connection in
                 self?.handleMirrorConnection(connection)
             }
-            listener.stateUpdateHandler = { state in
+            listener.stateUpdateHandler = { [weak self] state in
                 switch state {
                 case .ready:
                     NSLog("[WXCastSenderServer] Successfully bound Video Mirror listener to 0.0.0.0:%d", port)
                 case .failed(let err):
-                    NSLog("[WXCastSenderServer] Mirror listener state note: %@ (BSD socket active)", err.localizedDescription)
+                    NSLog("[WXCastSenderServer] Video Mirror listener failed: %@, falling back to BSD socket", err.localizedDescription)
+                    self?.setupBsdMirrorServer(port: port)
                 default:
                     break
                 }
@@ -327,7 +330,8 @@ public final class WXCastSenderServer {
             listener.start(queue: serverQueue)
             self.mirrorListener = listener
         } catch {
-            NSLog("[WXCastSenderServer] Failed to bind Mirror Listener on port %d: %@", port, error.localizedDescription)
+            NSLog("[WXCastSenderServer] Failed to bind Mirror Listener on port %d, falling back to BSD socket: %@", port, error.localizedDescription)
+            setupBsdMirrorServer(port: port)
         }
     }
 
@@ -529,27 +533,24 @@ public final class WXCastSenderServer {
     // MARK: - Audio Mirror Server (/mirrorVoice.do on 25335)
 
     private func setupAudioMirrorListener(port: UInt16) {
-        // 1. Setup BSD socket server for port 25335
-        setupBsdAudioServer(port: port)
-
-        // 2. Setup NWListener on port 25335
         do {
             let tcpOptions = NWProtocolTCP.Options()
             tcpOptions.noDelay = true
             tcpOptions.enableKeepalive = true
             let params = NWParameters(tls: nil, tcp: tcpOptions)
-            params.allowLocalEndpointReuse = true
+            params.allowLocalEndpointReuse = false
 
             let listener = try NWListener(using: params, on: NWEndpoint.Port(rawValue: port)!)
             listener.newConnectionHandler = { [weak self] connection in
                 self?.handleAudioConnection(connection)
             }
-            listener.stateUpdateHandler = { state in
+            listener.stateUpdateHandler = { [weak self] state in
                 switch state {
                 case .ready:
                     NSLog("[WXCastSenderServer] Successfully bound Audio Mirror listener to 0.0.0.0:%d", port)
                 case .failed(let err):
-                    NSLog("[WXCastSenderServer] Audio listener state note: %@ (BSD socket active)", err.localizedDescription)
+                    NSLog("[WXCastSenderServer] Audio listener failed: %@, falling back to BSD socket", err.localizedDescription)
+                    self?.setupBsdAudioServer(port: port)
                 default:
                     break
                 }
@@ -557,7 +558,8 @@ public final class WXCastSenderServer {
             listener.start(queue: serverQueue)
             self.audioListener = listener
         } catch {
-            NSLog("[WXCastSenderServer] Failed to bind Audio Listener on port %d: %@", port, error.localizedDescription)
+            NSLog("[WXCastSenderServer] Failed to bind Audio Listener on port %d, falling back to BSD socket: %@", port, error.localizedDescription)
+            setupBsdAudioServer(port: port)
         }
     }
 

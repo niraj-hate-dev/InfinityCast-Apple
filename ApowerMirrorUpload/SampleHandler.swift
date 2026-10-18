@@ -198,6 +198,8 @@ public class SampleHandler: RPBroadcastSampleHandler {
                 self.bsdClientSocket = sock
                 self.socketLock.unlock()
                 NSLog("[SampleHandler] Connected to Main App IPC on 127.0.0.1:%d", SampleHandler.kIpcPort)
+                // Force an immediate SPS + PPS + IDR keyframe now that IPC is live
+                self.videoEncoder?.forceKeyFrame()
             } else {
                 NSLog("[SampleHandler] Connect to 127.0.0.1:%d failed (errno: %d), retrying in 250ms...", SampleHandler.kIpcPort, errno)
                 close(sock)
