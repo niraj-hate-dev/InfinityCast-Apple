@@ -28,6 +28,7 @@ public final class WXCastSenderServer {
     public static let defaultChannelPort: UInt16 = 25333 // 0x62F5 (/channel.do)
     public static let defaultMirrorPort: UInt16 = 25334  // 0x62F6 (/mirror.do)
     public static let defaultIpcPort: UInt16 = 8888     // Internal IPC from Broadcast Extension
+    private static let forceKeyframeNotificationName = "com.apowermirror.forceKeyframe" as CFString
 
     // MARK: - Properties
     public weak var delegate: WXCastSenderServerDelegate?
@@ -49,6 +50,11 @@ public final class WXCastSenderServer {
     private var ipcListenSocket: Int32 = -1
     private var ipcClientSockets: [Int32] = []
     private let ipcSocketLock = NSLock()
+
+    // Cached H.264 Parameter Sets (Annex-B SPS & PPS) for late-joining desktop clients
+    private var cachedSps: Data?
+    private var cachedPps: Data?
+    private let parameterSetLock = NSLock()
 
     private let serverQueue = DispatchQueue(label: "com.apowermirror.server.queue", qos: .userInteractive)
     private var isRunning = false
@@ -114,6 +120,70 @@ public final class WXCastSenderServer {
             self.ipcSocketLock.unlock()
 
             NSLog("[WXCastSenderServer] Stopped all listeners and closed client connections")
+        }
+    }
+
+    // MARK: - Keyframe Request & Cached SPS/PPS Helpers
+
+    private func requestEncoderKeyframeRefresh() {
+        delegate?.serverDidRequestKeyframeRefresh()
+        CFNotificationCenterPostNotification(
+            CFNotificationCenterGetDarwinNotifyCenter(),
+            CFNotificationName(Self.forceKeyframeNotificationName),
+            nil,
+            nil,
+            true
+        )
+    }
+
+    private func getCachedParameterSetsData() -> Data? {
+        parameterSetLock.lock()
+        defer { parameterSetLock.unlock() }
+        guard let sps = cachedSps, let pps = cachedPps else { return nil }
+        var combined = Data(capacity: sps.count + pps.count)
+        combined.append(sps)
+        combined.append(pps)
+        return combined
+    }
+
+    private func cacheParameterSetsIfPresent(in data: Data) {
+        guard data.count > 5 else { return }
+        data.withUnsafeBytes { rawBuffer in
+            guard let base = rawBuffer.bindMemory(to: UInt8.self).baseAddress else { return }
+            let count = rawBuffer.count
+            var i = 0
+            var nalStarts: [Int] = []
+
+            while i <= count - 4 {
+                if base[i] == 0x00 && base[i + 1] == 0x00 && base[i + 2] == 0x00 && base[i + 3] == 0x01 {
+                    nalStarts.append(i)
+                    i += 4
+                } else {
+                    i += 1
+                }
+            }
+
+            guard !nalStarts.isEmpty else { return }
+
+            for idx in 0..<nalStarts.count {
+                let startOffset = nalStarts[idx]
+                let headerIndex = startOffset + 4
+                guard headerIndex < count else { continue }
+
+                let nalType = base[headerIndex] & 0x1F
+                if nalType == 7 || nalType == 8 {
+                    let endOffset = (idx + 1 < nalStarts.count) ? nalStarts[idx + 1] : count
+                    let nalData = Data(bytes: base.advanced(by: startOffset), count: endOffset - startOffset)
+
+                    parameterSetLock.lock()
+                    if nalType == 7 {
+                        cachedSps = nalData
+                    } else if nalType == 8 {
+                        cachedPps = nalData
+                    }
+                    parameterSetLock.unlock()
+                }
+            }
         }
     }
 
@@ -219,11 +289,16 @@ public final class WXCastSenderServer {
             switch state {
             case .ready:
                 self.serverQueue.async {
+                    // Send cached SPS/PPS before adding client to active broadcast list
+                    if let headerData = self.getCachedParameterSetsData() {
+                        conn.send(content: headerData, completion: .idempotent)
+                        NSLog("[WXCastSenderServer] Sent cached SPS/PPS (%d bytes) to new NWConnection client", headerData.count)
+                    }
                     self.mirrorClients.append(conn)
                     let endpoint = String(describing: conn.endpoint)
                     NSLog("[WXCastSenderServer] Desktop Mirror client connected on 25334: %@", endpoint)
                     self.delegate?.serverClientConnected(endpoint: endpoint)
-                    self.delegate?.serverDidRequestKeyframeRefresh()
+                    self.requestEncoderKeyframeRefresh()
                     self.receiveMirrorHandshake(connection: conn)
                 }
             case .failed, .cancelled:
@@ -240,14 +315,18 @@ public final class WXCastSenderServer {
 
     private func receiveMirrorHandshake(connection: NWConnection) {
         connection.receive(minimumIncompleteLength: 1, maximumLength: 4096) { [weak self, weak connection] (data, _, isComplete, error) in
-            guard let _ = self, let conn = connection, let data = data, !data.isEmpty else { return }
+            guard let self = self, let conn = connection, let data = data, !data.isEmpty else { return }
 
             if let text = String(data: data, encoding: .utf8), text.contains("GET ") {
                 let response = "HTTP/1.1 200 OK\r\nContent-Type: video/h264\r\nConnection: keep-alive\r\n\r\n"
                 if let respData = response.data(using: .utf8) {
                     conn.send(content: respData, completion: .idempotent)
                 }
-                NSLog("[WXCastSenderServer] Acknowledged HTTP /mirror.do stream request")
+                if let headerData = self.getCachedParameterSetsData() {
+                    conn.send(content: headerData, completion: .idempotent)
+                }
+                self.requestEncoderKeyframeRefresh()
+                NSLog("[WXCastSenderServer] Acknowledged HTTP /mirror.do stream request and dispatched SPS/PPS")
             }
         }
     }
@@ -313,17 +392,30 @@ public final class WXCastSenderServer {
 
                     guard clientFd >= 0 else { break }
 
+                    var noSigpipe: Int32 = 1
+                    setsockopt(clientFd, SOL_SOCKET, SO_NOSIGPIPE, &noSigpipe, socklen_t(MemoryLayout<Int32>.size))
+
                     var nd: Int32 = 1
                     setsockopt(clientFd, IPPROTO_TCP, TCP_NODELAY, &nd, socklen_t(MemoryLayout<Int32>.size))
+
+                    // Immediately prime the new BSD socket client with cached SPS & PPS headers
+                    if let headerData = self.getCachedParameterSetsData() {
+                        headerData.withUnsafeBytes { rawBuf in
+                            if let basePtr = rawBuf.baseAddress {
+                                _ = send(clientFd, basePtr, headerData.count, 0)
+                            }
+                        }
+                        NSLog("[WXCastSenderServer] Sent cached SPS/PPS (%d bytes) to new BSD client (fd: %d)", headerData.count, clientFd)
+                    }
 
                     self.bsdSocketLock.lock()
                     self.bsdClientSockets.append(clientFd)
                     self.bsdSocketLock.unlock()
 
                     NSLog("[WXCastSenderServer] Desktop connected to BSD socket on port %d (fd: %d)", port, clientFd)
+                    self.requestEncoderKeyframeRefresh()
                     DispatchQueue.main.async {
                         self.delegate?.serverClientConnected(endpoint: "BSD-Socket:\(clientFd)")
-                        self.delegate?.serverDidRequestKeyframeRefresh()
                     }
                 }
             }
@@ -333,6 +425,9 @@ public final class WXCastSenderServer {
     // MARK: - Video Dispatcher (Port 25334)
 
     public func sendVideoData(_ data: Data) {
+        // 0. Cache latest SPS (type 7) and PPS (type 8) NAL units for future clients
+        cacheParameterSetsIfPresent(in: data)
+
         // 1. Dispatch via NWConnection clients
         serverQueue.async { [weak self] in
             guard let self = self else { return }
@@ -446,6 +541,7 @@ public final class WXCastSenderServer {
                     self.ipcSocketLock.unlock()
 
                     NSLog("[WXCastSenderServer] Broadcast Extension connected to IPC on port %d (fd: %d)!", port, clientFd)
+                    self.requestEncoderKeyframeRefresh()
                     self.startIpcReceiveLoop(clientFd: clientFd)
                 }
             }
@@ -536,7 +632,7 @@ public final class WXCastSenderServer {
 
             // Decompiled ApowerMirror Control Commands (ASM @ 0x44920, 0x456a0, 0x456c0)
             if trimmed == "cmd_Recast_req" {
-                delegate?.serverDidRequestKeyframeRefresh()
+                requestEncoderKeyframeRefresh()
             } else if trimmed == "cmd_Pause_req" {
                 delegate?.serverDidReceiveCommand("cmd_Pause_req", data: nil)
             } else if trimmed == "cmd_Close_req" {

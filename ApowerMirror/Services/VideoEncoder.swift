@@ -1,10 +1,13 @@
 //
 //  VideoEncoder.swift
-//  ApowerMirror / Services
+//  ApowerMirrorUpload / AppleCast
 //
-//  Hardware accelerated H.264 VideoToolbox encoder for ReplayKit screen capture.
-//  Encodes CVPixelBuffer into Annex-B H.264 NALUs with ApowerMirror framing tags
-//  ([00 00 00 00] and [00 00 00 02]) compatible with desktop receivers.
+//  Reconstructed 1:1 from ApowerMirror WXCastiOSSender:
+//  - -[WXCastSenderVideoEncoder createSessionRotation:]
+//  - -[WXCastSenderVideoEncoder _encodeH264SampleBuffer:param:]
+//  - -[WXCastSenderVideoEncoder gotSpsPps:pps:]
+//  - -[WXCastSenderVideoEncoder gotEncodedData:]
+//  - -[WXCastSenderServer sendH264Data:type:]
 //
 
 import Foundation
@@ -34,7 +37,9 @@ public final class VideoEncoder {
     private var spsHeader: Data?
     private var ppsHeader: Data?
     private let annexBStartCode = Data([0x00, 0x00, 0x00, 0x01])
-    private var forceNextKeyframe = false
+    private var forceNextKeyframe = true
+
+    private static let forceKeyframeNotificationName = "com.apowermirror.forceKeyframe" as CFString
 
     // Maximum sub-packet size before slicing (10 KB / 0x2800 from ApowerMirror decompiled ASM)
     private let kMaxSliceChunkSize = 10240
@@ -45,6 +50,24 @@ public final class VideoEncoder {
         self.bitrate = bitrate
         self.fps = fps
         self.packetHandler = packetHandler
+        registerCrossProcessKeyframeObserver()
+    }
+
+    private func registerCrossProcessKeyframeObserver() {
+        let center = CFNotificationCenterGetDarwinNotifyCenter()
+        let observer = UnsafeRawPointer(Unmanaged.passUnretained(self).toOpaque())
+        CFNotificationCenterAddObserver(
+            center,
+            observer,
+            { _, observer, _, _, _ in
+                guard let observer = observer else { return }
+                let encoder = Unmanaged<VideoEncoder>.fromOpaque(observer).takeUnretainedValue()
+                encoder.forceKeyFrame()
+            },
+            Self.forceKeyframeNotificationName,
+            nil,
+            .deliverImmediately
+        )
     }
 
     public func setDimensionChangeHandler(_ handler: @escaping DimensionChangeHandler) {
@@ -183,6 +206,7 @@ public final class VideoEncoder {
 
         VTCompressionSessionPrepareToEncodeFrames(session)
         self.compressionSession = session
+        self.forceNextKeyframe = true
 
         // 6. Notify Desktop Receiver of Geometry Change
         let rotationVal: Int32 = isLandscape ? 90 : 0
@@ -192,56 +216,15 @@ public final class VideoEncoder {
     // MARK: - Output Sample Handling & H.264 NAL Parsing
 
     private func handleEncodedSampleBuffer(_ sampleBuffer: CMSampleBuffer) {
-        // Determine if keyframe (IDR) using type-safe CFDictionary casting
-        var isKeyFrame = false
+        // 1. In CoreMedia, kCMSampleAttachmentKey_NotSync is omitted (nil) for sync keyframes.
+        var isKeyFrame = true
         if let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false) as? [[CFString: Any]],
-           let firstAttachment = attachments.first,
-           let notSync = firstAttachment[kCMSampleAttachmentKey_NotSync] as? Bool {
+           let firstAttachment = attachments.first {
+            let notSync = (firstAttachment[kCMSampleAttachmentKey_NotSync] as? Bool) ?? false
             isKeyFrame = !notSync
         }
 
-        var frameData = Data()
-
-        // On keyframe, prepend SPS and PPS parameter sets with Annex-B delimiters
-        if isKeyFrame {
-            guard let formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer) else { return }
-
-            var spsPointer: UnsafePointer<UInt8>?
-            var spsSize = 0
-            let spsStatus = CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
-                formatDescription,
-                parameterSetIndex: 0,
-                parameterSetPointerOut: &spsPointer,
-                parameterSetSizeOut: &spsSize,
-                parameterSetCountOut: nil,
-                nalUnitHeaderLengthOut: nil
-            )
-
-            var ppsPointer: UnsafePointer<UInt8>?
-            var ppsSize = 0
-            let ppsStatus = CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
-                formatDescription,
-                parameterSetIndex: 1,
-                parameterSetPointerOut: &ppsPointer,
-                parameterSetSizeOut: &ppsSize,
-                parameterSetCountOut: nil,
-                nalUnitHeaderLengthOut: nil
-            )
-
-            if spsStatus == noErr, ppsStatus == noErr, let sps = spsPointer, let pps = ppsPointer {
-                spsHeader = Data(bytes: sps, count: spsSize)
-                ppsHeader = Data(bytes: pps, count: ppsSize)
-            }
-
-            if let sps = spsHeader, let pps = ppsHeader {
-                frameData.append(annexBStartCode)
-                frameData.append(sps)
-                frameData.append(annexBStartCode)
-                frameData.append(pps)
-            }
-        }
-
-        // Extract AVCC length-prefixed NALUs and convert to pure Annex-B [00 00 00 01]
+        // 2. Extract AVCC length-prefixed NALUs and convert to Annex-B [00 00 00 01]
         guard let dataBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else { return }
 
         var totalLength = 0
@@ -256,6 +239,7 @@ public final class VideoEncoder {
 
         guard blockStatus == noErr, let rawData = dataPointer else { return }
 
+        var naluData = Data()
         var bufferOffset = 0
         let avccHeaderLength = 4
 
@@ -266,15 +250,64 @@ public final class VideoEncoder {
 
             bufferOffset += avccHeaderLength
 
-            guard bufferOffset + Int(naluLength) <= totalLength else { break }
+            guard naluLength > 0, bufferOffset + Int(naluLength) <= totalLength else { break }
 
-            frameData.append(annexBStartCode)
-            frameData.append(Data(bytes: rawData + bufferOffset, count: Int(naluLength)))
+            // Inspect NAL unit header type (5 = IDR Keyframe slice)
+            let nalHeaderByte = UInt8(bitPattern: rawData[bufferOffset])
+            let nalType = nalHeaderByte & 0x1F
+            if nalType == 5 {
+                isKeyFrame = true
+            }
+
+            naluData.append(annexBStartCode)
+            naluData.append(Data(bytes: rawData + bufferOffset, count: Int(naluLength)))
 
             bufferOffset += Int(naluLength)
         }
 
-        // Dispatch complete unfragmented Annex-B frame
+        // 3. On keyframe (or if SPS/PPS have never been extracted), prepend SPS & PPS with Annex-B start codes
+        var frameData = Data()
+        if isKeyFrame || spsHeader == nil || ppsHeader == nil {
+            if let formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer) {
+                var spsPointer: UnsafePointer<UInt8>?
+                var spsSize = 0
+                let spsStatus = CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
+                    formatDescription,
+                    parameterSetIndex: 0,
+                    parameterSetPointerOut: &spsPointer,
+                    parameterSetSizeOut: &spsSize,
+                    parameterSetCountOut: nil,
+                    nalUnitHeaderLengthOut: nil
+                )
+
+                var ppsPointer: UnsafePointer<UInt8>?
+                var ppsSize = 0
+                let ppsStatus = CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
+                    formatDescription,
+                    parameterSetIndex: 1,
+                    parameterSetPointerOut: &ppsPointer,
+                    parameterSetSizeOut: &ppsSize,
+                    parameterSetCountOut: nil,
+                    nalUnitHeaderLengthOut: nil
+                )
+
+                if spsStatus == noErr, ppsStatus == noErr, let sps = spsPointer, let pps = ppsPointer {
+                    spsHeader = Data(bytes: sps, count: spsSize)
+                    ppsHeader = Data(bytes: pps, count: ppsSize)
+                }
+            }
+
+            if let sps = spsHeader, let pps = ppsHeader {
+                frameData.append(annexBStartCode)
+                frameData.append(sps)
+                frameData.append(annexBStartCode)
+                frameData.append(pps)
+            }
+        }
+
+        frameData.append(naluData)
+
+        // 4. Dispatch complete unfragmented Annex-B frame
         if !frameData.isEmpty {
             packetHandler(frameData, isKeyFrame, true)
         }
@@ -288,6 +321,9 @@ public final class VideoEncoder {
     }
 
     deinit {
+        let center = CFNotificationCenterGetDarwinNotifyCenter()
+        let observer = UnsafeRawPointer(Unmanaged.passUnretained(self).toOpaque())
+        CFNotificationCenterRemoveObserver(center, observer, CFNotificationName(Self.forceKeyframeNotificationName), nil)
         invalidate()
     }
 }
