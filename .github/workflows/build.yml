@@ -15,6 +15,9 @@ jobs:
     name: Build Windows Host Client
     runs-on: windows-latest
 
+    permissions:
+      contents: write
+
     steps:
       - name: Checkout Codebase
         uses: actions/checkout@v4
@@ -58,12 +61,25 @@ jobs:
           path: AppleCast-Windows-x64.zip
           retention-days: 14
 
+      - name: Publish Windows Release
+        uses: softprops/action-gh-release@v2
+        if: github.ref == 'refs/heads/main'
+        continue-on-error: true
+        with:
+          tag_name: latest
+          name: "AppleCast Latest Release"
+          files: AppleCast-Windows-x64.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   # ==============================================================
   # Job 2: iOS Companion App & ReplayKit Extension Build
   # ==============================================================
   build-ios:
     name: Build iOS Companion & Extension
     runs-on: macos-14
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout Codebase
@@ -152,43 +168,14 @@ jobs:
           path: build/ios/ipa/AppleCast-iOS-Unsigned.ipa
           retention-days: 14
 
-  # ==============================================================
-  # Job 3: Automated GitHub Release (Direct Downloads)
-  # ==============================================================
-  publish-release:
-    name: Publish Release (Direct Downloads)
-    needs: [build-windows, build-ios]
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
-    permissions:
-      contents: write
-    steps:
-      - name: Download Windows Binary Artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: AppleCast-Windows-x64
-          path: release-binaries
-
-      - name: Download iOS IPA Artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: AppleCast-iOS-Unsigned
-          path: release-binaries
-
-      - name: Create or Update GitHub Release
+      - name: Publish iOS Release
         uses: softprops/action-gh-release@v2
+        if: github.ref == 'refs/heads/main'
         continue-on-error: true
         with:
           tag_name: latest
           name: "AppleCast Latest Release"
-          body: |
-            ### AppleCast Automated Build
-            
-            Direct downloads:
-            - **iOS Sideloadable IPA:** `AppleCast-iOS-Unsigned.ipa`
-            - **Windows Host Client:** `AppleCast-Windows-x64.zip`
-          files: |
-            release-binaries/*
+          files: build/ios/ipa/AppleCast-iOS-Unsigned.ipa
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
