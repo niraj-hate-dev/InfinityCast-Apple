@@ -1,6 +1,9 @@
 #include "video_decoder.h"
+#include "logger.h"
 
 #include <iostream>
+#include <sstream>
+#include <iomanip>
 #include <cmath>
 
 namespace applecast {
@@ -224,21 +227,39 @@ bool VideoDecoder::LoadFfmpegSymbols() {
     if (last_slash) {
       *last_slash = '\0';
       SetDllDirectoryA(exe_path);
+      Log("FFMPEG", std::string("Application directory set for DLL search: ") + exe_path, "info");
     }
   }
 
-  // 1. Load avutil first (core dependency for avcodec and swscale)
+  // 0. Preload MinGW runtime and support libraries to guarantee dependencies resolve seamlessly
+  const char* kPreloadLibs[] = {
+      "libwinpthread-1.dll",
+      "libgcc_s_seh-1.dll",
+      "libstdc++-6.dll",
+      "swresample-5.dll"
+  };
+  for (const char* lib_name : kPreloadLibs) {
+    HMODULE mod = LoadLibraryA(lib_name);
+    if (mod) {
+      Log("FFMPEG", std::string("Preloaded dependency: ") + lib_name, "info");
+    }
+  }
+
+  // 1. Load avutil (core dependency for avcodec and swscale)
   const char* kAvutilNames[] = {
       "avutil-59.dll", "avutil-60.dll", "avutil-58.dll", "avutil-57.dll",
       "avutil-56.dll", "avutil.dll"
   };
   for (const char* dll_name : kAvutilNames) {
     avutil_module_ = LoadLibraryA(dll_name);
-    if (avutil_module_) break;
+    if (avutil_module_) {
+      Log("FFMPEG", std::string("Loaded core library: ") + dll_name, "success");
+      break;
+    }
   }
 
   if (!avutil_module_) {
-    std::cerr << "[DECODER] avutil dynamic library not found" << std::endl;
+    Log("FFMPEG", "avutil dynamic library not found in application path!", "error");
     return false;
   }
 
@@ -257,11 +278,14 @@ bool VideoDecoder::LoadFfmpegSymbols() {
   };
   for (const char* dll_name : kAvcodecNames) {
     avcodec_module_ = LoadLibraryA(dll_name);
-    if (avcodec_module_) break;
+    if (avcodec_module_) {
+      Log("FFMPEG", std::string("Loaded codec library: ") + dll_name, "success");
+      break;
+    }
   }
 
   if (!avcodec_module_) {
-    std::cerr << "[DECODER] avcodec dynamic library not found" << std::endl;
+    Log("FFMPEG", "avcodec dynamic library not found in application path!", "error");
     return false;
   }
 
@@ -284,7 +308,10 @@ bool VideoDecoder::LoadFfmpegSymbols() {
   };
   for (const char* dll_name : kSwscaleNames) {
     swscale_module_ = LoadLibraryA(dll_name);
-    if (swscale_module_) break;
+    if (swscale_module_) {
+      Log("FFMPEG", std::string("Loaded swscale library: ") + dll_name, "success");
+      break;
+    }
   }
 
   if (swscale_module_) {
@@ -297,7 +324,9 @@ bool VideoDecoder::LoadFfmpegSymbols() {
                    g_ffmpeg.send_packet && g_ffmpeg.receive_frame &&
                    g_ffmpeg.frame_alloc && g_ffmpeg.packet_alloc);
   if (!ok) {
-    std::cerr << "[DECODER] Required FFmpeg functions missing from loaded DLLs" << std::endl;
+    Log("FFMPEG", "Required FFmpeg functions missing from loaded DLLs!", "error");
+  } else {
+    Log("FFMPEG", "All required FFmpeg functions resolved successfully.", "success");
   }
   return ok;
 }
@@ -305,32 +334,31 @@ bool VideoDecoder::LoadFfmpegSymbols() {
 bool VideoDecoder::InitializeCodec() {
   if (!LoadFfmpegSymbols()) {
     is_hw_accelerated_ = false;
+    Log("DECODER", "InitializeCodec failed: FFmpeg symbols not loaded", "error");
     return false;
   }
 
   av_codec_ = g_ffmpeg.find_decoder(kAvCodecIdH264);
   if (!av_codec_) {
-    std::cerr << "[DECODER] H.264 decoder not found" << std::endl;
+    Log("DECODER", "H.264 decoder (id=27) not found in avcodec!", "error");
     return false;
   }
 
   av_codec_ctx_ = g_ffmpeg.alloc_context3(av_codec_);
   if (!av_codec_ctx_) {
-    std::cerr << "[DECODER] avcodec_alloc_context3 failed" << std::endl;
+    Log("DECODER", "avcodec_alloc_context3 failed", "error");
     return false;
   }
 
   // 1. Configure ultra-low-latency and multi-threaded CPU decoding
-  // threads = 0: automatically detects CPU cores for slice & frame decoding (fixes lag completely)
-  // thread_type = 3: FF_THREAD_FRAME (1) | FF_THREAD_SLICE (2)
+  // threads = 0: automatically detects CPU cores
+  // thread_type = 2: FF_THREAD_SLICE (0 frame delay, parallel macroblock decoding, eliminates lag completely)
+  // Note: Avoid FF_THREAD_FRAME (1) because it delays output by buffering multiple frames internally.
   if (g_ffmpeg.opt_set_int) {
     g_ffmpeg.opt_set_int(av_codec_ctx_, "threads", 0, 0);
-    g_ffmpeg.opt_set_int(av_codec_ctx_, "thread_type", 3, 0);
+    g_ffmpeg.opt_set_int(av_codec_ctx_, "thread_type", 2 /* FF_THREAD_SLICE */, 0);
     g_ffmpeg.opt_set_int(av_codec_ctx_, "flags", kAvCodecFlagLowDelay, 0);
     g_ffmpeg.opt_set_int(av_codec_ctx_, "flags2", 1 /* FAST */, 0);
-  }
-  if (g_ffmpeg.opt_set) {
-    g_ffmpeg.opt_set(av_codec_ctx_, "tune", "zerolatency", 0);
   }
 
   // 2. Hardware Acceleration Initialization (D3D11VA GPU with seamless CPU fallback)
@@ -338,15 +366,16 @@ bool VideoDecoder::InitializeCodec() {
     const int ret = g_ffmpeg.hwdevice_ctx_create(&av_hw_device_ctx_, kAvHwDeviceTypeD3d11va, nullptr, nullptr, 0);
     if (ret >= 0) {
       is_hw_accelerated_ = true;
-      std::cout << "[DECODER] D3D11VA GPU hardware acceleration enabled." << std::endl;
+      Log("DECODER", "D3D11VA GPU hardware acceleration enabled.", "info");
     } else {
       is_hw_accelerated_ = false;
-      std::cout << "[DECODER] D3D11VA not active, using ultra-fast multi-core CPU decoding." << std::endl;
+      Log("DECODER", "D3D11VA not active, using ultra-fast multi-core CPU decoding.", "info");
     }
   }
 
-  if (g_ffmpeg.open2(av_codec_ctx_, av_codec_, nullptr) < 0) {
-    std::cerr << "[DECODER] avcodec_open2 failed" << std::endl;
+  const int open_res = g_ffmpeg.open2(av_codec_ctx_, av_codec_, nullptr);
+  if (open_res < 0) {
+    Log("DECODER", "avcodec_open2 failed with code: " + std::to_string(open_res), "error");
     return false;
   }
 
@@ -358,7 +387,7 @@ bool VideoDecoder::InitializeCodec() {
   av_frame_ = g_ffmpeg.frame_alloc();
 
   is_initialized_ = true;
-  std::cout << "[DECODER] Real-time H.264 CPU/GPU decoder successfully ready!" << std::endl;
+  Log("DECODER", "Real-time H.264 CPU/GPU decoder successfully initialized!", "success");
   return true;
 }
 
@@ -372,6 +401,18 @@ bool VideoDecoder::DecodeStream(const uint8_t* in_data, size_t in_size) {
 
   if (!av_codec_ctx_ || !av_packet_ || !av_frame_ || !av_parser_ctx_) {
     return false;
+  }
+
+  // Hex dump of first incoming packet to verify bitstream integrity
+  static bool s_first_packet_logged = false;
+  if (!s_first_packet_logged && in_size >= 4) {
+    s_first_packet_logged = true;
+    std::stringstream hex_ss;
+    const size_t dump_len = std::min<size_t>(in_size, 32);
+    for (size_t i = 0; i < dump_len; ++i) {
+      hex_ss << std::hex << std::uppercase << std::setw(2) << std::setfill('0') << static_cast<int>(in_data[i]) << " ";
+    }
+    Log("STREAM", "First video stream chunk (" + std::to_string(in_size) + " bytes): " + hex_ss.str(), "info");
   }
 
   while (in_size > 0) {
@@ -389,6 +430,16 @@ bool VideoDecoder::DecodeStream(const uint8_t* in_data, size_t in_size) {
     }
 
     if (parsed_size > 0 && parsed_buf) {
+      static int s_logged_nals = 0;
+      if (s_logged_nals < 10 && parsed_size >= 5) {
+        s_logged_nals++;
+        uint8_t nal_type = parsed_buf[4] & 0x1F;
+        if (parsed_buf[0] == 0 && parsed_buf[1] == 0 && parsed_buf[2] == 1) {
+          nal_type = parsed_buf[3] & 0x1F;
+        }
+        Log("DECODER", "Parsed NAL #" + std::to_string(s_logged_nals) + " size=" + std::to_string(parsed_size) + " type=" + std::to_string(nal_type), "info");
+      }
+
       g_ffmpeg.packet_unref(av_packet_);
       auto* pkt = reinterpret_cast<FF_AVPacket*>(av_packet_);
       pkt->data = parsed_buf;
@@ -396,10 +447,23 @@ bool VideoDecoder::DecodeStream(const uint8_t* in_data, size_t in_size) {
       pkt->pts = kAvNoPtsValue;
       pkt->dts = kAvNoPtsValue;
 
-      const int send_res = g_ffmpeg.send_packet(av_codec_ctx_, av_packet_);
-      if (send_res >= 0 || send_res == -11 /* EAGAIN */) {
+      int send_res = g_ffmpeg.send_packet(av_codec_ctx_, av_packet_);
+      if (send_res == -11 /* EAGAIN */) {
+        // Drain frames if decoder queue is full, then retry sending packet
         while (g_ffmpeg.receive_frame(av_codec_ctx_, av_frame_) >= 0) {
           RenderDecodedFrame(av_frame_);
+        }
+        send_res = g_ffmpeg.send_packet(av_codec_ctx_, av_packet_);
+      }
+
+      if (send_res >= 0) {
+        while (g_ffmpeg.receive_frame(av_codec_ctx_, av_frame_) >= 0) {
+          RenderDecodedFrame(av_frame_);
+        }
+      } else {
+        static int s_send_err_count = 0;
+        if (s_send_err_count++ < 5) {
+          Log("DECODER", "avcodec_send_packet code: " + std::to_string(send_res), "warning");
         }
       }
 
@@ -437,9 +501,10 @@ void VideoDecoder::RenderDecodedFrame(void* av_frame) {
 
   static uint64_t s_rendered_count = 0;
   s_rendered_count++;
-  if (s_rendered_count == 1 || s_rendered_count % 120 == 0) {
-    std::cout << "[DECODER] Screen frame #" << s_rendered_count
-              << " displayed (" << frame_w << "x" << frame_h << ", fmt: " << frame_fmt << ")" << std::endl;
+  if (s_rendered_count == 1 || s_rendered_count % 60 == 0) {
+    Log("RENDERER", "Decoded frame #" + std::to_string(s_rendered_count) + " (" +
+        std::to_string(frame_w) + "x" + std::to_string(frame_h) + ", fmt=" +
+        std::to_string(frame_fmt) + ") displayed!", "success");
   }
 
   // Resize buffers if resolution changed (e.g. portrait <-> landscape rotation)

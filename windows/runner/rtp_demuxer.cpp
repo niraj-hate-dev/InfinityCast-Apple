@@ -1,4 +1,5 @@
 #include "rtp_demuxer.h"
+#include "logger.h"
 
 #include <cstring>
 #include <iostream>
@@ -188,26 +189,19 @@ void RtpDemuxer::ConsumeData(const uint8_t* buffer, size_t length) {
       }
     }
 
-    // 5. Mode B: Direct Raw Annex-B stream [00 00 00 01]
-    if (rem >= 4 && accumulator_[read_idx] == 0x00 && accumulator_[read_idx + 1] == 0x00 &&
-        accumulator_[read_idx + 2] == 0x00 && accumulator_[read_idx + 3] == 0x01) {
+    // 5. Mode B: Direct Raw H.264 Stream (Annex-B NALUs and continuation slices)
+    // All payload bytes belong to the video bitstream and must be fed to FFmpeg's stream parser without dropping!
+    DemuxedVideoPacket packet;
+    packet.data.assign(accumulator_.data() + read_idx, accumulator_.data() + accumulator_.size());
+    packet.pts = 0;
+    total_packets_++;
 
-      // Feed complete Annex-B slice chunk directly to video decoder stream parser
-      DemuxedVideoPacket packet;
-      packet.data.assign(accumulator_.data() + read_idx, accumulator_.data() + accumulator_.size());
-      packet.pts = 0;
-      total_packets_++;
-
-      if (on_video_packet_) {
-        on_video_packet_(packet);
-      }
-
-      read_idx = accumulator_.size();
-      break;
+    if (on_video_packet_) {
+      on_video_packet_(packet);
     }
 
-    // 6. Unrecognized leading byte, scan forward
-    read_idx++;
+    read_idx = accumulator_.size();
+    break;
   }
 
   // Prevent runaway buffer allocation if stream desynchronizes

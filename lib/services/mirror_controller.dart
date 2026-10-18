@@ -281,6 +281,20 @@ class MirrorController extends ChangeNotifier {
           errorMessage: msg,
         );
         break;
+      case 'log':
+        final tag = data['tag']?.toString() ?? 'NATIVE';
+        final message = data['message']?.toString() ?? '';
+        final levelStr = data['level']?.toString() ?? 'info';
+        LogLevel lvl = LogLevel.info;
+        if (levelStr == 'success') {
+          lvl = LogLevel.success;
+        } else if (levelStr == 'warning') {
+          lvl = LogLevel.warning;
+        } else if (levelStr == 'error') {
+          lvl = LogLevel.error;
+        }
+        addLog(tag, message, level: lvl);
+        break;
     }
     notifyListeners();
   }

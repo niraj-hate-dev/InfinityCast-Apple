@@ -1,4 +1,5 @@
 #include "screen_mirror_plugin.h"
+#include "logger.h"
 
 #include <iostream>
 #include <chrono>
@@ -114,12 +115,28 @@ ScreenMirrorPlugin::ScreenMirrorPlugin(
       [this](const flutter::EncodableValue* arguments,
              std::unique_ptr<flutter::EventSink<flutter::EncodableValue>>&& events)
           -> std::unique_ptr<flutter::StreamHandlerError<flutter::EncodableValue>> {
-        std::lock_guard<std::mutex> lock(sinks_mutex_);
-        status_sink_ = std::move(events);
+        {
+          std::lock_guard<std::mutex> lock(sinks_mutex_);
+          status_sink_ = std::move(events);
+        }
+        Logger::Instance().SetCallback(
+            [this](const std::string& tag, const std::string& msg, const std::string& level) {
+              std::lock_guard<std::mutex> lock(sinks_mutex_);
+              if (status_sink_) {
+                flutter::EncodableMap map;
+                map[flutter::EncodableValue("status")] = flutter::EncodableValue("log");
+                map[flutter::EncodableValue("tag")] = flutter::EncodableValue(tag);
+                map[flutter::EncodableValue("message")] = flutter::EncodableValue(msg);
+                map[flutter::EncodableValue("level")] = flutter::EncodableValue(level);
+                status_sink_->Success(flutter::EncodableValue(map));
+              }
+            });
+        Log("PLUGIN", "Status event sink active. Logger bridged to Flutter UI.", "info");
         return nullptr;
       },
       [this](const flutter::EncodableValue* arguments)
           -> std::unique_ptr<flutter::StreamHandlerError<flutter::EncodableValue>> {
+        Logger::Instance().SetCallback(nullptr);
         std::lock_guard<std::mutex> lock(sinks_mutex_);
         status_sink_ = nullptr;
         return nullptr;
@@ -128,6 +145,7 @@ ScreenMirrorPlugin::ScreenMirrorPlugin(
 }
 
 ScreenMirrorPlugin::~ScreenMirrorPlugin() {
+  Logger::Instance().SetCallback(nullptr);
   StopStreamingWorker();
   if (usbmuxd_client_) {
     usbmuxd_client_->StopDiscovery();
