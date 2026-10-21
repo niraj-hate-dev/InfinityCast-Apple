@@ -121,8 +121,8 @@ public final class SilentAudioKeepAlive {
                 samples[i + 3] = -1
             }
         }
-        samples.withUnsafeBufferPointer { sp in
-            data.append(UnsafeRawBufferPointer(sp))
+        samples.withUnsafeBytes { rawBytes in
+            data.append(contentsOf: rawBytes)
         }
 
         do {
