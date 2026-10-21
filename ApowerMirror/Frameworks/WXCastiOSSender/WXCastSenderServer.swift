@@ -514,7 +514,9 @@ public final class WXCastSenderServer {
                     while totalSent < data.count {
                         let sent = send(fd, basePtr.advanced(by: totalSent), data.count - totalSent, 0)
                         if sent <= 0 {
-                            deadFds.append(fd)
+                            if errno != EAGAIN && errno != EWOULDBLOCK {
+                                deadFds.append(fd)
+                            }
                             break
                         }
                         totalSent += sent
@@ -685,7 +687,9 @@ public final class WXCastSenderServer {
                     while totalSent < data.count {
                         let sent = send(fd, basePtr.advanced(by: totalSent), data.count - totalSent, 0)
                         if sent <= 0 {
-                            deadFds.append(fd)
+                            if errno != EAGAIN && errno != EWOULDBLOCK {
+                                deadFds.append(fd)
+                            }
                             break
                         }
                         totalSent += sent
