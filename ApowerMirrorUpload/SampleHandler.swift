@@ -21,6 +21,7 @@ public class SampleHandler: RPBroadcastSampleHandler {
     private static let kIpcPort: UInt16 = 8888
     private static let kAudioIpcPort: UInt16 = 8889
     private static let kStopNotification = "com.apowermirror.broadcast.StopBroadcast"
+    private static let kForceKeyframeNotification = "com.apowermirror.forceKeyframe"
 
     // MARK: - Encoders & Network Transport
     private var videoEncoder: VideoEncoder?
@@ -31,10 +32,19 @@ public class SampleHandler: RPBroadcastSampleHandler {
     private let socketLock = NSLock()
     private let audioSocketLock = NSLock()
     private var audioFrameCount: Int = 0
+    private var isVideoConnecting = false
+    private let videoConnectLock = NSLock()
     private var isAudioConnecting = false
     private let audioConnectLock = NSLock()
     private var audioPacketQueue: [Data] = []
     private let audioPacketQueueLock = NSLock()
+    private var pendingKeyframeRequest = true
+
+    // MARK: - Mach Memory Throttle Thresholds (Jetsam Protection)
+    private var isMemoryLocked = false
+    private let kMemoryLockThresholdMB: Double = 44.0
+    private let kMemoryUnlockThresholdMB: Double = 42.0
+    private var droppedVideoFramesDueToMemory = 0
 
     private let networkQueue = DispatchQueue(label: "com.apowermirror.upload.network", qos: .userInteractive)
     private var targetFps: Int32 = 60
@@ -63,7 +73,10 @@ public class SampleHandler: RPBroadcastSampleHandler {
         // 2. Setup observer to stop broadcast when user taps Stop in Main App
         setupDarwinStopReceiver()
 
-        // 3. Connect non-blocking BSD sockets to Main App IPC on 127.0.0.1:8888 (Video) & 8889 (Audio)
+        // 3. Setup observer for cross-process keyframe requests from desktop
+        setupDarwinKeyframeReceiver()
+
+        // 4. Connect non-blocking BSD sockets to Main App IPC on 127.0.0.1:8888 (Video) & 8889 (Audio)
         connectToMainAppIPC()
         connectToAudioIPC()
     }
@@ -98,6 +111,8 @@ public class SampleHandler: RPBroadcastSampleHandler {
         audioPacketQueue.removeAll()
         audioPacketQueueLock.unlock()
 
+        removeDarwinKeyframeReceiver()
+
         // Clean up BSD sockets
         closeSocket()
         closeAudioSocket()
@@ -116,6 +131,26 @@ public class SampleHandler: RPBroadcastSampleHandler {
         autoreleasepool {
             switch sampleBufferType {
             case .video:
+                // Mach Memory Footprint Guard (Jetsam 50MB ceiling protection)
+                let currentRamMB = self.getMemoryFootprintMB()
+                if self.isMemoryLocked {
+                    if currentRamMB < self.kMemoryUnlockThresholdMB {
+                        self.isMemoryLocked = false
+                        NSLog("[SampleHandler] Memory normalized (%.2f MB < %.2f MB), unlocking video frames", currentRamMB, self.kMemoryUnlockThresholdMB)
+                    } else {
+                        self.droppedVideoFramesDueToMemory += 1
+                        if self.droppedVideoFramesDueToMemory % 60 == 0 {
+                            NSLog("[SampleHandler] Memory throttle ACTIVE (%.2f MB >= %.2f MB). Dropped %d video frames", currentRamMB, self.kMemoryLockThresholdMB, self.droppedVideoFramesDueToMemory)
+                        }
+                        return
+                    }
+                } else if currentRamMB >= self.kMemoryLockThresholdMB {
+                    self.isMemoryLocked = true
+                    self.droppedVideoFramesDueToMemory += 1
+                    NSLog("[SampleHandler] Memory throttle triggered (%.2f MB >= %.2f MB). Dropping video frame to prevent Jetsam kill", currentRamMB, self.kMemoryLockThresholdMB)
+                    return
+                }
+
                 // Lazily initialize hardware VideoEncoder on the very first video frame
                 if videoEncoder == nil {
                     videoEncoder = VideoEncoder(bitrate: targetBitrate, fps: targetFps) { [weak self] (packet, isKeyFrame, isEndFrame) in
@@ -125,6 +160,14 @@ public class SampleHandler: RPBroadcastSampleHandler {
                     videoEncoder?.setDimensionChangeHandler { [weak self] width, height, rotation in
                         self?.sendGeometryChange(width: width, height: height, rotation: rotation)
                     }
+
+                    if pendingKeyframeRequest {
+                        videoEncoder?.forceKeyFrame()
+                        pendingKeyframeRequest = false
+                    }
+                } else if pendingKeyframeRequest {
+                    videoEncoder?.forceKeyFrame()
+                    pendingKeyframeRequest = false
                 }
 
                 // Extract orientation attachment if available
@@ -163,8 +206,21 @@ public class SampleHandler: RPBroadcastSampleHandler {
     // MARK: - Outbound POSIX BSD Socket IPC (to 127.0.0.1:8888)
 
     private func connectToMainAppIPC() {
+        videoConnectLock.lock()
+        if isVideoConnecting {
+            videoConnectLock.unlock()
+            return
+        }
+        isVideoConnecting = true
+        videoConnectLock.unlock()
+
         networkQueue.async { [weak self] in
-            guard let self = self, self.isBroadcasting else { return }
+            guard let self = self, self.isBroadcasting else {
+                self?.videoConnectLock.lock()
+                self?.isVideoConnecting = false
+                self?.videoConnectLock.unlock()
+                return
+            }
 
             self.socketLock.lock()
             if self.bsdClientSocket >= 0 {
@@ -176,6 +232,9 @@ public class SampleHandler: RPBroadcastSampleHandler {
             let sock = socket(AF_INET, SOCK_STREAM, 0)
             guard sock >= 0 else {
                 NSLog("[SampleHandler] Failed to create BSD socket: errno %d", errno)
+                self.videoConnectLock.lock()
+                self.isVideoConnecting = false
+                self.videoConnectLock.unlock()
                 return
             }
 
@@ -207,12 +266,17 @@ public class SampleHandler: RPBroadcastSampleHandler {
                 }
             }
 
+            self.videoConnectLock.lock()
+            self.isVideoConnecting = false
+            self.videoConnectLock.unlock()
+
             if res == 0 {
                 self.socketLock.lock()
                 self.bsdClientSocket = sock
                 self.socketLock.unlock()
                 NSLog("[SampleHandler] Connected to Main App IPC on 127.0.0.1:%d", SampleHandler.kIpcPort)
-                // Force an immediate SPS + PPS + IDR keyframe now that IPC is live
+                // Mark keyframe required and force an immediate SPS + PPS + IDR keyframe
+                self.pendingKeyframeRequest = true
                 self.videoEncoder?.forceKeyFrame()
             } else {
                 NSLog("[SampleHandler] Connect to 127.0.0.1:%d failed (errno: %d), retrying in 250ms...", SampleHandler.kIpcPort, errno)
@@ -246,8 +310,13 @@ public class SampleHandler: RPBroadcastSampleHandler {
                 let bytesToSend = totalLength - totalSent
                 let sent = send(sock, basePtr.advanced(by: totalSent), bytesToSend, 0)
                 if sent <= 0 {
-                    // Send failed (EPIPE / ECONNRESET)
-                    NSLog("[SampleHandler] Socket send failed (%d), reconnecting...", errno)
+                    if errno == EAGAIN || errno == EWOULDBLOCK {
+                        // Socket send buffer temporarily busy; let buffer flush without dropping socket
+                        usleep(1000)
+                        continue
+                    }
+                    // Actual socket failure (EPIPE / ECONNRESET)
+                    NSLog("[SampleHandler] Video socket send failed (errno: %d), reconnecting...", errno)
                     closeSocket()
                     connectToMainAppIPC()
                     break
@@ -442,5 +511,46 @@ public class SampleHandler: RPBroadcastSampleHandler {
             nil,
             .deliverImmediately
         )
+    }
+
+    private func setupDarwinKeyframeReceiver() {
+        let center = CFNotificationCenterGetDarwinNotifyCenter()
+        let observer = UnsafeRawPointer(Unmanaged.passUnretained(self).toOpaque())
+        CFNotificationCenterAddObserver(
+            center,
+            observer,
+            { _, observer, _, _, _ in
+                guard let observer = observer else { return }
+                let handler = Unmanaged<SampleHandler>.fromOpaque(observer).takeUnretainedValue()
+                handler.pendingKeyframeRequest = true
+                handler.videoEncoder?.forceKeyFrame()
+                NSLog("[SampleHandler] Cross-process forceKeyframe request received -> Keyframe pending")
+            },
+            SampleHandler.kForceKeyframeNotification as CFString,
+            nil,
+            .deliverImmediately
+        )
+    }
+
+    private func removeDarwinKeyframeReceiver() {
+        let center = CFNotificationCenterGetDarwinNotifyCenter()
+        let observer = UnsafeRawPointer(Unmanaged.passUnretained(self).toOpaque())
+        CFNotificationCenterRemoveObserver(center, observer, CFNotificationName(SampleHandler.kForceKeyframeNotification as CFString), nil)
+    }
+
+    // MARK: - Mach Kernel Memory Introspection
+
+    private func getMemoryFootprintMB() -> Double {
+        var info = task_vm_info_data_t()
+        var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<integer_t>.size)
+        let kerr = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count)
+            }
+        }
+        if kerr == KERN_SUCCESS {
+            return Double(info.phys_footprint) / (1024.0 * 1024.0)
+        }
+        return 0.0
     }
 }

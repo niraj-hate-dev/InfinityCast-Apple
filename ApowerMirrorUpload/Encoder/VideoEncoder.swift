@@ -199,10 +199,10 @@ public final class VideoEncoder {
         let dataRateLimits: [CFNumber] = [byteLimit as CFNumber, 1 as CFNumber]
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_DataRateLimits, value: dataRateLimits as CFArray)
 
-        // Keyframe cadence: 1 keyframe per second
+        // Keyframe cadence: 1 keyframe every 0.5s (every 30 frames at 60fps)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ExpectedFrameRate, value: fps as CFNumber)
-        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameInterval, value: fps as CFNumber)
-        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameIntervalDuration, value: 1.0 as CFNumber)
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameInterval, value: 30 as CFNumber)
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameIntervalDuration, value: 0.5 as CFNumber)
 
         VTCompressionSessionPrepareToEncodeFrames(session)
         self.compressionSession = session

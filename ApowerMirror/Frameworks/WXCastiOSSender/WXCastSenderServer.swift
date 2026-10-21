@@ -89,7 +89,7 @@ public final class WXCastSenderServer {
             self.isRunning = true
 
             self.setupChannelListener(port: channelPort)
-            self.setupMirrorListener(port: mirrorPort)
+            self.setupBsdMirrorServer(port: mirrorPort)
             self.setupBsdAudioServer(port: audioPort)
             self.setupIpcListener(port: ipcPort)
             self.setupAudioIpcListener(port: audioIpcPort)
@@ -462,6 +462,12 @@ public final class WXCastSenderServer {
                     var nd: Int32 = 1
                     setsockopt(clientFd, IPPROTO_TCP, TCP_NODELAY, &nd, socklen_t(MemoryLayout<Int32>.size))
 
+                    var sndBuf: Int32 = 2 * 1024 * 1024
+                    setsockopt(clientFd, SOL_SOCKET, SO_SNDBUF, &sndBuf, socklen_t(MemoryLayout<Int32>.size))
+
+                    var timeout = timeval(tv_sec: 1, tv_usec: 0)
+                    setsockopt(clientFd, SOL_SOCKET, SO_SNDTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
+
                     // Immediately prime the new BSD socket client with cached SPS & PPS headers
                     if let headerData = self.getCachedParameterSetsData() {
                         headerData.withUnsafeBytes { rawBuf in
@@ -652,6 +658,12 @@ public final class WXCastSenderServer {
                     var nd: Int32 = 1
                     setsockopt(clientFd, IPPROTO_TCP, TCP_NODELAY, &nd, socklen_t(MemoryLayout<Int32>.size))
 
+                    var sndBuf: Int32 = 2 * 1024 * 1024
+                    setsockopt(clientFd, SOL_SOCKET, SO_SNDBUF, &sndBuf, socklen_t(MemoryLayout<Int32>.size))
+
+                    var timeout = timeval(tv_sec: 1, tv_usec: 0)
+                    setsockopt(clientFd, SOL_SOCKET, SO_SNDTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
+
                     self.bsdAudioSocketLock.lock()
                     self.bsdAudioClientSockets.append(clientFd)
                     self.bsdAudioSocketLock.unlock()
@@ -775,6 +787,12 @@ public final class WXCastSenderServer {
                     var nd: Int32 = 1
                     setsockopt(clientFd, IPPROTO_TCP, TCP_NODELAY, &nd, socklen_t(MemoryLayout<Int32>.size))
 
+                    var sndBuf: Int32 = 2 * 1024 * 1024
+                    setsockopt(clientFd, SOL_SOCKET, SO_SNDBUF, &sndBuf, socklen_t(MemoryLayout<Int32>.size))
+
+                    var timeout = timeval(tv_sec: 1, tv_usec: 0)
+                    setsockopt(clientFd, SOL_SOCKET, SO_SNDTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
+
                     self.ipcSocketLock.lock()
                     self.ipcClientSockets.append(clientFd)
                     self.ipcSocketLock.unlock()
@@ -886,6 +904,12 @@ public final class WXCastSenderServer {
 
                     var nd: Int32 = 1
                     setsockopt(clientFd, IPPROTO_TCP, TCP_NODELAY, &nd, socklen_t(MemoryLayout<Int32>.size))
+
+                    var sndBuf: Int32 = 2 * 1024 * 1024
+                    setsockopt(clientFd, SOL_SOCKET, SO_SNDBUF, &sndBuf, socklen_t(MemoryLayout<Int32>.size))
+
+                    var timeout = timeval(tv_sec: 1, tv_usec: 0)
+                    setsockopt(clientFd, SOL_SOCKET, SO_SNDTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
 
                     self.audioIpcSocketLock.lock()
                     self.audioIpcClientSockets.append(clientFd)
