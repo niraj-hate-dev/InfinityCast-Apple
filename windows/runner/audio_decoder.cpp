@@ -340,27 +340,42 @@ bool AudioDecoder::DecodeStream(const uint8_t* in_data, size_t in_size) {
     }
   }
 
-  while (cur_size > 0) {
-    // Strip 4-byte ApowerMirror tag [00 00 00 02] before each ADTS frame
-    while (cur_size >= 4 && cur_ptr[0] == 0x00 && cur_ptr[1] == 0x00 && cur_ptr[2] == 0x00 && cur_ptr[3] == 0x02) {
-      cur_ptr += 4;
-      cur_size -= 4;
-    }
+  if (cur_size <= 0) return true;
 
+  // Sanitize buffer: Strip all embedded [00 00 00 02] tags before passing to FFmpeg parser
+  // to prevent av_parser_parse2 from swallowing tags into ADTS packets or desynchronizing.
+  std::vector<uint8_t> clean_buf;
+  clean_buf.reserve(cur_size);
+  for (int i = 0; i < cur_size; ) {
+    if (i + 4 <= cur_size &&
+        cur_ptr[i] == 0x00 && cur_ptr[i + 1] == 0x00 &&
+        cur_ptr[i + 2] == 0x00 && cur_ptr[i + 3] == 0x02) {
+      i += 4;
+    } else {
+      clean_buf.push_back(cur_ptr[i++]);
+    }
+  }
+
+  if (clean_buf.empty()) return true;
+
+  const uint8_t* parse_ptr = clean_buf.data();
+  int remaining_size = static_cast<int>(clean_buf.size());
+
+  while (remaining_size > 0) {
     uint8_t* poutbuf = nullptr;
     int poutbuf_size = 0;
 
     int bytes_consumed = g_audio_ffmpeg.parser_parse2(
         parser_, codec_ctx_, &poutbuf, &poutbuf_size,
-        cur_ptr, cur_size,
+        parse_ptr, remaining_size,
         kAvNoPtsValue, kAvNoPtsValue, 0);
 
     if (bytes_consumed <= 0) {
       break;
     }
 
-    cur_ptr += bytes_consumed;
-    cur_size -= bytes_consumed;
+    parse_ptr += bytes_consumed;
+    remaining_size -= bytes_consumed;
 
     if (poutbuf_size > 0 && poutbuf) {
       auto* pkt = reinterpret_cast<FF_AVPacket*>(packet_);
@@ -382,24 +397,31 @@ bool AudioDecoder::DecodeStream(const uint8_t* in_data, size_t in_size) {
         auto* f = reinterpret_cast<FF_AVFrame*>(frame_);
         if (f->nb_samples <= 0) continue;
 
-        // Query sample rate and channel count
+        // Query sample rate safely via av_opt_get_int with 44100 fallback (no broken struct offsets)
         int sample_rate = 0;
-        int channels = 0;
-
         if (g_audio_ffmpeg.opt_get_int) {
           int64_t sr_val = 0;
-          if (g_audio_ffmpeg.opt_get_int(codec_ctx_, "ar", 0, &sr_val) == 0) {
+          if (g_audio_ffmpeg.opt_get_int(codec_ctx_, "ar", 0, &sr_val) == 0 && sr_val > 0) {
             sample_rate = static_cast<int>(sr_val);
           }
         }
-
         if (sample_rate <= 0) {
-          sample_rate = *reinterpret_cast<const int*>(reinterpret_cast<const uint8_t*>(codec_ctx_) + 344);
+          sample_rate = 44100;
         }
-        channels = *reinterpret_cast<const int*>(reinterpret_cast<const uint8_t*>(codec_ctx_) + 356);
 
-        if (sample_rate <= 0) sample_rate = 44100;
-        if (channels <= 0) channels = 2;
+        // Determine stereo vs mono:
+        // For planar formats (FLTP, S16P), (f->data[1] != nullptr) confirms 2 channels.
+        // For packed formats, check linesize vs sample count.
+        int channels = 2;
+        if (f->format == 8 /* AV_SAMPLE_FMT_FLTP */ || f->format == 6 /* AV_SAMPLE_FMT_S16P */) {
+          channels = (f->data[1] != nullptr) ? 2 : 1;
+        } else if (f->format == 1 /* AV_SAMPLE_FMT_S16 */ && f->nb_samples > 0) {
+          channels = (f->linesize[0] >= static_cast<int>(f->nb_samples * 4)) ? 2 : 1;
+        } else if (f->format == 3 /* AV_SAMPLE_FMT_FLT */ && f->nb_samples > 0) {
+          channels = (f->linesize[0] >= static_cast<int>(f->nb_samples * 8)) ? 2 : 1;
+        } else {
+          channels = (f->data[1] != nullptr) ? 2 : 1;
+        }
 
         if (!h_wave_out_ || sample_rate != static_cast<int>(current_sample_rate_) || current_channels_ != 2) {
           InitWaveOut(static_cast<uint32_t>(sample_rate), 2);
@@ -416,7 +438,7 @@ bool AudioDecoder::DecodeStream(const uint8_t* in_data, size_t in_size) {
           std::vector<int16_t> pcm(f->nb_samples * 2);
           for (int i = 0; i < f->nb_samples; ++i) {
             float l = left[i];
-            float r = (channels > 1) ? right[i] : l;
+            float r = (channels > 1 && f->data[1]) ? right[i] : l;
             pcm[i * 2] = static_cast<int16_t>(std::clamp(l, -1.0f, 1.0f) * 32767.0f);
             pcm[i * 2 + 1] = static_cast<int16_t>(std::clamp(r, -1.0f, 1.0f) * 32767.0f);
           }
@@ -431,8 +453,9 @@ bool AudioDecoder::DecodeStream(const uint8_t* in_data, size_t in_size) {
               pcm[i * 2 + 1] = s;
             }
           } else {
-            for (size_t i = 0; i < pcm.size(); ++i) {
-              pcm[i] = static_cast<int16_t>(std::clamp(samples[i], -1.0f, 1.0f) * 32767.0f);
+            for (int i = 0; i < f->nb_samples; ++i) {
+              pcm[i * 2] = static_cast<int16_t>(std::clamp(samples[i * 2], -1.0f, 1.0f) * 32767.0f);
+              pcm[i * 2 + 1] = static_cast<int16_t>(std::clamp(samples[i * 2 + 1], -1.0f, 1.0f) * 32767.0f);
             }
           }
           PlayPcm(pcm.data(), pcm.size());
@@ -446,7 +469,7 @@ bool AudioDecoder::DecodeStream(const uint8_t* in_data, size_t in_size) {
             }
             PlayPcm(pcm.data(), pcm.size());
           } else {
-            PlayPcm(samples, f->nb_samples * channels);
+            PlayPcm(samples, f->nb_samples * 2);
           }
         } else if (f->format == 6 /* AV_SAMPLE_FMT_S16P */) {
           const int16_t* left = reinterpret_cast<const int16_t*>(f->data[0]);
@@ -454,7 +477,7 @@ bool AudioDecoder::DecodeStream(const uint8_t* in_data, size_t in_size) {
           std::vector<int16_t> pcm(f->nb_samples * 2);
           for (int i = 0; i < f->nb_samples; ++i) {
             pcm[i * 2] = left[i];
-            pcm[i * 2 + 1] = (channels > 1) ? right[i] : left[i];
+            pcm[i * 2 + 1] = (channels > 1 && f->data[1]) ? right[i] : left[i];
           }
           PlayPcm(pcm.data(), pcm.size());
         }

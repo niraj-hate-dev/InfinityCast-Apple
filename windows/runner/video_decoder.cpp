@@ -59,6 +59,7 @@ typedef void  (*FnAvPacketFree)(void** pkt);
 typedef void  (*FnAvPacketUnref)(void* pkt);
 typedef void* (*FnAvFrameAlloc)();
 typedef void  (*FnAvFrameFree)(void** frame);
+typedef void  (*FnAvFrameUnref)(void* frame);
 typedef int   (*FnAvcodecSendPacket)(void* avctx, const void* pkt);
 typedef int   (*FnAvcodecReceiveFrame)(void* avctx, void* frame);
 typedef int   (*FnAvHwdeviceCtxCreate)(void** device_ctx, int type, const char* device, void* opts, int flags);
@@ -99,6 +100,7 @@ struct FfmpegFunctions {
   // avutil
   FnAvFrameAlloc frame_alloc = nullptr;
   FnAvFrameFree frame_free = nullptr;
+  FnAvFrameUnref frame_unref = nullptr;
   FnAvHwdeviceCtxCreate hwdevice_ctx_create = nullptr;
   FnAvOptSetInt opt_set_int = nullptr;
   FnAvOptSet opt_set = nullptr;
@@ -265,6 +267,7 @@ bool VideoDecoder::LoadFfmpegSymbols() {
 
   g_ffmpeg.frame_alloc = (FnAvFrameAlloc)GetProcAddress(avutil_module_, "av_frame_alloc");
   g_ffmpeg.frame_free = (FnAvFrameFree)GetProcAddress(avutil_module_, "av_frame_free");
+  g_ffmpeg.frame_unref = (FnAvFrameUnref)GetProcAddress(avutil_module_, "av_frame_unref");
   g_ffmpeg.hwdevice_ctx_create = (FnAvHwdeviceCtxCreate)GetProcAddress(avutil_module_, "av_hwdevice_ctx_create");
   g_ffmpeg.opt_set_int = (FnAvOptSetInt)GetProcAddress(avutil_module_, "av_opt_set_int");
   g_ffmpeg.opt_set = (FnAvOptSet)GetProcAddress(avutil_module_, "av_opt_set");
@@ -385,6 +388,7 @@ bool VideoDecoder::InitializeCodec() {
 
   av_packet_ = g_ffmpeg.packet_alloc();
   av_frame_ = g_ffmpeg.frame_alloc();
+  av_frame_secondary_ = g_ffmpeg.frame_alloc();
 
   is_initialized_ = true;
   Log("DECODER", "Real-time H.264 CPU/GPU decoder successfully initialized!", "success");
@@ -450,16 +454,12 @@ bool VideoDecoder::DecodeStream(const uint8_t* in_data, size_t in_size) {
       int send_res = g_ffmpeg.send_packet(av_codec_ctx_, av_packet_);
       if (send_res == -11 /* EAGAIN */) {
         // Drain frames if decoder queue is full, then retry sending packet
-        while (g_ffmpeg.receive_frame(av_codec_ctx_, av_frame_) >= 0) {
-          RenderDecodedFrame(av_frame_);
-        }
+        DrainAndRenderLatestFrame();
         send_res = g_ffmpeg.send_packet(av_codec_ctx_, av_packet_);
       }
 
       if (send_res >= 0) {
-        while (g_ffmpeg.receive_frame(av_codec_ctx_, av_frame_) >= 0) {
-          RenderDecodedFrame(av_frame_);
-        }
+        DrainAndRenderLatestFrame();
       } else {
         static int s_send_err_count = 0;
         if (s_send_err_count++ < 5) {
@@ -482,6 +482,31 @@ bool VideoDecoder::DecodeStream(const uint8_t* in_data, size_t in_size) {
 bool VideoDecoder::DecodePacket(const DemuxedVideoPacket& packet) {
   if (packet.data.empty()) return false;
   return DecodeStream(packet.data.data(), packet.data.size());
+}
+
+void VideoDecoder::DrainAndRenderLatestFrame() {
+  if (!av_codec_ctx_ || !av_frame_) return;
+
+  void* active_frame = av_frame_;
+  void* next_frame = av_frame_secondary_ ? av_frame_secondary_ : av_frame_;
+  void* latest_valid_frame = nullptr;
+
+  while (g_ffmpeg.receive_frame(av_codec_ctx_, active_frame) >= 0) {
+    if (latest_valid_frame && g_ffmpeg.frame_unref) {
+      g_ffmpeg.frame_unref(latest_valid_frame);
+    }
+    latest_valid_frame = active_frame;
+    if (av_frame_secondary_) {
+      std::swap(active_frame, next_frame);
+    }
+  }
+
+  if (latest_valid_frame) {
+    RenderDecodedFrame(latest_valid_frame);
+    if (g_ffmpeg.frame_unref) {
+      g_ffmpeg.frame_unref(latest_valid_frame);
+    }
+  }
 }
 
 void VideoDecoder::RenderDecodedFrame(void* av_frame) {
@@ -654,6 +679,10 @@ void VideoDecoder::Teardown() {
   if (g_ffmpeg.frame_free && av_frame_) {
     g_ffmpeg.frame_free(&av_frame_);
     av_frame_ = nullptr;
+  }
+  if (g_ffmpeg.frame_free && av_frame_secondary_) {
+    g_ffmpeg.frame_free(&av_frame_secondary_);
+    av_frame_secondary_ = nullptr;
   }
   if (g_ffmpeg.free_context && av_codec_ctx_) {
     g_ffmpeg.free_context(&av_codec_ctx_);

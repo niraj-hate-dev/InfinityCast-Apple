@@ -55,6 +55,7 @@ class VideoDecoder {
   bool CreateSharedTexture(size_t width, size_t height);
   bool LoadFfmpegSymbols();
   void RenderDecodedFrame(void* av_frame);
+  void DrainAndRenderLatestFrame();
 
   TextureBridge* texture_bridge_ = nullptr;
   size_t width_ = 1920;
@@ -79,6 +80,7 @@ class VideoDecoder {
   void* av_hw_device_ctx_ = nullptr;
   void* av_packet_ = nullptr;
   void* av_frame_ = nullptr;
+  void* av_frame_secondary_ = nullptr;
   void* av_parser_ctx_ = nullptr;
   void* sws_ctx_ = nullptr;
 
