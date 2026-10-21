@@ -444,7 +444,7 @@ public final class WXCastSenderServer {
 
             NSLog("[WXCastSenderServer] BSD Video Mirror socket listening on 0.0.0.0:%d", port)
 
-            DispatchQueue.global(qos: .utility).async { [weak self] in
+            DispatchQueue.global(qos: .userInteractive).async { [weak self] in
                 while let self = self, self.isRunning, self.bsdListenSocket >= 0 {
                     var clientAddr = sockaddr_in()
                     var addrLen = socklen_t(MemoryLayout<sockaddr_in>.size)
@@ -634,7 +634,7 @@ public final class WXCastSenderServer {
 
             NSLog("[WXCastSenderServer] BSD Audio Mirror socket listening on 0.0.0.0:%d", port)
 
-            DispatchQueue.global(qos: .utility).async { [weak self] in
+            DispatchQueue.global(qos: .userInteractive).async { [weak self] in
                 while let self = self, self.isRunning, self.bsdAudioListenSocket >= 0 {
                     var clientAddr = sockaddr_in()
                     var addrLen = socklen_t(MemoryLayout<sockaddr_in>.size)

@@ -33,6 +33,8 @@ public class SampleHandler: RPBroadcastSampleHandler {
     private var audioFrameCount: Int = 0
     private var isAudioConnecting = false
     private let audioConnectLock = NSLock()
+    private var audioPacketQueue: [Data] = []
+    private let audioPacketQueueLock = NSLock()
 
     private let networkQueue = DispatchQueue(label: "com.apowermirror.upload.network", qos: .userInteractive)
     private var targetFps: Int32 = 60
@@ -92,6 +94,9 @@ public class SampleHandler: RPBroadcastSampleHandler {
         audioEncoder?.invalidate()
         audioEncoder = nil
         audioFrameCount = 0
+        audioPacketQueueLock.lock()
+        audioPacketQueue.removeAll()
+        audioPacketQueueLock.unlock()
 
         // Clean up BSD sockets
         closeSocket()
@@ -131,8 +136,8 @@ public class SampleHandler: RPBroadcastSampleHandler {
                 // Feed CVPixelBuffer to hardware encoder
                 videoEncoder?.encode(sampleBuffer: sampleBuffer, orientation: orientation)
 
-            case .audioApp, .audioMic:
-                // Auto Audio Detector: whenever any audio arrives (from app, media, game, or mic),
+            case .audioApp:
+                // Auto Audio Detector: whenever device audio arrives (YouTube, games, media),
                 // automatically encode and transfer immediately!
                 self.audioFrameCount += 1
                 if self.audioFrameCount <= 5 || self.audioFrameCount % 200 == 0 {
@@ -335,6 +340,16 @@ public class SampleHandler: RPBroadcastSampleHandler {
                 self.audioBsdClientSocket = sock
                 self.audioSocketLock.unlock()
                 NSLog("[SampleHandler] Connected to Main App Audio IPC on 127.0.0.1:%d", SampleHandler.kAudioIpcPort)
+
+                // Flush any packets buffered while socket was connecting
+                self.audioPacketQueueLock.lock()
+                let pending = self.audioPacketQueue
+                self.audioPacketQueue.removeAll()
+                self.audioPacketQueueLock.unlock()
+
+                for pkt in pending {
+                    self.sendAudioDataToMainApp(pkt)
+                }
             } else {
                 close(sock)
                 if self.isBroadcasting {
@@ -352,6 +367,11 @@ public class SampleHandler: RPBroadcastSampleHandler {
         audioSocketLock.unlock()
 
         guard sock >= 0 else {
+            audioPacketQueueLock.lock()
+            if audioPacketQueue.count < 30 {
+                audioPacketQueue.append(data)
+            }
+            audioPacketQueueLock.unlock()
             connectToAudioIPC()
             return
         }
@@ -368,6 +388,11 @@ public class SampleHandler: RPBroadcastSampleHandler {
                     if errno != EAGAIN && errno != EWOULDBLOCK {
                         NSLog("[SampleHandler] Audio socket send failed (errno: %d), reconnecting...", errno)
                         closeAudioSocket()
+                        audioPacketQueueLock.lock()
+                        if audioPacketQueue.count < 30 {
+                            audioPacketQueue.append(data)
+                        }
+                        audioPacketQueueLock.unlock()
                         connectToAudioIPC()
                     }
                     break

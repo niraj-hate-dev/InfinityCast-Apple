@@ -2,15 +2,12 @@
 //  SilentAudioKeepAlive.swift
 //  ApowerMirror / Services
 //
-//  Background Keepalive & Audio Graph Priming Engine:
-//  Plays an inaudible, low-level dithered PCM audio loop using AVAudioPlayer with
+//  Background Keepalive Engine:
+//  Plays an inaudible, zero-volume silent audio loop using AVAudioPlayer with
 //  AVAudioSession category .playback and .mixWithOthers.
-//  This serves two critical roles:
-//  1. Prevents iOS from suspending the Main App when minimized to the Home screen
-//     or when another app (YouTube, Spotify) is opened.
-//  2. Actively primes the iOS CoreAudio render graph from the moment broadcast starts,
-//     ensuring ReplayKit's daemon (replayd) hooks into the system audio output tap
-//     and reliably delivers .audioApp sample buffers even when external audio starts late.
+//  This prevents iOS from suspending the Main App when minimized to the Home screen
+//  during live ReplayKit screen mirroring sessions, keeping internal socket servers
+//  (Port 8889 and Port 25335) actively processing packets without sleep or throttling.
 //
 
 import Foundation
@@ -73,16 +70,14 @@ public final class SilentAudioKeepAlive {
     }
 
     private func prepareSilentPlayer() {
-        // Generate a 1-second 44.1kHz 16-bit stereo WAV with low-level LSB dither (alternating +1 and -1).
-        // Amplitude: 1 out of 32767 = -90.3 dBFS.
-        // This is completely imperceptible to human ears, but tricks CoreAudio's silence
-        // detector into keeping the audio hardware graph and replayd tap active.
+        // Generate a 1-second standard 44.1kHz 16-bit stereo PCM WAV file with pure zero silence.
+        // Pure silence ensures zero audible noise (no old TV high-frequency whine or static hiss).
         let sampleRate: UInt32 = 44100
         let channels: UInt16 = 2
         let bitsPerSample: UInt16 = 16
         let durationSec: UInt32 = 1
         let numFrames = sampleRate * durationSec
-        let dataBytes = numFrames * UInt32(channels) * UInt32(bitsPerSample / 8)
+        let dataBytes = numFrames * UInt32(channels) * UInt32(bitsPerSample / 8) // 176,400 bytes
         let riffSize = dataBytes + 36
 
         var data = Data(capacity: Int(dataBytes + 44))
@@ -110,30 +105,34 @@ public final class SilentAudioKeepAlive {
         data.append(contentsOf: [0x64, 0x61, 0x74, 0x61]) // "data"
         data.append(contentsOf: withUnsafeBytes(of: dataBytes.littleEndian) { Array($0) })
 
-        // 1 second of alternating +1, -1 dithered samples for L and R channels (bulk filled in <1ms)
-        let totalSamples = Int(numFrames * UInt32(channels))
-        var samples = [Int16](repeating: 0, count: totalSamples)
-        for i in stride(from: 0, to: totalSamples, by: 4) {
-            samples[i] = 1
-            samples[i + 1] = 1
-            if i + 3 < totalSamples {
-                samples[i + 2] = -1
-                samples[i + 3] = -1
-            }
-        }
-        samples.withUnsafeBytes { rawBytes in
-            data.append(contentsOf: rawBytes)
+        // 176,400 bytes of pure zero PCM silence (no tone, no whine, no TV static)
+        data.append(Data(repeating: 0, count: Int(dataBytes)))
+
+        // Persist to temporary file to guarantee bulletproof initialization across all iOS versions
+        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("keepalive.wav")
+        if !FileManager.default.fileExists(atPath: tempURL.path) {
+            try? data.write(to: tempURL)
         }
 
         do {
-            let player = try AVAudioPlayer(data: data)
+            let player = try AVAudioPlayer(contentsOf: tempURL)
             player.numberOfLoops = -1 // Infinite loop
-            player.volume = 1.0       // Non-zero amplitude ensures active CoreAudio render graph
+            player.volume = 1.0       // Non-zero volume keeps CoreAudio graph alive
             player.prepareToPlay()
             self.audioPlayer = player
-            NSLog("[SilentAudioKeepAlive] Initialized 1-second dithered silent audio player (%d bytes)", data.count)
+            NSLog("[SilentAudioKeepAlive] Initialized silent audio player from file (%d bytes)", data.count)
         } catch {
-            NSLog("[SilentAudioKeepAlive] Failed to initialize silent audio player: %@", error.localizedDescription)
+            NSLog("[SilentAudioKeepAlive] File init note: %@, trying data init with fileTypeHint", error.localizedDescription)
+            do {
+                let player = try AVAudioPlayer(data: data, fileTypeHint: AVFileType.wav.rawValue)
+                player.numberOfLoops = -1
+                player.volume = 1.0
+                player.prepareToPlay()
+                self.audioPlayer = player
+                NSLog("[SilentAudioKeepAlive] Initialized silent audio player from data with hint (%d bytes)", data.count)
+            } catch {
+                NSLog("[SilentAudioKeepAlive] Failed to initialize silent audio player: %@", error.localizedDescription)
+            }
         }
     }
 
@@ -146,6 +145,9 @@ public final class SilentAudioKeepAlive {
             let session = AVAudioSession.sharedInstance()
             try session.setCategory(.playback, options: [.mixWithOthers, .allowBluetooth, .allowBluetoothA2DP, .allowAirPlay])
             try session.setActive(true)
+            if audioPlayer == nil {
+                prepareSilentPlayer()
+            }
             audioPlayer?.play()
             isPlaying = true
             NSLog("[SilentAudioKeepAlive] Silent audio loop started -> CoreAudio graph primed & continuous background active")
@@ -158,6 +160,7 @@ public final class SilentAudioKeepAlive {
         lock.lock()
         defer { lock.unlock() }
         guard isPlaying else { return }
+
         audioPlayer?.pause()
         isPlaying = false
         do {
