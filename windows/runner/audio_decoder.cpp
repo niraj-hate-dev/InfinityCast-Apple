@@ -247,30 +247,13 @@ void AudioDecoder::PlayPcm(const int16_t* pcm_data, size_t num_samples) {
 
   static size_t s_audio_frames_played = 0;
   s_audio_frames_played++;
-  if (s_audio_frames_played % 100 == 1) {
+  if (s_audio_frames_played % 200 == 1) {
     Log("AUDIO", "Playing audio frame #" + std::to_string(s_audio_frames_played) + " (" + std::to_string(num_samples) + " samples)", "info");
   }
 
   const size_t bytes_to_write = num_samples * sizeof(int16_t);
 
-  // Measure active in-flight hardware buffers currently queued in the sound card DAC
-  size_t in_flight = 0;
-  for (size_t i = 0; i < kNumWaveBuffers; ++i) {
-    if ((wave_headers_[i].dwFlags & WHDR_PREPARED) && !(wave_headers_[i].dwFlags & WHDR_DONE)) {
-      in_flight++;
-    }
-  }
-
-  // Ultra-Low-Latency Live Edge Clamping:
-  // Each buffer = 1024 samples @ 44.1kHz = 23.2ms.
-  // 1-2 buffers in flight = ~23-46ms of audio ahead of DAC (safe, smooth, jitter-free).
-  // If in_flight >= 2 (~46ms), sound card already has enough audio queued ahead.
-  // Drop the excess frame to immediately catch up and lock tightly to live 60 FPS video!
-  if (in_flight >= 2) {
-    return;
-  }
-
-  // Search for the next available buffer in the ring
+  // Search for the next available buffer in the 4-buffer ring
   size_t idx = current_wave_buffer_idx_;
   bool found = false;
 
@@ -283,6 +266,26 @@ void AudioDecoder::PlayPcm(const int16_t* pcm_data, size_t num_samples) {
     idx = (idx + 1) % kNumWaveBuffers;
   }
 
+  // If all 4 buffers are busy in the hardware DAC (~69-92ms queued), wait up to 8ms for one to complete
+  if (!found) {
+    for (int wait = 0; wait < 4; ++wait) {
+      lock.unlock();
+      std::this_thread::sleep_for(std::chrono::milliseconds(2));
+      lock.lock();
+      if (!h_wave_out_) return;
+      for (size_t attempt = 0; attempt < kNumWaveBuffers; ++attempt) {
+        WAVEHDR& candidate = wave_headers_[attempt];
+        if (!(candidate.dwFlags & WHDR_PREPARED) || (candidate.dwFlags & WHDR_DONE)) {
+          found = true;
+          idx = attempt;
+          break;
+        }
+      }
+      if (found) break;
+    }
+  }
+
+  // If still completely backlogged (initial connect burst >70ms), skip excess frame to prevent latency drift
   if (!found) {
     return;
   }

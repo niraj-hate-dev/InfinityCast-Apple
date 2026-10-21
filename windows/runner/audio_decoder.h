@@ -62,7 +62,7 @@ class AudioDecoder {
   uint32_t current_sample_rate_ = 0;
   uint32_t current_channels_ = 0;
 
-  static constexpr size_t kNumWaveBuffers = 8;
+  static constexpr size_t kNumWaveBuffers = 4;
   WAVEHDR wave_headers_[kNumWaveBuffers]{};
   std::vector<uint8_t> wave_buffer_data_[kNumWaveBuffers];
   size_t current_wave_buffer_idx_ = 0;

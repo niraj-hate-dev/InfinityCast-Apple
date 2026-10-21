@@ -279,17 +279,18 @@ void ScreenMirrorPlugin::StreamWorkerLoop(SOCKET sock) {
   }
 }
 
-void ScreenMirrorPlugin::StartAudioStreamingWorker(SOCKET sock) {
+void ScreenMirrorPlugin::StartAudioStreamingWorker(uint32_t device_id, const std::string& host_ip) {
   StopAudioStreamingWorker();
 
-  active_audio_tunnel_sock_ = sock;
+  current_device_id_ = device_id;
+  current_host_ip_ = host_ip.empty() ? "172.20.10.1" : host_ip;
   is_audio_streaming_ = true;
 
   if (audio_decoder_) {
     audio_decoder_->Initialize();
   }
 
-  audio_stream_thread_ = std::thread(&ScreenMirrorPlugin::AudioStreamWorkerLoop, this, sock);
+  audio_stream_thread_ = std::thread(&ScreenMirrorPlugin::AudioStreamWorkerLoop, this);
 }
 
 void ScreenMirrorPlugin::StopAudioStreamingWorker() {
@@ -305,13 +306,72 @@ void ScreenMirrorPlugin::StopAudioStreamingWorker() {
   }
 }
 
-void ScreenMirrorPlugin::AudioStreamWorkerLoop(SOCKET sock) {
+void ScreenMirrorPlugin::AudioStreamWorkerLoop() {
   std::vector<uint8_t> recv_buf(16384);
   bool first_chunk = true;
   size_t total_audio_bytes = 0;
 
+  Log("AUDIO", "Audio stream worker started (resilient background engine active)", "info");
+
   while (is_audio_streaming_) {
-    const int bytes_read = recv(sock, reinterpret_cast<char*>(recv_buf.data()), static_cast<int>(recv_buf.size()), 0);
+    // 1. Ensure connection to Port 25335
+    if (active_audio_tunnel_sock_ == INVALID_SOCKET) {
+      SOCKET new_sock = INVALID_SOCKET;
+      std::string err;
+
+      // Primary: usbmuxd tunnel if USB device is present
+      if (current_device_id_ > 0) {
+        usbmuxd_client_->ConnectTunnel(current_device_id_, 25335, &new_sock, &err);
+      }
+
+      // Secondary: Direct TCP to target IP (Wi-Fi)
+      if (new_sock == INVALID_SOCKET && !current_host_ip_.empty()) {
+        SOCKET direct_sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        if (direct_sock != INVALID_SOCKET) {
+          sockaddr_in addr{};
+          addr.sin_family = AF_INET;
+          addr.sin_port = htons(25335);
+          inet_pton(AF_INET, current_host_ip_.c_str(), &addr.sin_addr);
+
+          u_long mode = 1;
+          ioctlsocket(direct_sock, FIONBIO, &mode);
+          connect(direct_sock, reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
+
+          fd_set write_fds;
+          FD_ZERO(&write_fds);
+          FD_SET(direct_sock, &write_fds);
+          timeval tv{1, 0};
+          if (select(0, nullptr, &write_fds, nullptr, &tv) > 0) {
+            mode = 0;
+            ioctlsocket(direct_sock, FIONBIO, &mode);
+            new_sock = direct_sock;
+          } else {
+            closesocket(direct_sock);
+          }
+        }
+      }
+
+      if (new_sock != INVALID_SOCKET) {
+        const BOOL flag = TRUE;
+        setsockopt(new_sock, IPPROTO_TCP, TCP_NODELAY, reinterpret_cast<const char*>(&flag), sizeof(flag));
+        int rcv_buf = 32768;
+        setsockopt(new_sock, SOL_SOCKET, SO_RCVBUF, reinterpret_cast<const char*>(&rcv_buf), sizeof(rcv_buf));
+
+        // 1000ms receive timeout so recv periodically unblocks to check is_audio_streaming_
+        DWORD rcv_timeout = 1000;
+        setsockopt(new_sock, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&rcv_timeout), sizeof(rcv_timeout));
+
+        active_audio_tunnel_sock_ = new_sock;
+        Log("AUDIO", "Successfully connected audio tunnel to port 25335", "success");
+      } else {
+        // Broadcast might not have started yet on iPhone; wait 500ms before retrying
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        continue;
+      }
+    }
+
+    // 2. Read incoming audio frames
+    const int bytes_read = recv(active_audio_tunnel_sock_, reinterpret_cast<char*>(recv_buf.data()), static_cast<int>(recv_buf.size()), 0);
 
     if (bytes_read > 0) {
       total_audio_bytes += bytes_read;
@@ -323,12 +383,30 @@ void ScreenMirrorPlugin::AudioStreamWorkerLoop(SOCKET sock) {
       if (audio_decoder_) {
         audio_decoder_->DecodeStream(recv_buf.data(), static_cast<size_t>(bytes_read));
       }
-    } else if (bytes_read == 0 || (bytes_read < 0 && WSAGetLastError() != WSAEWOULDBLOCK)) {
-      break;
+    } else if (bytes_read < 0) {
+      const int err = WSAGetLastError();
+      // If timed out or would block, this is just normal silence when user has no sound playing
+      if (err == WSAETIMEDOUT || err == WSAEWOULDBLOCK) {
+        continue; // Keep listening! Never terminate!
+      }
+      // Actual socket failure: reset socket and auto-reconnect on next loop iteration
+      Log("AUDIO", "Audio socket read error (" + std::to_string(err) + "), reconnecting...", "warn");
+      closesocket(active_audio_tunnel_sock_);
+      active_audio_tunnel_sock_ = INVALID_SOCKET;
+      std::this_thread::sleep_for(std::chrono::milliseconds(250));
+    } else {
+      // bytes_read == 0: peer closed connection (e.g. broadcast stopped/restarted)
+      Log("AUDIO", "Audio connection closed by server, reconnecting...", "info");
+      closesocket(active_audio_tunnel_sock_);
+      active_audio_tunnel_sock_ = INVALID_SOCKET;
+      std::this_thread::sleep_for(std::chrono::milliseconds(250));
     }
   }
 
-  is_audio_streaming_ = false;
+  if (active_audio_tunnel_sock_ != INVALID_SOCKET) {
+    closesocket(active_audio_tunnel_sock_);
+    active_audio_tunnel_sock_ = INVALID_SOCKET;
+  }
   Log("AUDIO", "Audio streaming worker stopped (total received: " + std::to_string(total_audio_bytes) + " bytes)", "info");
 }
 
@@ -426,60 +504,15 @@ void ScreenMirrorPlugin::HandleMethodCall(
       }
       StartStreamingWorker(tunnel_sock);
 
-      // Connect Audio Tunnel to Port 25335
-      SOCKET audio_sock = INVALID_SOCKET;
-      std::string audio_err;
-      bool audio_ok = false;
-      if (device_id > 0) {
-        audio_ok = usbmuxd_client_->ConnectTunnel(device_id, 25335, &audio_sock, &audio_err);
-      }
-      if (!audio_ok) {
-        // Direct TCP fallback for Wi-Fi mirroring
-        SOCKET direct_audio = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-        if (direct_audio != INVALID_SOCKET) {
-          const BOOL flag = TRUE;
-          setsockopt(direct_audio, IPPROTO_TCP, TCP_NODELAY, reinterpret_cast<const char*>(&flag), sizeof(flag));
-          sockaddr_in direct_addr{};
-          direct_addr.sin_family = AF_INET;
-          direct_addr.sin_port = htons(25335);
-          inet_pton(AF_INET, "172.20.10.1", &direct_addr.sin_addr);
-
-          DWORD timeout = 1000;
-          setsockopt(direct_audio, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&timeout), sizeof(timeout));
-          setsockopt(direct_audio, SOL_SOCKET, SO_SNDTIMEO, reinterpret_cast<const char*>(&timeout), sizeof(timeout));
-
-          if (connect(direct_audio, reinterpret_cast<sockaddr*>(&direct_addr), sizeof(direct_addr)) == 0) {
-            audio_sock = direct_audio;
-            audio_ok = true;
-          } else {
-            closesocket(direct_audio);
-          }
+      // Launch resilient background audio streaming worker (auto-reconnects, never drops on idle)
+      std::string host_str = "172.20.10.1";
+      if (args) {
+        auto host_it = args->find(flutter::EncodableValue("host"));
+        if (host_it != args->end() && std::holds_alternative<std::string>(host_it->second)) {
+          host_str = std::get<std::string>(host_it->second);
         }
       }
-
-      if (!audio_ok) {
-        // Fallback: connect secondary socket to target_port (25334) and issue HTTP /mirrorVoice.do request
-        SOCKET voice_sock = INVALID_SOCKET;
-        std::string voice_err;
-        if (device_id > 0 && usbmuxd_client_->ConnectTunnel(device_id, target_port, &voice_sock, &voice_err)) {
-          const char* req = "GET /mirrorVoice.do HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n";
-          send(voice_sock, req, static_cast<int>(strlen(req)), 0);
-          audio_sock = voice_sock;
-          audio_ok = true;
-          Log("AUDIO", "Connected audio via /mirrorVoice.do handshake on port " + std::to_string(target_port), "info");
-        }
-      }
-
-      if (audio_ok) {
-        const BOOL flag = TRUE;
-        setsockopt(audio_sock, IPPROTO_TCP, TCP_NODELAY, reinterpret_cast<const char*>(&flag), sizeof(flag));
-        int rcv_buf = 32768;
-        setsockopt(audio_sock, SOL_SOCKET, SO_RCVBUF, reinterpret_cast<const char*>(&rcv_buf), sizeof(rcv_buf));
-        Log("AUDIO", "Successfully connected Audio Tunnel (low-latency mode)", "success");
-        StartAudioStreamingWorker(audio_sock);
-      } else {
-        Log("AUDIO", "Audio tunnel not available: " + audio_err, "warn");
-      }
+      StartAudioStreamingWorker(device_id, host_str);
 
       std::lock_guard<std::mutex> lock(sinks_mutex_);
       if (status_sink_) {

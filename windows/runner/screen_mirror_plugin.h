@@ -57,9 +57,9 @@ class ScreenMirrorPlugin : public flutter::Plugin {
   void StopStreamingWorker();
   void StreamWorkerLoop(SOCKET sock);
 
-  void StartAudioStreamingWorker(SOCKET sock);
+  void StartAudioStreamingWorker(uint32_t device_id, const std::string& host_ip);
   void StopAudioStreamingWorker();
-  void AudioStreamWorkerLoop(SOCKET sock);
+  void AudioStreamWorkerLoop();
 
   flutter::BinaryMessenger* messenger_ = nullptr;
   flutter::TextureRegistrar* texture_registrar_ = nullptr;
@@ -78,6 +78,8 @@ class ScreenMirrorPlugin : public flutter::Plugin {
   std::atomic<bool> is_audio_streaming_{false};
   SOCKET active_audio_tunnel_sock_ = INVALID_SOCKET;
   std::thread audio_stream_thread_;
+  uint32_t current_device_id_ = 0;
+  std::string current_host_ip_;
 
   // Telemetry metrics tracking
   std::chrono::steady_clock::time_point last_metrics_time_;
