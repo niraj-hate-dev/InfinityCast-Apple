@@ -221,11 +221,18 @@ void ScreenMirrorPlugin::StopStreamingWorker() {
 
 void ScreenMirrorPlugin::StreamWorkerLoop(SOCKET sock) {
   std::vector<uint8_t> recv_buf(65536);
+  bool first_chunk = true;
+
+  Log("STREAM", "Video stream worker loop active", "info");
 
   while (is_streaming_) {
     const int bytes_read = recv(sock, reinterpret_cast<char*>(recv_buf.data()), static_cast<int>(recv_buf.size()), 0);
 
     if (bytes_read > 0) {
+      if (first_chunk) {
+        first_chunk = false;
+        Log("STREAM", "First video stream data chunk (" + std::to_string(bytes_read) + " bytes) received", "success");
+      }
       frames_in_interval_++;
       bytes_in_interval_ += bytes_read;
 
@@ -263,8 +270,16 @@ void ScreenMirrorPlugin::StreamWorkerLoop(SOCKET sock) {
         bytes_in_interval_ = 0;
         last_metrics_time_ = now;
       }
-    } else if (bytes_read == 0 || (bytes_read < 0 && WSAGetLastError() != WSAEWOULDBLOCK)) {
-      // Disconnection or socket error
+    } else if (bytes_read < 0) {
+      const int err = WSAGetLastError();
+      if (err == WSAETIMEDOUT || err == WSAEWOULDBLOCK) {
+        // Timed out waiting for next video frame, keep listening!
+        continue;
+      }
+      Log("STREAM", "Video socket read error (" + std::to_string(err) + "), disconnecting...", "warn");
+      break;
+    } else {
+      Log("STREAM", "Video socket closed by peer", "info");
       break;
     }
   }
@@ -505,6 +520,13 @@ void ScreenMirrorPlugin::HandleMethodCall(
     }
 
     if (success) {
+      const BOOL flag = TRUE;
+      setsockopt(tunnel_sock, IPPROTO_TCP, TCP_NODELAY, reinterpret_cast<const char*>(&flag), sizeof(flag));
+      int rcv_buf = 2 * 1024 * 1024;
+      setsockopt(tunnel_sock, SOL_SOCKET, SO_RCVBUF, reinterpret_cast<const char*>(&rcv_buf), sizeof(rcv_buf));
+      DWORD rcv_timeout = 1000;
+      setsockopt(tunnel_sock, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&rcv_timeout), sizeof(rcv_timeout));
+
       if (video_decoder_) {
         video_decoder_->InitializeD3D11(1920, 1080);
       }
