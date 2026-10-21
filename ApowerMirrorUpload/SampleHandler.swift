@@ -219,7 +219,10 @@ public class SampleHandler: RPBroadcastSampleHandler {
         let sock = bsdClientSocket
         socketLock.unlock()
 
-        guard sock >= 0 else { return }
+        guard sock >= 0 else {
+            connectToMainAppIPC()
+            return
+        }
 
         data.withUnsafeBytes { rawBuf in
             guard let basePtr = rawBuf.baseAddress else { return }
@@ -320,7 +323,10 @@ public class SampleHandler: RPBroadcastSampleHandler {
         let sock = audioBsdClientSocket
         audioSocketLock.unlock()
 
-        guard sock >= 0 else { return }
+        guard sock >= 0 else {
+            connectToAudioIPC()
+            return
+        }
 
         data.withUnsafeBytes { rawBuf in
             guard let basePtr = rawBuf.baseAddress else { return }

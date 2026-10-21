@@ -57,7 +57,19 @@ public final class AudioEncoder {
         audioQueue.async { [weak self] in
             guard let self = self else { return }
 
-            if self.audioConverter == nil {
+            guard let formatDesc = CMSampleBufferGetFormatDescription(sampleBuffer),
+                  let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(formatDesc) else {
+                return
+            }
+
+            let inSampleRate = asbd.pointee.mSampleRate > 0 ? asbd.pointee.mSampleRate : 44100.0
+            let inChannels = asbd.pointee.mChannelsPerFrame > 0 ? asbd.pointee.mChannelsPerFrame : 2
+
+            if self.audioConverter == nil || inSampleRate != self.sampleRate || inChannels != self.channels {
+                if let oldConv = self.audioConverter {
+                    AudioConverterDispose(oldConv)
+                    self.audioConverter = nil
+                }
                 guard self.setupAudioConverter(for: sampleBuffer) else { return }
             }
 
