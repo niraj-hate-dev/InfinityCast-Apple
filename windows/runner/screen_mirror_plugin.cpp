@@ -471,7 +471,11 @@ void ScreenMirrorPlugin::HandleMethodCall(
       }
 
       if (audio_ok) {
-        Log("AUDIO", "Successfully connected Audio Tunnel", "success");
+        const BOOL flag = TRUE;
+        setsockopt(audio_sock, IPPROTO_TCP, TCP_NODELAY, reinterpret_cast<const char*>(&flag), sizeof(flag));
+        int rcv_buf = 32768;
+        setsockopt(audio_sock, SOL_SOCKET, SO_RCVBUF, reinterpret_cast<const char*>(&rcv_buf), sizeof(rcv_buf));
+        Log("AUDIO", "Successfully connected Audio Tunnel (low-latency mode)", "success");
         StartAudioStreamingWorker(audio_sock);
       } else {
         Log("AUDIO", "Audio tunnel not available: " + audio_err, "warn");

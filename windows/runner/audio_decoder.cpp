@@ -253,26 +253,38 @@ void AudioDecoder::PlayPcm(const int16_t* pcm_data, size_t num_samples) {
 
   const size_t bytes_to_write = num_samples * sizeof(int16_t);
 
+  // Measure active in-flight hardware buffers currently queued in the sound card DAC
+  size_t in_flight = 0;
+  for (size_t i = 0; i < kNumWaveBuffers; ++i) {
+    if ((wave_headers_[i].dwFlags & WHDR_PREPARED) && !(wave_headers_[i].dwFlags & WHDR_DONE)) {
+      in_flight++;
+    }
+  }
+
+  // Ultra-Low-Latency Live Edge Clamping:
+  // Each buffer = 1024 samples @ 44.1kHz = 23.2ms.
+  // 1-2 buffers in flight = ~23-46ms of audio ahead of DAC (safe, smooth, jitter-free).
+  // If in_flight >= 2 (~46ms), sound card already has enough audio queued ahead.
+  // Drop the excess frame to immediately catch up and lock tightly to live 60 FPS video!
+  if (in_flight >= 2) {
+    return;
+  }
+
   // Search for the next available buffer in the ring
   size_t idx = current_wave_buffer_idx_;
   bool found = false;
 
-  for (int retry = 0; retry < 50; ++retry) {
-    for (size_t attempt = 0; attempt < kNumWaveBuffers; ++attempt) {
-      WAVEHDR& candidate = wave_headers_[idx];
-      if (!(candidate.dwFlags & WHDR_PREPARED) || (candidate.dwFlags & WHDR_DONE)) {
-        found = true;
-        break;
-      }
-      idx = (idx + 1) % kNumWaveBuffers;
+  for (size_t attempt = 0; attempt < kNumWaveBuffers; ++attempt) {
+    WAVEHDR& candidate = wave_headers_[idx];
+    if (!(candidate.dwFlags & WHDR_PREPARED) || (candidate.dwFlags & WHDR_DONE)) {
+      found = true;
+      break;
     }
-    if (found) break;
+    idx = (idx + 1) % kNumWaveBuffers;
+  }
 
-    // All buffers in flight; unlock briefly to allow sound hardware DMA to complete
-    lock.unlock();
-    std::this_thread::sleep_for(std::chrono::milliseconds(2));
-    lock.lock();
-    if (!h_wave_out_) return;
+  if (!found) {
+    return;
   }
 
   WAVEHDR& hdr = wave_headers_[idx];
