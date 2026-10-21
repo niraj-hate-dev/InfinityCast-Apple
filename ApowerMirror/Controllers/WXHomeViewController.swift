@@ -322,7 +322,7 @@ open class WXHomeViewController: UIViewController, ScreenRecorderManagerDelegate
                 if self.lastErrorMessage == nil {
                     self.lastErrorMessage = "Screen recording is not started. Tap START and choose 'Start Broadcast' on the dialog."
                 }
-                SilentAudioKeepAlive.shared.stop()
+                // Do not stop keepalive here; keep CoreAudio primed and background active
                 self.updateStatusCards()
             }
         }

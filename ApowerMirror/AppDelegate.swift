@@ -24,8 +24,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate, MMWormholeManagerDelegate
 
         NSLog("[AppDelegate] ApowerMirror application launched")
 
-        // 1. Enable Background Audio Category to keep process active during USB mirroring
+        // 1. Enable Background Audio Category and start keepalive to prime CoreAudio from launch
         configureBackgroundAudioSession()
+        SilentAudioKeepAlive.shared.start()
 
         // 2. Initialize and start WXCastiOSSender service (Listening on 25333 / 25334)
         WXCastiOSSender.shared.startMirrorService(channelPort: 25333, mirrorPort: 25334)
@@ -67,10 +68,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate, MMWormholeManagerDelegate
     // MARK: - Lifecycle & Background Task Keepalive
 
     func applicationDidEnterBackground(_ application: UIApplication) {
-        NSLog("[AppDelegate] Application entered background -> requesting background assertion")
-        if UIScreen.main.isCaptured {
-            SilentAudioKeepAlive.shared.start()
-        }
+        NSLog("[AppDelegate] Application entered background -> ensuring audio keepalive is active")
+        SilentAudioKeepAlive.shared.start()
 
         backgroundTask = application.beginBackgroundTask(withName: "com.apowermirror.keepalive") { [weak self] in
             guard let self = self else { return }

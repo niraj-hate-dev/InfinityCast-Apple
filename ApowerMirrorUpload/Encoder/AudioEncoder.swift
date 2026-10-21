@@ -20,11 +20,20 @@ public final class AudioEncoder {
     // MARK: - Types
     public typealias EncodedAudioHandler = (_ packet: Data) -> Void
 
+    // StackAudioBufferList2 provides stack-allocated memory layout matching AudioBufferList
+    // with space for up to 2 buffers (40 bytes), eliminating dynamic allocation while preventing buffer overrun
+    private struct StackAudioBufferList2 {
+        var mNumberBuffers: UInt32 = 2
+        var mBuffer0: AudioBuffer = AudioBuffer()
+        var mBuffer1: AudioBuffer = AudioBuffer()
+    }
+
     // MARK: - State
     private var audioConverter: AudioConverterRef?
     private let audioQueue = DispatchQueue(label: "com.apowermirror.audio.queue", qos: .userInteractive)
     private let packetHandler: EncodedAudioHandler
 
+    private var currentSourceFormat: AudioStreamBasicDescription?
     private var sampleRate: Double = 44100.0
     private var channels: UInt32 = 2
     private var aacBuffer: UnsafeMutablePointer<UInt8>
@@ -43,13 +52,24 @@ public final class AudioEncoder {
     // MARK: - Input Context & Ingestion
 
     private final class InputContext {
-        let bufferListPointer: UnsafeMutableAudioBufferListPointer
-        let numPackets: UInt32
-        var consumed: Bool = false
+        let buffer0Data: UnsafeMutableRawPointer?
+        let buffer0Channels: UInt32
+        let buffer1Data: UnsafeMutableRawPointer?
+        let buffer1Channels: UInt32
+        let numBuffers: UInt32
+        let bytesPerFrame: UInt32
+        let totalFrames: UInt32
+        var currentFrameOffset: UInt32 = 0
 
-        init(bufferListPointer: UnsafeMutableAudioBufferListPointer, numPackets: UInt32) {
-            self.bufferListPointer = bufferListPointer
-            self.numPackets = numPackets
+        init(stackAbl: StackAudioBufferList2, bytesPerFrame: UInt32, totalFrames: UInt32) {
+            self.buffer0Data = stackAbl.mBuffer0.mData
+            self.buffer0Channels = stackAbl.mBuffer0.mNumberChannels
+            self.buffer1Data = stackAbl.mBuffer1.mData
+            self.buffer1Channels = stackAbl.mBuffer1.mNumberChannels
+            self.numBuffers = stackAbl.mNumberBuffers
+            self.bytesPerFrame = max(bytesPerFrame, 1)
+            self.totalFrames = totalFrames
+            self.currentFrameOffset = 0
         }
     }
 
@@ -62,10 +82,16 @@ public final class AudioEncoder {
                 return
             }
 
-            let inSampleRate = asbd.pointee.mSampleRate > 0 ? asbd.pointee.mSampleRate : 44100.0
-            let inChannels = asbd.pointee.mChannelsPerFrame > 0 ? asbd.pointee.mChannelsPerFrame : 2
+            let newFormat = asbd.pointee
+            let formatChanged: Bool = {
+                guard let cur = self.currentSourceFormat else { return true }
+                return cur.mSampleRate != newFormat.mSampleRate ||
+                       cur.mChannelsPerFrame != newFormat.mChannelsPerFrame ||
+                       cur.mFormatFlags != newFormat.mFormatFlags ||
+                       cur.mBytesPerFrame != newFormat.mBytesPerFrame
+            }()
 
-            if self.audioConverter == nil || inSampleRate != self.sampleRate || inChannels != self.channels {
+            if self.audioConverter == nil || formatChanged {
                 if let oldConv = self.audioConverter {
                     AudioConverterDispose(oldConv)
                     self.audioConverter = nil
@@ -75,41 +101,37 @@ public final class AudioEncoder {
 
             guard let converter = self.audioConverter else { return }
 
-            // 1. Allocate AudioBufferList with sufficient capacity for both interleaved (1 buffer)
-            //    and non-interleaved stereo (2 buffers) to prevent kCMSampleBufferError_ArrayTooSmall (-12739)
-            let maxBufs = Int(max(self.channels, 2))
-            let abl = AudioBufferList.allocate(maximumBuffers: maxBufs)
-            defer { free(UnsafeMutableRawPointer(abl.unsafeMutablePointer)) }
-
+            // 1. Stack-allocated 2-buffer AudioBufferList (zero heap allocation, zero crash risk, supports both interleaved & non-interleaved)
+            var stackAbl = StackAudioBufferList2()
             var blockBuffer: CMBlockBuffer? = nil
-            let status = CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(
-                sampleBuffer,
-                bufferListSizeNeededOut: nil,
-                bufferListOut: abl.unsafeMutablePointer,
-                bufferListSize: AudioBufferList.sizeInBytes(maximumBuffers: maxBufs),
-                blockBufferAllocator: nil,
-                blockBufferMemoryAllocator: nil,
-                flags: 0,
-                blockBufferOut: &blockBuffer
-            )
+
+            let status = withUnsafeMutablePointer(to: &stackAbl) { stackPtr in
+                stackPtr.withMemoryRebound(to: AudioBufferList.self, capacity: 1) { ablPtr in
+                    CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(
+                        sampleBuffer,
+                        bufferListSizeNeededOut: nil,
+                        bufferListOut: ablPtr,
+                        bufferListSize: MemoryLayout<StackAudioBufferList2>.size,
+                        blockBufferAllocator: nil,
+                        blockBufferMemoryAllocator: nil,
+                        flags: 0,
+                        blockBufferOut: &blockBuffer
+                    )
+                }
+            }
 
             guard status == noErr else {
                 NSLog("[AudioEncoder] CMSampleBufferGetAudioBufferList error: %d", status)
                 return
             }
 
-            // 2. Setup output AudioBufferList (matching ASM @ 0xe03c)
-            var outAudioBufferList = AudioBufferList()
-            outAudioBufferList.mNumberBuffers = 1
-            outAudioBufferList.mBuffers.mNumberChannels = self.channels
-            outAudioBufferList.mBuffers.mDataByteSize = UInt32(self.aacBufferSize)
-            outAudioBufferList.mBuffers.mData = UnsafeMutableRawPointer(self.aacBuffer)
+            let numSamples = UInt32(max(CMSampleBufferGetNumSamples(sampleBuffer), 0))
+            guard numSamples > 0 else { return }
 
-            var ioOutputDataPacketSize: UInt32 = 1
-            let numSamples = CMSampleBufferGetNumSamples(sampleBuffer)
-            let context = InputContext(bufferListPointer: abl, numPackets: UInt32(max(numSamples, 1024)))
+            let bytesPerFrame = newFormat.mBytesPerFrame > 0 ? newFormat.mBytesPerFrame : (2 * self.channels)
+            let context = InputContext(stackAbl: stackAbl, bytesPerFrame: bytesPerFrame, totalFrames: numSamples)
 
-            // Input proc copying all buffers (handles 1-buffer interleaved and 2-buffer non-interleaved)
+            // Input proc handling arbitrary chunk frames and both interleaved and non-interleaved audio
             let inputProc: AudioConverterComplexInputDataProc = { (
                 _,
                 ioNumberDataPackets,
@@ -122,53 +144,83 @@ public final class AudioEncoder {
                     return noErr
                 }
                 let ctx = Unmanaged<InputContext>.fromOpaque(inUserData).takeUnretainedValue()
-                if ctx.consumed || ctx.numPackets == 0 {
+                let remaining = ctx.totalFrames > ctx.currentFrameOffset ? (ctx.totalFrames - ctx.currentFrameOffset) : 0
+                if remaining == 0 {
                     ioNumberDataPackets.pointee = 0
-                    return noErr // Signal EOF for this conversion cycle
+                    return noErr
                 }
 
-                let srcAbl = ctx.bufferListPointer
-                let dstAbl = UnsafeMutableAudioBufferListPointer(ioData)
-                for i in 0..<min(srcAbl.count, dstAbl.count) {
-                    dstAbl[i] = srcAbl[i]
+                let framesToProvide = min(ioNumberDataPackets.pointee, remaining)
+                let byteOffset = Int(ctx.currentFrameOffset * ctx.bytesPerFrame)
+                let byteSize = framesToProvide * ctx.bytesPerFrame
+
+                ioData.pointee.mNumberBuffers = ctx.numBuffers
+                if ctx.numBuffers >= 2 {
+                    let dstBuffers = UnsafeMutableAudioBufferListPointer(ioData)
+                    if let b0 = ctx.buffer0Data {
+                        dstBuffers[0].mData = b0.advanced(by: byteOffset)
+                        dstBuffers[0].mDataByteSize = byteSize
+                        dstBuffers[0].mNumberChannels = ctx.buffer0Channels
+                    }
+                    if let b1 = ctx.buffer1Data {
+                        dstBuffers[1].mData = b1.advanced(by: byteOffset)
+                        dstBuffers[1].mDataByteSize = byteSize
+                        dstBuffers[1].mNumberChannels = ctx.buffer1Channels
+                    }
+                } else {
+                    if let b0 = ctx.buffer0Data {
+                        ioData.pointee.mBuffers.mData = b0.advanced(by: byteOffset)
+                        ioData.pointee.mBuffers.mDataByteSize = byteSize
+                        ioData.pointee.mBuffers.mNumberChannels = ctx.buffer0Channels
+                    }
                 }
 
-                ioNumberDataPackets.pointee = ctx.numPackets
-                ctx.consumed = true
+                ioNumberDataPackets.pointee = framesToProvide
+                ctx.currentFrameOffset += framesToProvide
                 return noErr
             }
 
-            let convStatus = AudioConverterFillComplexBuffer(
-                converter,
-                inputProc,
-                Unmanaged.passUnretained(context).toOpaque(),
-                &ioOutputDataPacketSize,
-                &outAudioBufferList,
-                nil
-            )
+            // Loop to encode ALL audio packets present in this sample buffer without dropping any frames
+            while true {
+                var outAudioBufferList = AudioBufferList()
+                outAudioBufferList.mNumberBuffers = 1
+                outAudioBufferList.mBuffers.mNumberChannels = self.channels
+                outAudioBufferList.mBuffers.mDataByteSize = UInt32(self.aacBufferSize)
+                outAudioBufferList.mBuffers.mData = UnsafeMutableRawPointer(self.aacBuffer)
+
+                var ioOutputDataPacketSize: UInt32 = 1
+
+                let convStatus = AudioConverterFillComplexBuffer(
+                    converter,
+                    inputProc,
+                    Unmanaged.passUnretained(context).toOpaque(),
+                    &ioOutputDataPacketSize,
+                    &outAudioBufferList,
+                    nil
+                )
+
+                if convStatus == noErr && ioOutputDataPacketSize > 0 {
+                    let aacSize = Int(outAudioBufferList.mBuffers.mDataByteSize)
+                    if aacSize > 0 {
+                        // Prepend standard 7-byte ADTS Header (matching ASM @ 0xe56c)
+                        let adtsHeader = self.createAdtsHeader(packetLength: aacSize)
+                        var packet = Data(adtsHeader)
+                        packet.append(self.aacBuffer, count: aacSize)
+
+                        self.frameCount += 1
+                        if self.frameCount <= 5 || self.frameCount % 200 == 0 {
+                            NSLog("[AudioEncoder] Encoded AAC frame #%d (%d bytes)", self.frameCount, packet.count)
+                        }
+
+                        self.packetHandler(packet)
+                    }
+                } else {
+                    break
+                }
+            }
 
             // Retain blockBuffer throughout conversion
             _ = blockBuffer
-
-            if convStatus == noErr && ioOutputDataPacketSize > 0 {
-                let aacSize = Int(outAudioBufferList.mBuffers.mDataByteSize)
-                if aacSize > 0 {
-                    // Prepend standard 7-byte ADTS Header (matching ASM @ 0xe56c)
-                    let adtsHeader = self.createAdtsHeader(packetLength: aacSize)
-                    // Pure ADTS AAC frame (starts with 0xFF 0xF9)
-                    var packet = Data(adtsHeader)
-                    packet.append(self.aacBuffer, count: aacSize)
-
-                    self.frameCount += 1
-                    if self.frameCount <= 5 || self.frameCount % 200 == 0 {
-                        NSLog("[AudioEncoder] Encoded AAC frame #%d (%d bytes)", self.frameCount, packet.count)
-                    }
-
-                    self.packetHandler(packet)
-                }
-            } else if convStatus != noErr {
-                NSLog("[AudioEncoder] AudioConverterFillComplexBuffer status: %d", convStatus)
-            }
         }
     }
 
@@ -181,6 +233,7 @@ public final class AudioEncoder {
         }
 
         var sourceFormat = asbd.pointee
+        self.currentSourceFormat = sourceFormat
         self.sampleRate = sourceFormat.mSampleRate > 0 ? sourceFormat.mSampleRate : 44100.0
         self.channels = sourceFormat.mChannelsPerFrame > 0 ? sourceFormat.mChannelsPerFrame : 2
 

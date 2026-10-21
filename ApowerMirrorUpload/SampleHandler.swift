@@ -131,25 +131,23 @@ public class SampleHandler: RPBroadcastSampleHandler {
                 // Feed CVPixelBuffer to hardware encoder
                 videoEncoder?.encode(sampleBuffer: sampleBuffer, orientation: orientation)
 
-            case .audioApp:
+            case .audioApp, .audioMic:
+                // Auto Audio Detector: whenever any audio arrives (from app, media, game, or mic),
+                // automatically encode and transfer immediately!
                 self.audioFrameCount += 1
                 if self.audioFrameCount <= 5 || self.audioFrameCount % 200 == 0 {
                     let numSamples = CMSampleBufferGetNumSamples(sampleBuffer)
-                    NSLog("[SampleHandler] .audioApp frame #%d received (%d samples)", self.audioFrameCount, numSamples)
+                    let typeStr = (sampleBufferType == .audioApp) ? "app" : "mic"
+                    NSLog("[SampleHandler] Auto Audio Detector: \(typeStr) audio frame #%d received (%d samples)", self.audioFrameCount, numSamples)
                 }
 
-                // Lazily initialize AudioEncoder on the first audio frame
                 if audioEncoder == nil {
-                    NSLog("[SampleHandler] First .audioApp frame received -> Initializing AudioEncoder")
+                    NSLog("[SampleHandler] First audio frame received -> Initializing AudioEncoder")
                     audioEncoder = AudioEncoder(sampleRate: 44100.0, channels: 2) { [weak self] packet in
                         self?.sendAudioDataToMainApp(packet)
                     }
                 }
                 audioEncoder?.encode(sampleBuffer: sampleBuffer)
-
-            case .audioMic:
-                // Microphone audio ignored to prevent ASBD sampling conflicts with app audio
-                break
 
             @unknown default:
                 break

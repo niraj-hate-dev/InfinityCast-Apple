@@ -62,7 +62,7 @@ public final class SilentAudioKeepAlive {
         if shouldPlay {
             do {
                 let session = AVAudioSession.sharedInstance()
-                try session.setCategory(.playback, options: [.mixWithOthers])
+                try session.setCategory(.playback, options: [.mixWithOthers, .allowBluetooth, .allowBluetoothA2DP, .allowAirPlay])
                 try session.setActive(true)
                 audioPlayer?.play()
                 NSLog("[SilentAudioKeepAlive] Resumed silent audio loop after interruption")
@@ -73,14 +73,14 @@ public final class SilentAudioKeepAlive {
     }
 
     private func prepareSilentPlayer() {
-        // Generate a 3-second 44.1kHz 16-bit stereo WAV with low-level LSB dither (alternating +1 and -1).
+        // Generate a 1-second 44.1kHz 16-bit stereo WAV with low-level LSB dither (alternating +1 and -1).
         // Amplitude: 1 out of 32767 = -90.3 dBFS.
         // This is completely imperceptible to human ears, but tricks CoreAudio's silence
         // detector into keeping the audio hardware graph and replayd tap active.
         let sampleRate: UInt32 = 44100
         let channels: UInt16 = 2
         let bitsPerSample: UInt16 = 16
-        let durationSec: UInt32 = 3
+        let durationSec: UInt32 = 1
         let numFrames = sampleRate * durationSec
         let dataBytes = numFrames * UInt32(channels) * UInt32(bitsPerSample / 8)
         let riffSize = dataBytes + 36
@@ -110,20 +110,19 @@ public final class SilentAudioKeepAlive {
         data.append(contentsOf: [0x64, 0x61, 0x74, 0x61]) // "data"
         data.append(contentsOf: withUnsafeBytes(of: dataBytes.littleEndian) { Array($0) })
 
-        // 3 seconds of alternating +1, -1 dithered samples for L and R channels
-        let pos1: Int16 = 1
-        let neg1: Int16 = -1
-        let posBytes = withUnsafeBytes(of: pos1.littleEndian) { Array($0) }
-        let negBytes = withUnsafeBytes(of: neg1.littleEndian) { Array($0) }
-
-        for i in 0..<numFrames {
-            if i % 2 == 0 {
-                data.append(contentsOf: posBytes) // Left
-                data.append(contentsOf: posBytes) // Right
-            } else {
-                data.append(contentsOf: negBytes) // Left
-                data.append(contentsOf: negBytes) // Right
+        // 1 second of alternating +1, -1 dithered samples for L and R channels (bulk filled in <1ms)
+        let totalSamples = Int(numFrames * UInt32(channels))
+        var samples = [Int16](repeating: 0, count: totalSamples)
+        for i in stride(from: 0, to: totalSamples, by: 4) {
+            samples[i] = 1
+            samples[i + 1] = 1
+            if i + 3 < totalSamples {
+                samples[i + 2] = -1
+                samples[i + 3] = -1
             }
+        }
+        samples.withUnsafeBufferPointer { sp in
+            data.append(UnsafeRawBufferPointer(sp))
         }
 
         do {
@@ -132,7 +131,7 @@ public final class SilentAudioKeepAlive {
             player.volume = 1.0       // Non-zero amplitude ensures active CoreAudio render graph
             player.prepareToPlay()
             self.audioPlayer = player
-            NSLog("[SilentAudioKeepAlive] Initialized 3-second dithered silent audio player (%d bytes)", data.count)
+            NSLog("[SilentAudioKeepAlive] Initialized 1-second dithered silent audio player (%d bytes)", data.count)
         } catch {
             NSLog("[SilentAudioKeepAlive] Failed to initialize silent audio player: %@", error.localizedDescription)
         }
@@ -145,7 +144,7 @@ public final class SilentAudioKeepAlive {
 
         do {
             let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playback, options: [.mixWithOthers])
+            try session.setCategory(.playback, options: [.mixWithOthers, .allowBluetooth, .allowBluetoothA2DP, .allowAirPlay])
             try session.setActive(true)
             audioPlayer?.play()
             isPlaying = true
