@@ -24,9 +24,11 @@ public final class VideoEncoder {
     // MARK: - Configuration
     private var bitrate: Int32
     private var fps: Int32
-    private var maxDimension: Int32 = 1920
+    private var maxDimension: Int32 = 1600
     private var currentWidth: Int32 = 0
     private var currentHeight: Int32 = 0
+    private var lastRawWidth: Int32 = 0
+    private var lastRawHeight: Int32 = 0
     private var currentOrientation: CGImagePropertyOrientation = .up
 
     // MARK: - State
@@ -93,8 +95,13 @@ public final class VideoEncoder {
                 let rawHeight = Int32(CVPixelBufferGetHeight(pixelBuffer))
 
                 // Re-create compression session if orientation or dimensions changed
-                if self.compressionSession == nil || orientation != self.currentOrientation {
+                if self.compressionSession == nil ||
+                   orientation != self.currentOrientation ||
+                   rawWidth != self.lastRawWidth ||
+                   rawHeight != self.lastRawHeight {
                     self.currentOrientation = orientation
+                    self.lastRawWidth = rawWidth
+                    self.lastRawHeight = rawHeight
                     self.rebuildCompressionSession(sourceWidth: rawWidth, sourceHeight: rawHeight, orientation: orientation)
                 }
 
@@ -189,9 +196,10 @@ public final class VideoEncoder {
 
         // 5. Apply Hardened Low-Latency Properties
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_RealTime, value: kCFBooleanTrue)
-        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ProfileLevel, value: kVTProfileLevel_H264_High_AutoLevel)
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ProfileLevel, value: kVTProfileLevel_H264_Main_AutoLevel)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_H264EntropyMode, value: kVTH264EntropyMode_CABAC)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AllowFrameReordering, value: kCFBooleanFalse)
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxFrameDelayCount, value: 1 as CFNumber)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AverageBitRate, value: bitrate as CFNumber)
 
         // Data rate limit ceiling: (bitrate / 8) * 1.5 bytes/sec
@@ -199,10 +207,10 @@ public final class VideoEncoder {
         let dataRateLimits: [CFNumber] = [byteLimit as CFNumber, 1 as CFNumber]
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_DataRateLimits, value: dataRateLimits as CFArray)
 
-        // Keyframe cadence: 1 keyframe per second
+        // Keyframe cadence: 1 keyframe every 0.5s (every 30 frames at 60fps)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ExpectedFrameRate, value: fps as CFNumber)
-        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameInterval, value: fps as CFNumber)
-        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameIntervalDuration, value: 1.0 as CFNumber)
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameInterval, value: 30 as CFNumber)
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameIntervalDuration, value: 0.5 as CFNumber)
 
         VTCompressionSessionPrepareToEncodeFrames(session)
         self.compressionSession = session

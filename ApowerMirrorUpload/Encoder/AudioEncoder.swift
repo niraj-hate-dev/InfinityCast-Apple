@@ -37,7 +37,7 @@ public final class AudioEncoder {
     // Accumulates raw PCM frames across arbitrary chunk sizes (441, 512, 1024, 2048 samples)
     // so AudioConverterFillComplexBuffer always receives exact 1024-frame chunks required by AAC-LC
     private var pcmBuffer = Data()
-    private var lastBufferPts: Double = -1.0
+    private var lastBufferEndPts: Double = -1.0
 
     private var aacBuffer: UnsafeMutablePointer<UInt8>
     private let aacBufferSize: Int = 2048
@@ -81,18 +81,23 @@ public final class AudioEncoder {
                     self.audioConverter = nil
                 }
                 self.pcmBuffer.removeAll()
-                self.lastBufferPts = -1.0
+                self.lastBufferEndPts = -1.0
                 guard self.setupAudioConverter(for: newFormat) else { return }
             }
 
             guard let converter = self.audioConverter else { return }
 
-            // 2. Discontinuity Detection (Pause / Resume gap > 250ms)
+            let numSamples = CMSampleBufferGetNumSamples(sampleBuffer)
+            guard numSamples > 0 else { return }
+
+            // 2. Discontinuity Detection (Pause / Resume gap > 1.5s)
+            let sampleRateVal = newFormat.mSampleRate > 0 ? newFormat.mSampleRate : 44100.0
+            let bufferDuration = Double(numSamples) / sampleRateVal
             let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
             let ptsSeconds = pts.isValid ? pts.seconds : -1.0
-            if ptsSeconds > 0 && self.lastBufferPts > 0 {
-                let gap = ptsSeconds - self.lastBufferPts
-                if gap > 0.25 || gap < 0 {
+            if ptsSeconds > 0 && self.lastBufferEndPts > 0 {
+                let gap = ptsSeconds - self.lastBufferEndPts
+                if gap > 1.5 || gap < -0.1 {
                     // Audio paused & resumed! Clear leftover partial frames and reset converter state
                     self.pcmBuffer.removeAll()
                     AudioConverterReset(converter)
@@ -100,17 +105,16 @@ public final class AudioEncoder {
                 }
             }
             if ptsSeconds > 0 {
-                self.lastBufferPts = ptsSeconds
+                self.lastBufferEndPts = ptsSeconds + bufferDuration
             }
 
             // 3. Extract PCM samples from CMSampleBuffer into persistent ring buffer
-            // Handles both Interleaved & Non-Interleaved 32-bit Float (ReplayKit app audio) and 16-bit Int
+            // Handles Big-Endian / Little-Endian, Interleaved / Non-Interleaved, Float / 16-bit Int
             let inFlags = newFormat.mFormatFlags
             let inChannels = max(1, Int(newFormat.mChannelsPerFrame))
             let isNonInterleaved = (inFlags & kAudioFormatFlagIsNonInterleaved) != 0
             let isFloat = (inFlags & kAudioFormatFlagIsFloat) != 0
-            let numSamples = CMSampleBufferGetNumSamples(sampleBuffer)
-            guard numSamples > 0 else { return }
+            let isBigEndian = (inFlags & kAudioFormatFlagIsBigEndian) != 0
 
             let ablPointer = AudioBufferList.allocate(maximumBuffers: inChannels)
             defer { free(ablPointer.unsafeMutablePointer) }
@@ -129,6 +133,21 @@ public final class AudioEncoder {
 
             guard status == noErr else { return }
 
+            func readFloatSample(_ ptr: UnsafePointer<Float>, _ idx: Int) -> Float {
+                if isBigEndian {
+                    let u32 = ptr.withMemoryRebound(to: UInt32.self, capacity: idx + 1) { $0[idx] }
+                    return Float(bitPattern: UInt32(bigEndian: u32))
+                }
+                return ptr[idx]
+            }
+
+            func readInt16Sample(_ ptr: UnsafePointer<Int16>, _ idx: Int) -> Int16 {
+                if isBigEndian {
+                    return Int16(bigEndian: ptr[idx])
+                }
+                return ptr[idx]
+            }
+
             var pcm16 = [Int16](repeating: 0, count: numSamples * 2)
 
             if isFloat {
@@ -137,8 +156,8 @@ public final class AudioEncoder {
                     if let leftPtr = ablPointer[0].mData?.assumingMemoryBound(to: Float.self),
                        let rightPtr = ablPointer[1].mData?.assumingMemoryBound(to: Float.self) {
                         for i in 0..<numSamples {
-                            let l = max(-1.0, min(1.0, leftPtr[i]))
-                            let r = max(-1.0, min(1.0, rightPtr[i]))
+                            let l = max(-1.0, min(1.0, readFloatSample(leftPtr, i)))
+                            let r = max(-1.0, min(1.0, readFloatSample(rightPtr, i)))
                             pcm16[i * 2] = Int16(l * 32767.0)
                             pcm16[i * 2 + 1] = Int16(r * 32767.0)
                         }
@@ -146,14 +165,14 @@ public final class AudioEncoder {
                 } else if let floatPtr = ablPointer[0].mData?.assumingMemoryBound(to: Float.self) {
                     if inChannels == 1 {
                         for i in 0..<numSamples {
-                            let s = Int16(max(-1.0, min(1.0, floatPtr[i])) * 32767.0)
+                            let s = Int16(max(-1.0, min(1.0, readFloatSample(floatPtr, i))) * 32767.0)
                             pcm16[i * 2] = s
                             pcm16[i * 2 + 1] = s
                         }
                     } else {
                         for i in 0..<numSamples {
-                            pcm16[i * 2] = Int16(max(-1.0, min(1.0, floatPtr[i * 2])) * 32767.0)
-                            pcm16[i * 2 + 1] = Int16(max(-1.0, min(1.0, floatPtr[i * 2 + 1])) * 32767.0)
+                            pcm16[i * 2] = Int16(max(-1.0, min(1.0, readFloatSample(floatPtr, i * 2))) * 32767.0)
+                            pcm16[i * 2 + 1] = Int16(max(-1.0, min(1.0, readFloatSample(floatPtr, i * 2 + 1))) * 32767.0)
                         }
                     }
                 }
@@ -163,19 +182,20 @@ public final class AudioEncoder {
                     if let leftPtr = ablPointer[0].mData?.assumingMemoryBound(to: Int16.self),
                        let rightPtr = ablPointer[1].mData?.assumingMemoryBound(to: Int16.self) {
                         for i in 0..<numSamples {
-                            pcm16[i * 2] = leftPtr[i]
-                            pcm16[i * 2 + 1] = rightPtr[i]
+                            pcm16[i * 2] = readInt16Sample(leftPtr, i)
+                            pcm16[i * 2 + 1] = readInt16Sample(rightPtr, i)
                         }
                     }
                 } else if let intPtr = ablPointer[0].mData?.assumingMemoryBound(to: Int16.self) {
                     if inChannels == 1 {
                         for i in 0..<numSamples {
-                            pcm16[i * 2] = intPtr[i]
-                            pcm16[i * 2 + 1] = intPtr[i]
+                            let s = readInt16Sample(intPtr, i)
+                            pcm16[i * 2] = s
+                            pcm16[i * 2 + 1] = s
                         }
                     } else {
                         for i in 0..<numSamples * 2 {
-                            pcm16[i] = intPtr[i]
+                            pcm16[i] = readInt16Sample(intPtr, i)
                         }
                     }
                 }
@@ -392,7 +412,7 @@ public final class AudioEncoder {
             audioConverter = nil
         }
         pcmBuffer.removeAll()
-        lastBufferPts = -1.0
+        lastBufferEndPts = -1.0
     }
 
     deinit {

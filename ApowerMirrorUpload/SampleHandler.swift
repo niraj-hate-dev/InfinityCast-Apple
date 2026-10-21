@@ -36,6 +36,12 @@ public class SampleHandler: RPBroadcastSampleHandler {
     private let videoConnectLock = NSLock()
     private var isAudioConnecting = false
     private let audioConnectLock = NSLock()
+    private struct VideoQueueItem {
+        let data: Data
+        let isKeyFrame: Bool
+    }
+    private var videoPacketQueue: [VideoQueueItem] = []
+    private let videoPacketQueueLock = NSLock()
     private var audioPacketQueue: [Data] = []
     private let audioPacketQueueLock = NSLock()
     private var pendingKeyframeRequest = true
@@ -46,6 +52,7 @@ public class SampleHandler: RPBroadcastSampleHandler {
     private let kMemoryLockThresholdMB: Double = 48.0
     private let kMemoryUnlockThresholdMB: Double = 45.0
     private var droppedVideoFramesDueToMemory = 0
+    private var consecutiveMemoryLockedFrames = 0
 
     private let networkQueue = DispatchQueue(label: "com.apowermirror.upload.network", qos: .userInteractive)
     private var targetFps: Int32 = 60
@@ -103,6 +110,10 @@ public class SampleHandler: RPBroadcastSampleHandler {
         // Invalidate and free video encoder
         videoEncoder?.invalidate()
         videoEncoder = nil
+        videoPacketQueueLock.lock()
+        videoPacketQueue.removeAll()
+        videoPacketQueueLock.unlock()
+        consecutiveMemoryLockedFrames = 0
 
         // Invalidate and free audio encoder
         audioEncoder?.invalidate()
@@ -132,23 +143,36 @@ public class SampleHandler: RPBroadcastSampleHandler {
         autoreleasepool {
             switch sampleBufferType {
             case .video:
-                // Mach Memory Footprint Guard (Jetsam 50MB ceiling protection) - sampled every 30 frames
+                // Mach Memory Footprint Guard (Jetsam 50MB ceiling protection) - sampled every 15 frames
                 self.videoFrameCount += 1
-                if self.videoFrameCount % 30 == 0 {
+                if self.videoFrameCount % 15 == 0 {
                     let currentRamMB = self.getMemoryFootprintMB()
                     if self.isMemoryLocked {
                         if currentRamMB < self.kMemoryUnlockThresholdMB {
                             self.isMemoryLocked = false
+                            self.consecutiveMemoryLockedFrames = 0
+                            self.pendingKeyframeRequest = true
                             NSLog("[SampleHandler] Memory normalized (%.2f MB < %.2f MB), unlocking video frames", currentRamMB, self.kMemoryUnlockThresholdMB)
                         }
                     } else if currentRamMB >= self.kMemoryLockThresholdMB {
                         self.isMemoryLocked = true
+                        self.consecutiveMemoryLockedFrames = 0
                         NSLog("[SampleHandler] Memory throttle triggered (%.2f MB >= %.2f MB). Throttling to prevent Jetsam kill", currentRamMB, self.kMemoryLockThresholdMB)
                     }
                 }
 
                 if self.isMemoryLocked {
+                    self.consecutiveMemoryLockedFrames += 1
                     self.droppedVideoFramesDueToMemory += 1
+
+                    // If memory remains locked for more than 45 consecutive frames,
+                    // forcefully invalidate the VideoEncoder to release its internal CVPixelBuffer pools!
+                    if self.consecutiveMemoryLockedFrames > 45 && self.videoEncoder != nil {
+                        NSLog("[SampleHandler] Memory locked for %d frames. Releasing VideoEncoder to free buffer pools", self.consecutiveMemoryLockedFrames)
+                        self.videoEncoder?.invalidate()
+                        self.videoEncoder = nil
+                    }
+
                     if self.droppedVideoFramesDueToMemory % 60 == 0 {
                         NSLog("[SampleHandler] Memory throttle ACTIVE. Dropped %d video frames", self.droppedVideoFramesDueToMemory)
                     }
@@ -158,7 +182,7 @@ public class SampleHandler: RPBroadcastSampleHandler {
                 // Lazily initialize hardware VideoEncoder on the very first video frame
                 if videoEncoder == nil {
                     videoEncoder = VideoEncoder(bitrate: targetBitrate, fps: targetFps) { [weak self] (packet, isKeyFrame, isEndFrame) in
-                        self?.sendDataToMainApp(packet)
+                        self?.enqueueVideoFrame(packet, isKeyFrame: isKeyFrame)
                     }
 
                     videoEncoder?.setDimensionChangeHandler { [weak self] width, height, rotation in
@@ -282,6 +306,7 @@ public class SampleHandler: RPBroadcastSampleHandler {
                 // Mark keyframe required and force an immediate SPS + PPS + IDR keyframe
                 self.pendingKeyframeRequest = true
                 self.videoEncoder?.forceKeyFrame()
+                self.triggerVideoQueueDrain()
             } else {
                 NSLog("[SampleHandler] Connect to 127.0.0.1:%d failed (errno: %d), retrying in 250ms...", SampleHandler.kIpcPort, errno)
                 close(sock)
@@ -295,7 +320,44 @@ public class SampleHandler: RPBroadcastSampleHandler {
         }
     }
 
-    private func sendDataToMainApp(_ data: Data) {
+    private func enqueueVideoFrame(_ data: Data, isKeyFrame: Bool) {
+        videoPacketQueueLock.lock()
+        if videoPacketQueue.count >= 15 {
+            if !isKeyFrame {
+                // Drop non-keyframe under backpressure to avoid buffering delay
+                videoPacketQueueLock.unlock()
+                videoEncoder?.forceKeyFrame()
+                return
+            } else {
+                // Keep the keyframe, but drop older non-keyframes in queue
+                videoPacketQueue.removeAll(where: { !$0.isKeyFrame })
+            }
+        }
+        videoPacketQueue.append(VideoQueueItem(data: data, isKeyFrame: isKeyFrame))
+        videoPacketQueueLock.unlock()
+
+        triggerVideoQueueDrain()
+    }
+
+    private func triggerVideoQueueDrain() {
+        networkQueue.async { [weak self] in
+            guard let self = self, self.isBroadcasting else { return }
+
+            while true {
+                self.videoPacketQueueLock.lock()
+                if self.videoPacketQueue.isEmpty {
+                    self.videoPacketQueueLock.unlock()
+                    break
+                }
+                let item = self.videoPacketQueue.removeFirst()
+                self.videoPacketQueueLock.unlock()
+
+                self.sendVideoData(item.data, isKeyFrame: item.isKeyFrame)
+            }
+        }
+    }
+
+    private func sendVideoData(_ data: Data, isKeyFrame: Bool) {
         socketLock.lock()
         let sock = bsdClientSocket
         socketLock.unlock()
@@ -314,23 +376,25 @@ public class SampleHandler: RPBroadcastSampleHandler {
             while totalSent < totalLength {
                 let bytesToSend = totalLength - totalSent
                 let sent = send(sock, basePtr.advanced(by: totalSent), bytesToSend, 0)
-                if sent <= 0 {
-                    if errno == EAGAIN || errno == EWOULDBLOCK {
+                if sent > 0 {
+                    totalSent += sent
+                    retries = 0
+                } else {
+                    if (errno == EAGAIN || errno == EWOULDBLOCK) && retries < 10 {
                         retries += 1
-                        if retries > 5 {
-                            // Buffer saturated after 5ms; skip remainder of this frame to avoid stalling encoder
-                            break
-                        }
                         usleep(1000)
                         continue
                     }
-                    // Actual socket failure (EPIPE / ECONNRESET)
-                    NSLog("[SampleHandler] Video socket send failed (errno: %d), reconnecting...", errno)
-                    closeSocket()
-                    connectToMainAppIPC()
+                    // Socket error OR buffer saturated:
+                    // NEVER leave a partial frame on the socket!
+                    // Close the socket to abort the corrupt frame stream cleanly,
+                    // reconnect, and request a fresh IDR keyframe.
+                    NSLog("[SampleHandler] Video send failed (sent %d/%d, errno: %d). Closing socket & requesting keyframe", totalSent, totalLength, errno)
+                    self.closeSocket()
+                    self.videoEncoder?.forceKeyFrame()
+                    self.connectToMainAppIPC()
                     break
                 }
-                totalSent += sent
             }
         }
     }
