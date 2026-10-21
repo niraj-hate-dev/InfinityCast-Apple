@@ -269,9 +269,9 @@ void AudioDecoder::PlayPcm(const int16_t* pcm_data, size_t num_samples) {
     idx = (idx + 1) % kNumWaveBuffers;
   }
 
-  // If all 4 buffers are busy in the hardware DAC (~69-92ms queued), wait up to 8ms for one to complete
+  // If all buffers are busy in the hardware DAC (~185ms queued), wait up to 20ms for one to complete
   if (!found) {
-    for (int wait = 0; wait < 4; ++wait) {
+    for (int wait = 0; wait < 10; ++wait) {
       lock.unlock();
       std::this_thread::sleep_for(std::chrono::milliseconds(2));
       lock.lock();
