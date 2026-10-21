@@ -41,9 +41,10 @@ public class SampleHandler: RPBroadcastSampleHandler {
     private var pendingKeyframeRequest = true
 
     // MARK: - Mach Memory Throttle Thresholds (Jetsam Protection)
+    private var videoFrameCount: Int = 0
     private var isMemoryLocked = false
-    private let kMemoryLockThresholdMB: Double = 44.0
-    private let kMemoryUnlockThresholdMB: Double = 42.0
+    private let kMemoryLockThresholdMB: Double = 48.0
+    private let kMemoryUnlockThresholdMB: Double = 45.0
     private var droppedVideoFramesDueToMemory = 0
 
     private let networkQueue = DispatchQueue(label: "com.apowermirror.upload.network", qos: .userInteractive)
@@ -131,23 +132,26 @@ public class SampleHandler: RPBroadcastSampleHandler {
         autoreleasepool {
             switch sampleBufferType {
             case .video:
-                // Mach Memory Footprint Guard (Jetsam 50MB ceiling protection)
-                let currentRamMB = self.getMemoryFootprintMB()
-                if self.isMemoryLocked {
-                    if currentRamMB < self.kMemoryUnlockThresholdMB {
-                        self.isMemoryLocked = false
-                        NSLog("[SampleHandler] Memory normalized (%.2f MB < %.2f MB), unlocking video frames", currentRamMB, self.kMemoryUnlockThresholdMB)
-                    } else {
-                        self.droppedVideoFramesDueToMemory += 1
-                        if self.droppedVideoFramesDueToMemory % 60 == 0 {
-                            NSLog("[SampleHandler] Memory throttle ACTIVE (%.2f MB >= %.2f MB). Dropped %d video frames", currentRamMB, self.kMemoryLockThresholdMB, self.droppedVideoFramesDueToMemory)
+                // Mach Memory Footprint Guard (Jetsam 50MB ceiling protection) - sampled every 30 frames
+                self.videoFrameCount += 1
+                if self.videoFrameCount % 30 == 0 {
+                    let currentRamMB = self.getMemoryFootprintMB()
+                    if self.isMemoryLocked {
+                        if currentRamMB < self.kMemoryUnlockThresholdMB {
+                            self.isMemoryLocked = false
+                            NSLog("[SampleHandler] Memory normalized (%.2f MB < %.2f MB), unlocking video frames", currentRamMB, self.kMemoryUnlockThresholdMB)
                         }
-                        return
+                    } else if currentRamMB >= self.kMemoryLockThresholdMB {
+                        self.isMemoryLocked = true
+                        NSLog("[SampleHandler] Memory throttle triggered (%.2f MB >= %.2f MB). Throttling to prevent Jetsam kill", currentRamMB, self.kMemoryLockThresholdMB)
                     }
-                } else if currentRamMB >= self.kMemoryLockThresholdMB {
-                    self.isMemoryLocked = true
+                }
+
+                if self.isMemoryLocked {
                     self.droppedVideoFramesDueToMemory += 1
-                    NSLog("[SampleHandler] Memory throttle triggered (%.2f MB >= %.2f MB). Dropping video frame to prevent Jetsam kill", currentRamMB, self.kMemoryLockThresholdMB)
+                    if self.droppedVideoFramesDueToMemory % 60 == 0 {
+                        NSLog("[SampleHandler] Memory throttle ACTIVE. Dropped %d video frames", self.droppedVideoFramesDueToMemory)
+                    }
                     return
                 }
 
@@ -305,13 +309,18 @@ public class SampleHandler: RPBroadcastSampleHandler {
             guard let basePtr = rawBuf.baseAddress else { return }
             var totalSent = 0
             let totalLength = data.count
+            var retries = 0
 
             while totalSent < totalLength {
                 let bytesToSend = totalLength - totalSent
                 let sent = send(sock, basePtr.advanced(by: totalSent), bytesToSend, 0)
                 if sent <= 0 {
                     if errno == EAGAIN || errno == EWOULDBLOCK {
-                        // Socket send buffer temporarily busy; let buffer flush without dropping socket
+                        retries += 1
+                        if retries > 5 {
+                            // Buffer saturated after 5ms; skip remainder of this frame to avoid stalling encoder
+                            break
+                        }
                         usleep(1000)
                         continue
                     }
