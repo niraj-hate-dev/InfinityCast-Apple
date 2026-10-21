@@ -10,7 +10,7 @@
 //  (Port 8889 and Port 25335) actively processing packets without sleep or throttling.
 //
 
-import Foundation
+import UIKit
 import AVFoundation
 
 public final class SilentAudioKeepAlive {
@@ -22,11 +22,12 @@ public final class SilentAudioKeepAlive {
     private let lock = NSLock()
 
     private init() {
-        setupInterruptionObserver()
+        setupObservers()
         prepareSilentPlayer()
     }
 
-    private func setupInterruptionObserver() {
+    private func setupObservers() {
+        // 1. Audio Session Interruption Notification (when YouTube/Music pauses, plays, or interrupts)
         NotificationCenter.default.addObserver(
             forName: AVAudioSession.interruptionNotification,
             object: AVAudioSession.sharedInstance(),
@@ -39,16 +40,37 @@ public final class SilentAudioKeepAlive {
             }
 
             if type == .ended {
-                if let optionsValue = userInfo[AVAudioSessionInterruptionOptionKey] as? UInt {
-                    let options = AVAudioSession.InterruptionOptions(rawValue: optionsValue)
-                    if options.contains(.shouldResume) {
-                        NSLog("[SilentAudioKeepAlive] Interruption ended with shouldResume -> Resuming silent audio player")
-                        self?.resumeIfPlaying()
-                    }
-                } else {
-                    self?.resumeIfPlaying()
-                }
+                NSLog("[SilentAudioKeepAlive] Audio interruption ended -> Resuming silent keepalive loop")
+                self?.resumeIfPlaying()
             }
+        }
+
+        // 2. Audio Route Change Notification (Bluetooth disconnect, headphone unplug, route shift)
+        NotificationCenter.default.addObserver(
+            forName: AVAudioSession.routeChangeNotification,
+            object: AVAudioSession.sharedInstance(),
+            queue: .main
+        ) { [weak self] _ in
+            self?.resumeIfPlaying()
+        }
+
+        // 3. Application Did Enter Background Notification
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.didEnterBackgroundNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            NSLog("[SilentAudioKeepAlive] App entered background -> Activating silent keepalive loop")
+            self?.start()
+        }
+
+        // 4. Application Did Become Active Notification
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.resumeIfPlaying()
         }
     }
 
@@ -61,8 +83,13 @@ public final class SilentAudioKeepAlive {
                 let session = AVAudioSession.sharedInstance()
                 try session.setCategory(.playback, options: [.mixWithOthers, .allowBluetooth, .allowBluetoothA2DP, .allowAirPlay])
                 try session.setActive(true)
-                audioPlayer?.play()
-                NSLog("[SilentAudioKeepAlive] Resumed silent audio loop after interruption")
+                if audioPlayer == nil {
+                    prepareSilentPlayer()
+                }
+                if audioPlayer?.isPlaying == false {
+                    audioPlayer?.play()
+                }
+                NSLog("[SilentAudioKeepAlive] Resumed silent audio loop")
             } catch {
                 NSLog("[SilentAudioKeepAlive] Failed to resume audio session: %@", error.localizedDescription)
             }
@@ -139,7 +166,13 @@ public final class SilentAudioKeepAlive {
     public func start() {
         lock.lock()
         defer { lock.unlock() }
-        guard !isPlaying else { return }
+        guard !isPlaying else {
+            // Already active, ensure player is actually playing
+            if audioPlayer?.isPlaying == false {
+                audioPlayer?.play()
+            }
+            return
+        }
 
         do {
             let session = AVAudioSession.sharedInstance()
