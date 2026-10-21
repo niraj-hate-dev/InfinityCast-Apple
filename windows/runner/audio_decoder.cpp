@@ -55,6 +55,7 @@ typedef void* (*FnAvFrameAlloc)();
 typedef void  (*FnAvFrameFree)(void** frame);
 typedef int   (*FnAvcodecSendPacket)(void* avctx, const void* pkt);
 typedef int   (*FnAvcodecReceiveFrame)(void* avctx, void* frame);
+typedef void  (*FnAvcodecFlushBuffers)(void* avctx);
 typedef void* (*FnAvParserInit)(int codec_id);
 typedef int   (*FnAvParserParse2)(void* s, void* avctx,
                                   uint8_t** poutbuf, int* poutbuf_size,
@@ -74,6 +75,7 @@ struct FfmpegAudioFunctions {
   FnAvPacketUnref packet_unref = nullptr;
   FnAvcodecSendPacket send_packet = nullptr;
   FnAvcodecReceiveFrame receive_frame = nullptr;
+  FnAvcodecFlushBuffers flush_buffers = nullptr;
   FnAvParserInit parser_init = nullptr;
   FnAvParserParse2 parser_parse2 = nullptr;
   FnAvParserClose parser_close = nullptr;
@@ -142,6 +144,7 @@ bool AudioDecoder::LoadFfmpegSymbols() {
   g_audio_ffmpeg.packet_unref = (FnAvPacketUnref)GetProcAddress(avcodec_module_, "av_packet_unref");
   g_audio_ffmpeg.send_packet = (FnAvcodecSendPacket)GetProcAddress(avcodec_module_, "avcodec_send_packet");
   g_audio_ffmpeg.receive_frame = (FnAvcodecReceiveFrame)GetProcAddress(avcodec_module_, "avcodec_receive_frame");
+  g_audio_ffmpeg.flush_buffers = (FnAvcodecFlushBuffers)GetProcAddress(avcodec_module_, "avcodec_flush_buffers");
   g_audio_ffmpeg.parser_init = (FnAvParserInit)GetProcAddress(avcodec_module_, "av_parser_init");
   g_audio_ffmpeg.parser_parse2 = (FnAvParserParse2)GetProcAddress(avcodec_module_, "av_parser_parse2");
   g_audio_ffmpeg.parser_close = (FnAvParserClose)GetProcAddress(avcodec_module_, "av_parser_close");
@@ -460,6 +463,13 @@ bool AudioDecoder::DecodeStream(const uint8_t* in_data, size_t in_size) {
   }
 
   return true;
+}
+
+void AudioDecoder::Flush() {
+  std::lock_guard<std::mutex> lock(decode_mutex_);
+  if (codec_ctx_ && g_audio_ffmpeg.flush_buffers) {
+    g_audio_ffmpeg.flush_buffers(codec_ctx_);
+  }
 }
 
 void AudioDecoder::Teardown() {

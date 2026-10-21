@@ -29,6 +29,9 @@ class AudioDecoder {
   // Decodes incoming ADTS AAC byte chunks from socket stream
   bool DecodeStream(const uint8_t* in_data, size_t in_size);
 
+  // Flushes internal FFmpeg codec buffers on pause/reconnect without tearing down WaveOut
+  void Flush();
+
   // Releases all decoder and WaveOut resources
   void Teardown();
 

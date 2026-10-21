@@ -393,12 +393,18 @@ void ScreenMirrorPlugin::AudioStreamWorkerLoop() {
       Log("AUDIO", "Audio socket read error (" + std::to_string(err) + "), reconnecting...", "warn");
       closesocket(active_audio_tunnel_sock_);
       active_audio_tunnel_sock_ = INVALID_SOCKET;
+      if (audio_decoder_) {
+        audio_decoder_->Flush();
+      }
       std::this_thread::sleep_for(std::chrono::milliseconds(250));
     } else {
       // bytes_read == 0: peer closed connection (e.g. broadcast stopped/restarted)
       Log("AUDIO", "Audio connection closed by server, reconnecting...", "info");
       closesocket(active_audio_tunnel_sock_);
       active_audio_tunnel_sock_ = INVALID_SOCKET;
+      if (audio_decoder_) {
+        audio_decoder_->Flush();
+      }
       std::this_thread::sleep_for(std::chrono::milliseconds(250));
     }
   }
