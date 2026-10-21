@@ -40,19 +40,6 @@ public final class AudioEncoder {
         self.aacBuffer = UnsafeMutablePointer<UInt8>.allocate(capacity: aacBufferSize)
     }
 
-    // MARK: - Input Context & Ingestion
-
-    private final class InputContext {
-        var bufferList: AudioBufferList
-        let numPackets: UInt32
-        var consumed: Bool = false
-
-        init(bufferList: AudioBufferList, numPackets: UInt32) {
-            self.bufferList = bufferList
-            self.numPackets = numPackets
-        }
-    }
-
     public func encode(sampleBuffer: CMSampleBuffer) {
         audioQueue.async { [weak self] in
             guard let self = self else { return }
@@ -102,10 +89,11 @@ public final class AudioEncoder {
             outAudioBufferList.mBuffers.mData = UnsafeMutableRawPointer(self.aacBuffer)
 
             var ioOutputDataPacketSize: UInt32 = 1
-            let numSamples = CMSampleBufferGetNumSamples(sampleBuffer)
-            let context = InputContext(bufferList: bufferList, numPackets: UInt32(max(numSamples, 1024)))
 
-            // Input proc (reconstructed 1:1 from _wxCastSenderAudioEncoderInInputDataProc @ 0xdf20)
+            // 3. Input proc matching 1:1 _wxCastSenderAudioEncoderInInputDataProc @ 0xdf20
+            // Returns -1 when dataByteSize == 0 (ASM @ 0xdf40: mov w0, #-1; ret)
+            // CRITICAL: Must return non-zero (-1), NEVER 0 (noErr)! Returning 0 with 0 packets
+            // signals permanent stream EOF to CoreAudio, poisoning the converter into silence.
             let inputProc: AudioConverterComplexInputDataProc = { (
                 _,
                 ioNumberDataPackets,
@@ -115,29 +103,27 @@ public final class AudioEncoder {
             ) -> OSStatus in
                 guard let inUserData = inUserData else {
                     ioNumberDataPackets.pointee = 0
-                    return noErr
+                    return -1
                 }
-                let ctx = Unmanaged<InputContext>.fromOpaque(inUserData).takeUnretainedValue()
-                let dataByteSize = ctx.bufferList.mBuffers.mDataByteSize
-                if ctx.consumed || dataByteSize == 0 {
+                let abl = inUserData.assumingMemoryBound(to: AudioBufferList.self)
+                let byteSize = abl.pointee.mBuffers.mDataByteSize
+                if byteSize == 0 {
                     ioNumberDataPackets.pointee = 0
-                    return noErr // Return noErr with 0 packets to signal EOF for this buffer
+                    return -1
                 }
 
-                ioData.pointee.mNumberBuffers = 1
-                ioData.pointee.mBuffers.mData = ctx.bufferList.mBuffers.mData
-                ioData.pointee.mBuffers.mNumberChannels = ctx.bufferList.mBuffers.mNumberChannels
-                ioData.pointee.mBuffers.mDataByteSize = dataByteSize
+                ioData.pointee.mBuffers.mData = abl.pointee.mBuffers.mData
+                ioData.pointee.mBuffers.mNumberChannels = abl.pointee.mBuffers.mNumberChannels
+                ioData.pointee.mBuffers.mDataByteSize = byteSize
 
-                ioNumberDataPackets.pointee = ctx.numPackets
-                ctx.consumed = true
+                abl.pointee.mBuffers.mDataByteSize = 0
                 return noErr
             }
 
             let convStatus = AudioConverterFillComplexBuffer(
                 converter,
                 inputProc,
-                Unmanaged.passUnretained(context).toOpaque(),
+                &bufferList,
                 &ioOutputDataPacketSize,
                 &outAudioBufferList,
                 nil
@@ -161,9 +147,6 @@ public final class AudioEncoder {
 
                     self.packetHandler(packet)
                 }
-            } else if convStatus != noErr {
-                // If an unexpected status occurs, reset converter to clear any internal error state
-                AudioConverterReset(converter)
             }
         }
     }
