@@ -30,6 +30,9 @@ public class SampleHandler: RPBroadcastSampleHandler {
     private var audioBsdClientSocket: Int32 = -1
     private let socketLock = NSLock()
     private let audioSocketLock = NSLock()
+    private var audioFrameCount: Int = 0
+    private var isAudioConnecting = false
+    private let audioConnectLock = NSLock()
 
     private let networkQueue = DispatchQueue(label: "com.apowermirror.upload.network", qos: .userInteractive)
     private var targetFps: Int32 = 60
@@ -88,6 +91,7 @@ public class SampleHandler: RPBroadcastSampleHandler {
         // Invalidate and free audio encoder
         audioEncoder?.invalidate()
         audioEncoder = nil
+        audioFrameCount = 0
 
         // Clean up BSD sockets
         closeSocket()
@@ -128,6 +132,12 @@ public class SampleHandler: RPBroadcastSampleHandler {
                 videoEncoder?.encode(sampleBuffer: sampleBuffer, orientation: orientation)
 
             case .audioApp:
+                self.audioFrameCount += 1
+                if self.audioFrameCount <= 5 || self.audioFrameCount % 200 == 0 {
+                    let numSamples = CMSampleBufferGetNumSamples(sampleBuffer)
+                    NSLog("[SampleHandler] .audioApp frame #%d received (%d samples)", self.audioFrameCount, numSamples)
+                }
+
                 // Lazily initialize AudioEncoder on the first audio frame
                 if audioEncoder == nil {
                     NSLog("[SampleHandler] First .audioApp frame received -> Initializing AudioEncoder")
@@ -262,8 +272,21 @@ public class SampleHandler: RPBroadcastSampleHandler {
     // MARK: - Outbound Audio POSIX BSD Socket IPC (to 127.0.0.1:8889)
 
     private func connectToAudioIPC() {
+        audioConnectLock.lock()
+        if isAudioConnecting {
+            audioConnectLock.unlock()
+            return
+        }
+        isAudioConnecting = true
+        audioConnectLock.unlock()
+
         networkQueue.async { [weak self] in
-            guard let self = self, self.isBroadcasting else { return }
+            guard let self = self, self.isBroadcasting else {
+                self?.audioConnectLock.lock()
+                self?.isAudioConnecting = false
+                self?.audioConnectLock.unlock()
+                return
+            }
 
             self.audioSocketLock.lock()
             if self.audioBsdClientSocket >= 0 {
@@ -275,6 +298,9 @@ public class SampleHandler: RPBroadcastSampleHandler {
             let sock = socket(AF_INET, SOCK_STREAM, 0)
             guard sock >= 0 else {
                 NSLog("[SampleHandler] Failed to create audio BSD socket: errno %d", errno)
+                self.audioConnectLock.lock()
+                self.isAudioConnecting = false
+                self.audioConnectLock.unlock()
                 return
             }
 
@@ -301,6 +327,10 @@ public class SampleHandler: RPBroadcastSampleHandler {
                     connect(sock, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
                 }
             }
+
+            self.audioConnectLock.lock()
+            self.isAudioConnecting = false
+            self.audioConnectLock.unlock()
 
             if res == 0 {
                 self.audioSocketLock.lock()
@@ -337,8 +367,11 @@ public class SampleHandler: RPBroadcastSampleHandler {
                 let bytesToSend = totalLength - totalSent
                 let sent = send(sock, basePtr.advanced(by: totalSent), bytesToSend, 0)
                 if sent <= 0 {
-                    closeAudioSocket()
-                    connectToAudioIPC()
+                    if errno != EAGAIN && errno != EWOULDBLOCK {
+                        NSLog("[SampleHandler] Audio socket send failed (errno: %d), reconnecting...", errno)
+                        closeAudioSocket()
+                        connectToAudioIPC()
+                    }
                     break
                 }
                 totalSent += sent

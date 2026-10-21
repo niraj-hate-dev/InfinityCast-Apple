@@ -315,8 +315,8 @@ open class WXHomeViewController: UIViewController, ScreenRecorderManagerDelegate
         // Launch the ReplayKit Broadcast Picker
         BroadcastPickerManager.shared.presentBroadcastPicker()
 
-        // 6-second timer to check if user cancelled or if broadcast started
-        DispatchQueue.main.asyncAfter(deadline: .now() + 6.0) { [weak self] in
+        // 15-second fallback timer to check if user cancelled or if broadcast started
+        DispatchQueue.main.asyncAfter(deadline: .now() + 15.0) { [weak self] in
             guard let self = self else { return }
             if !UIScreen.main.isCaptured && !ScreenRecorderManager.shared.isCapturing {
                 if self.lastErrorMessage == nil {
@@ -347,6 +347,7 @@ open class WXHomeViewController: UIViewController, ScreenRecorderManagerDelegate
                 let vc = Unmanaged<WXHomeViewController>.fromOpaque(obs).takeUnretainedValue()
                 DispatchQueue.main.async {
                     vc.lastErrorMessage = nil
+                    SilentAudioKeepAlive.shared.start()
                     vc.updateStatusCards()
                 }
             },

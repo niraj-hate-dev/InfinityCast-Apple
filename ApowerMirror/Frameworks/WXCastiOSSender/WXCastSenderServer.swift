@@ -902,6 +902,7 @@ public final class WXCastSenderServer {
         DispatchQueue.global(qos: .userInteractive).async { [weak self] in
             guard let self = self else { return }
             var buffer = [UInt8](repeating: 0, count: 16384)
+            var totalPacketsReceived = 0
 
             while self.isRunning {
                 let bytesRead = buffer.withUnsafeMutableBytes { rawBuf in
@@ -909,13 +910,17 @@ public final class WXCastSenderServer {
                 }
 
                 if bytesRead > 0 {
+                    totalPacketsReceived += 1
+                    if totalPacketsReceived <= 5 || totalPacketsReceived % 200 == 0 {
+                        NSLog("[WXCastSenderServer] Audio IPC received packet #%d (%d bytes) from Extension", totalPacketsReceived, bytesRead)
+                    }
                     let packetData = Data(buffer[0..<bytesRead])
                     self.sendAudioData(packetData)
                 } else if bytesRead <= 0 {
                     if errno == EAGAIN || errno == EWOULDBLOCK {
                         continue
                     }
-                    NSLog("[WXCastSenderServer] Broadcast Extension disconnected from Audio IPC (fd: %d)", clientFd)
+                    NSLog("[WXCastSenderServer] Broadcast Extension disconnected from Audio IPC (fd: %d, errno: %d)", clientFd, errno)
                     break
                 }
             }

@@ -43,12 +43,12 @@ public final class AudioEncoder {
     // MARK: - Input Context & Ingestion
 
     private final class InputContext {
-        var bufferList: AudioBufferList
+        let bufferListPointer: UnsafeMutableAudioBufferListPointer
         let numPackets: UInt32
         var consumed: Bool = false
 
-        init(bufferList: AudioBufferList, numPackets: UInt32) {
-            self.bufferList = bufferList
+        init(bufferListPointer: UnsafeMutableAudioBufferListPointer, numPackets: UInt32) {
+            self.bufferListPointer = bufferListPointer
             self.numPackets = numPackets
         }
     }
@@ -75,14 +75,18 @@ public final class AudioEncoder {
 
             guard let converter = self.audioConverter else { return }
 
-            // 1. Extract AudioBufferList from sampleBuffer using retained CMBlockBuffer (matching ASM @ 0xe01c)
-            var bufferList = AudioBufferList()
+            // 1. Allocate AudioBufferList with sufficient capacity for both interleaved (1 buffer)
+            //    and non-interleaved stereo (2 buffers) to prevent kCMSampleBufferError_ArrayTooSmall (-12739)
+            let maxBufs = Int(max(self.channels, 2))
+            let abl = AudioBufferList.allocate(maximumBuffers: maxBufs)
+            defer { free(UnsafeMutableRawPointer(abl.unsafeMutablePointer)) }
+
             var blockBuffer: CMBlockBuffer? = nil
             let status = CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(
                 sampleBuffer,
                 bufferListSizeNeededOut: nil,
-                bufferListOut: &bufferList,
-                bufferListSize: MemoryLayout<AudioBufferList>.size,
+                bufferListOut: abl.unsafeMutablePointer,
+                bufferListSize: AudioBufferList.sizeInBytes(maximumBuffers: maxBufs),
                 blockBufferAllocator: nil,
                 blockBufferMemoryAllocator: nil,
                 flags: 0,
@@ -103,9 +107,9 @@ public final class AudioEncoder {
 
             var ioOutputDataPacketSize: UInt32 = 1
             let numSamples = CMSampleBufferGetNumSamples(sampleBuffer)
-            let context = InputContext(bufferList: bufferList, numPackets: UInt32(max(numSamples, 1024)))
+            let context = InputContext(bufferListPointer: abl, numPackets: UInt32(max(numSamples, 1024)))
 
-            // Input proc (reconstructed 1:1 from _wxCastSenderAudioEncoderInInputDataProc @ 0xdf20)
+            // Input proc copying all buffers (handles 1-buffer interleaved and 2-buffer non-interleaved)
             let inputProc: AudioConverterComplexInputDataProc = { (
                 _,
                 ioNumberDataPackets,
@@ -118,16 +122,16 @@ public final class AudioEncoder {
                     return noErr
                 }
                 let ctx = Unmanaged<InputContext>.fromOpaque(inUserData).takeUnretainedValue()
-                let dataByteSize = ctx.bufferList.mBuffers.mDataByteSize
-                if ctx.consumed || dataByteSize == 0 {
+                if ctx.consumed || ctx.numPackets == 0 {
                     ioNumberDataPackets.pointee = 0
-                    return noErr // Return noErr with 0 packets to signal EOF for this buffer
+                    return noErr // Signal EOF for this conversion cycle
                 }
 
-                ioData.pointee.mNumberBuffers = 1
-                ioData.pointee.mBuffers.mData = ctx.bufferList.mBuffers.mData
-                ioData.pointee.mBuffers.mNumberChannels = ctx.bufferList.mBuffers.mNumberChannels
-                ioData.pointee.mBuffers.mDataByteSize = dataByteSize
+                let srcAbl = ctx.bufferListPointer
+                let dstAbl = UnsafeMutableAudioBufferListPointer(ioData)
+                for i in 0..<min(srcAbl.count, dstAbl.count) {
+                    dstAbl[i] = srcAbl[i]
+                }
 
                 ioNumberDataPackets.pointee = ctx.numPackets
                 ctx.consumed = true
@@ -156,7 +160,7 @@ public final class AudioEncoder {
                     packet.append(self.aacBuffer, count: aacSize)
 
                     self.frameCount += 1
-                    if self.frameCount % 100 == 1 {
+                    if self.frameCount <= 5 || self.frameCount % 200 == 0 {
                         NSLog("[AudioEncoder] Encoded AAC frame #%d (%d bytes)", self.frameCount, packet.count)
                     }
 
