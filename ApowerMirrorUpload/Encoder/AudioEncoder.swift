@@ -238,13 +238,13 @@ public final class AudioEncoder {
                     ) -> OSStatus in
                         guard let inUserData = inUserData else {
                             ioNumberDataPackets.pointee = 0
-                            return noErr
+                            return -1
                         }
                         let abl = inUserData.assumingMemoryBound(to: AudioBufferList.self)
                         let byteSize = abl.pointee.mBuffers.mDataByteSize
                         if byteSize == 0 {
                             ioNumberDataPackets.pointee = 0
-                            return noErr
+                            return -1
                         }
 
                         ioData.pointee.mBuffers.mData = abl.pointee.mBuffers.mData
@@ -265,7 +265,7 @@ public final class AudioEncoder {
                         nil
                     )
 
-                    if (convStatus == noErr || ioOutputDataPacketSize > 0) && ioOutputDataPacketSize > 0 {
+                    if ioOutputDataPacketSize > 0 {
                         let aacSize = Int(outAudioBufferList.mBuffers.mDataByteSize)
                         if aacSize > 0 {
                             // Prepend standard 7-byte ADTS Header (matching ASM @ 0xe56c)
@@ -280,7 +280,7 @@ public final class AudioEncoder {
 
                             self.packetHandler(packet)
                         }
-                    } else if convStatus != noErr {
+                    } else if convStatus != noErr && convStatus != -1 {
                         NSLog("[AudioEncoder] AudioConverterFillComplexBuffer status: %d (packets: %d)", convStatus, ioOutputDataPacketSize)
                     }
                 }

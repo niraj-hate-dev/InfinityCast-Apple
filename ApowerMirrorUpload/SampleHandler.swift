@@ -208,14 +208,13 @@ public class SampleHandler: RPBroadcastSampleHandler {
                 // Feed CVPixelBuffer to hardware encoder
                 videoEncoder?.encode(sampleBuffer: sampleBuffer, orientation: orientation)
 
-            case .audioApp, .audioMic:
+            case .audioApp:
                 // Auto Audio Detector: whenever device audio arrives (YouTube, games, media),
                 // automatically encode and transfer immediately!
                 self.audioFrameCount += 1
                 if self.audioFrameCount <= 5 || self.audioFrameCount % 200 == 0 {
                     let numSamples = CMSampleBufferGetNumSamples(sampleBuffer)
-                    let typeStr = (sampleBufferType == .audioApp) ? "app" : "mic"
-                    NSLog("[SampleHandler] Auto Audio Detector: \(typeStr) audio frame #%d received (%d samples)", self.audioFrameCount, numSamples)
+                    NSLog("[SampleHandler] Auto Audio Detector: app audio frame #%d received (%d samples)", self.audioFrameCount, numSamples)
                 }
 
                 if audioEncoder == nil {
@@ -225,6 +224,18 @@ public class SampleHandler: RPBroadcastSampleHandler {
                     }
                 }
                 audioEncoder?.encode(sampleBuffer: sampleBuffer)
+
+            case .audioMic:
+                // Microphone commentary (only if explicitly enabled in app group settings)
+                let micEnabled = UserDefaults(suiteName: appGroupName)?.bool(forKey: "kGroupMirrorVoiceSwitch") ?? false
+                if micEnabled {
+                    if audioEncoder == nil {
+                        audioEncoder = AudioEncoder(sampleRate: 44100.0, channels: 2) { [weak self] packet in
+                            self?.sendAudioDataToMainApp(packet)
+                        }
+                    }
+                    audioEncoder?.encode(sampleBuffer: sampleBuffer)
+                }
 
             @unknown default:
                 break
