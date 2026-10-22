@@ -17,6 +17,7 @@
 		97C146FE1CF9000F007C117D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FD1CF9000F007C117D /* Assets.xcassets */; };
 		97C147011CF9000F007C117D /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FF1CF9000F007C117D /* LaunchScreen.storyboard */; };
 		CE0100010000000000000001 /* SampleHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0100020000000000000001 /* SampleHandler.swift */; };
+		CE010001000000000000000A /* AudioEncoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE010002000000000000000A /* AudioEncoder.swift */; };
 		CE0100010000000000000002 /* AppleCastExtension.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = CE0100020000000000000003 /* AppleCastExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
@@ -80,6 +81,7 @@
 		97C147001CF9000F007C117D /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/LaunchScreen.storyboard; sourceTree = "<group>"; };
 		97C147021CF9000F007C117D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		CE0100020000000000000001 /* SampleHandler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SampleHandler.swift; sourceTree = "<group>"; };
+		CE010002000000000000000A /* AudioEncoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioEncoder.swift; sourceTree = "<group>"; };
 		CE0100020000000000000002 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		CE0100020000000000000003 /* AppleCastExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = AppleCastExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		CE0100020000000000000004 /* AppleCastExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = AppleCastExtension.entitlements; sourceTree = "<group>"; };
@@ -150,6 +152,7 @@
 			isa = PBXGroup;
 			children = (
 				CE0100020000000000000001 /* SampleHandler.swift */,
+				CE010002000000000000000A /* AudioEncoder.swift */,
 				CE0100020000000000000002 /* Info.plist */,
 				CE0100020000000000000004 /* AppleCastExtension.entitlements */,
 			);
@@ -367,6 +370,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				CE0100010000000000000001 /* SampleHandler.swift in Sources */,
+				CE010001000000000000000A /* AudioEncoder.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

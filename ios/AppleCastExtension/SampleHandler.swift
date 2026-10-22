@@ -19,6 +19,8 @@ public class SampleHandler: RPBroadcastSampleHandler {
     private let appGroupName = "group.applecast.mirror"
     private let defaultPort: UInt16 = 25334
     private var streamingPort: UInt16 = 25334
+    private let defaultAudioPort: UInt16 = 25335
+    private var audioStreamingPort: UInt16 = 25335
     private var targetFps: Int32 = 60
     private var targetBitrate: Int32 = 4_000_000 // 4 Mbps (safe for 50MB Jetsam)
     private let rtpMagicByte: UInt8 = 0x24       // '$'
@@ -33,6 +35,13 @@ public class SampleHandler: RPBroadcastSampleHandler {
     private var lastRawWidth: Int32 = 0
     private var lastRawHeight: Int32 = 0
     private var lastOrientation: CGImagePropertyOrientation = .up
+
+    // MARK: - Audio Pipeline
+    private var audioEncoder: AudioEncoder?
+    private var audioServerSocket: Int32 = -1
+    private var audioClientSocket: Int32 = -1
+    private let audioSocketLock = NSLock()
+    private let audioNetworkQueue = DispatchQueue(label: "com.applecast.audioNetworkQueue", qos: .userInteractive)
 
     // MARK: - Memory Management & Backpressure State
     private var sharedDefaults: UserDefaults?
@@ -70,6 +79,8 @@ public class SampleHandler: RPBroadcastSampleHandler {
         sharedDefaults = UserDefaults(suiteName: appGroupName) ?? UserDefaults.standard
         let targetPortInt = sharedDefaults?.integer(forKey: "wxiosserverport") ?? 0
         streamingPort = targetPortInt > 0 ? UInt16(targetPortInt) : defaultPort
+        let targetAudioPortInt = sharedDefaults?.integer(forKey: "wxiosserveraudioport") ?? 0
+        audioStreamingPort = targetAudioPortInt > 0 ? UInt16(targetAudioPortInt) : defaultAudioPort
 
         if let fps = sharedDefaults?.integer(forKey: "videoFps"), fps > 0 {
             targetFps = Int32(fps)
@@ -81,14 +92,16 @@ public class SampleHandler: RPBroadcastSampleHandler {
         // Record active lifecycle state
         sharedDefaults?.set("RUNNING", forKey: "extension_status")
         sharedDefaults?.set(Int(streamingPort), forKey: "extension_active_port")
+        sharedDefaults?.set(Int(audioStreamingPort), forKey: "extension_active_audio_port")
         sharedDefaults?.set(Date().timeIntervalSince1970, forKey: "extension_start_time")
         sharedDefaults?.set("LISTENING", forKey: "extension_socket_state")
         sharedDefaults?.synchronize()
 
-        NSLog("[AppleCastExtension] Target streaming port: %d (FPS: %d, Bitrate: %d bps)", streamingPort, targetFps, targetBitrate)
+        NSLog("[AppleCastExtension] Target streaming port: %d, audio port: %d (FPS: %d, Bitrate: %d bps)", streamingPort, audioStreamingPort, targetFps, targetBitrate)
 
-        // Bind BSD TCP server on 0.0.0.0 to receive usbmuxd tunnel
+        // Bind BSD TCP servers on 0.0.0.0 to receive usbmuxd tunnels
         startLocalTcpServer(port: streamingPort)
+        startLocalAudioTcpServer(port: audioStreamingPort)
     }
 
     public override func broadcastPaused() {
@@ -146,7 +159,17 @@ public class SampleHandler: RPBroadcastSampleHandler {
                 }
             }
 
-        case .audioApp, .audioMic:
+        case .audioApp:
+            if audioEncoder == nil {
+                NSLog("[AppleCastExtension] >>> Initializing AudioEncoder (44100 Hz, stereo)")
+                audioEncoder = AudioEncoder(sampleRate: 44100.0, channels: 2) { [weak self] packet in
+                    self?.sendAudioSocketData(packet)
+                }
+            }
+            audioEncoder?.encode(sampleBuffer: sampleBuffer)
+
+        case .audioMic:
+            // Keep .audioMic as break (ignore mic to prevent echo/feedback)
             break
 
         @unknown default:
@@ -341,6 +364,10 @@ public class SampleHandler: RPBroadcastSampleHandler {
                 if client >= 0 {
                     var flag: Int32 = 1
                     setsockopt(client, IPPROTO_TCP, TCP_NODELAY, &flag, socklen_t(MemoryLayout<Int32>.size))
+                    #if os(iOS)
+                    var nosigpipe: Int32 = 1
+                    setsockopt(client, SOL_SOCKET, SO_NOSIGPIPE, &nosigpipe, socklen_t(MemoryLayout<Int32>.size))
+                    #endif
                     self.socketLock.lock()
                     if self.clientSocket >= 0 { close(self.clientSocket) }
                     self.clientSocket = client
@@ -349,6 +376,72 @@ public class SampleHandler: RPBroadcastSampleHandler {
                     NSLog("[AppleCastExtension] >>> SUCCESS: Windows Client connected to video streaming socket! <<<")
                     self.sharedDefaults?.set("CLIENT_CONNECTED", forKey: "extension_socket_state")
                     self.sharedDefaults?.synchronize()
+                }
+            }
+        }
+    }
+
+    // MARK: - Direct BSD TCP Audio Streaming Server for usbmuxd (port 25335)
+    private func startLocalAudioTcpServer(port: UInt16) {
+        audioNetworkQueue.async { [weak self] in
+            guard let self = self, self.isBroadcasting else { return }
+
+            NSLog("[AppleCastExtension] Initializing BSD audio streaming server on 0.0.0.0:%d...", port)
+
+            let sock = socket(AF_INET, SOCK_STREAM, 0)
+            guard sock >= 0 else {
+                NSLog("[AppleCastExtension] Failed to create audio streaming socket: errno %d", errno)
+                return
+            }
+
+            var yes: Int32 = 1
+            setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &yes, socklen_t(MemoryLayout<Int32>.size))
+            setsockopt(sock, SOL_SOCKET, SO_REUSEPORT, &yes, socklen_t(MemoryLayout<Int32>.size))
+            setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, &yes, socklen_t(MemoryLayout<Int32>.size))
+
+            var serverAddr = sockaddr_in()
+            serverAddr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+            serverAddr.sin_family = sa_family_t(AF_INET)
+            serverAddr.sin_port = port.bigEndian
+            serverAddr.sin_addr.s_addr = in_addr_t(0) // Bind to INADDR_ANY (0.0.0.0) to accept usbmuxd 127.0.0.1 tunnel
+
+            let bindRes = withUnsafePointer(to: &serverAddr) { ptr in
+                ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { saPtr in
+                    bind(sock, saPtr, socklen_t(MemoryLayout<sockaddr_in>.size))
+                }
+            }
+
+            guard bindRes >= 0, listen(sock, 5) >= 0 else {
+                NSLog("[AppleCastExtension] BSD audio socket bind/listen failed on port %d (errno: %d)", port, errno)
+                close(sock)
+                return
+            }
+
+            self.audioSocketLock.lock()
+            self.audioServerSocket = sock
+            self.audioSocketLock.unlock()
+            NSLog("[AppleCastExtension] >>> SUCCESS: BSD audio streaming server listening on 0.0.0.0:%d! <<<", port)
+
+            while self.isBroadcasting {
+                var clientAddr = sockaddr_in()
+                var addrLen = socklen_t(MemoryLayout<sockaddr_in>.size)
+                let client = withUnsafeMutablePointer(to: &clientAddr) { ptr in
+                    ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { saPtr in
+                        accept(sock, saPtr, &addrLen)
+                    }
+                }
+                if client >= 0 {
+                    var flag: Int32 = 1
+                    setsockopt(client, IPPROTO_TCP, TCP_NODELAY, &flag, socklen_t(MemoryLayout<Int32>.size))
+                    #if os(iOS)
+                    var nosigpipe: Int32 = 1
+                    setsockopt(client, SOL_SOCKET, SO_NOSIGPIPE, &nosigpipe, socklen_t(MemoryLayout<Int32>.size))
+                    #endif
+                    self.audioSocketLock.lock()
+                    if self.audioClientSocket >= 0 { close(self.audioClientSocket) }
+                    self.audioClientSocket = client
+                    self.audioSocketLock.unlock()
+                    NSLog("[AppleCastExtension] >>> SUCCESS: Windows Client connected to audio streaming socket (port %d)! <<<", port)
                 }
             }
         }
@@ -470,11 +563,41 @@ public class SampleHandler: RPBroadcastSampleHandler {
         }
     }
 
+    private func sendAudioSocketData(_ data: Data) {
+        audioSocketLock.lock()
+        let activeBsd = audioClientSocket
+        audioSocketLock.unlock()
+
+        guard activeBsd >= 0 else { return }
+
+        data.withUnsafeBytes { rawBuffer in
+            guard let baseAddress = rawBuffer.baseAddress else { return }
+            var sentBytes = 0
+            let totalBytes = rawBuffer.count
+            while sentBytes < totalBytes {
+                let res = write(activeBsd, baseAddress.advanced(by: sentBytes), totalBytes - sentBytes)
+                if res <= 0 {
+                    self.audioSocketLock.lock()
+                    if self.audioClientSocket == activeBsd {
+                        close(self.audioClientSocket)
+                        self.audioClientSocket = -1
+                    }
+                    self.audioSocketLock.unlock()
+                    break
+                }
+                sentBytes += res
+            }
+        }
+    }
+
     private func teardownSession() {
         if let session = compressionSession {
             VTCompressionSessionInvalidate(session)
             compressionSession = nil
         }
+
+        audioEncoder?.invalidate()
+        audioEncoder = nil
 
         socketLock.lock()
         if clientSocket >= 0 {
@@ -488,6 +611,19 @@ public class SampleHandler: RPBroadcastSampleHandler {
             serverSocket = -1
         }
         socketLock.unlock()
+
+        audioSocketLock.lock()
+        if audioClientSocket >= 0 {
+            shutdown(audioClientSocket, SHUT_RDWR)
+            close(audioClientSocket)
+            audioClientSocket = -1
+        }
+        if audioServerSocket >= 0 {
+            shutdown(audioServerSocket, SHUT_RDWR)
+            close(audioServerSocket)
+            audioServerSocket = -1
+        }
+        audioSocketLock.unlock()
     }
 
     // MARK: - Darwin Notification Helper (MMWormhole Equivalent)
