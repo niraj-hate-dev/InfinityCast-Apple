@@ -133,14 +133,6 @@ public class SampleHandler: RPBroadcastSampleHandler {
 
         switch sampleBufferType {
         case .video:
-            // Critical Jetsam 50MB OOM Prevention:
-            // If physical footprint reaches 41 MB, drop frame immediately without queuing.
-            if isMemoryLocked || getPhysicalFootprintMB() >= 41 {
-                isMemoryLocked = true
-                scheduleMemoryRecoveryCheck()
-                return // Drop frame under memory pressure
-            }
-
             var frameOrientation: CGImagePropertyOrientation = .up
             if let orientationAttachment = CMGetAttachment(sampleBuffer, key: RPVideoSampleOrientationKey as CFString, attachmentModeOut: nil) as? NSNumber {
                 frameOrientation = CGImagePropertyOrientation(rawValue: orientationAttachment.uint32Value) ?? .up
