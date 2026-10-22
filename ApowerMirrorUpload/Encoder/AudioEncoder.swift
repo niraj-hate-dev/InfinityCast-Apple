@@ -208,6 +208,12 @@ public final class AudioEncoder {
             // 4. Encode exact 1024-frame chunks from the ring buffer (1024 * 4 bytes for 16-bit stereo)
             let requiredChunkSize = 1024 * 4
 
+            // Memory guard: Limit ring buffer to at most 10 chunks (~230ms of audio)
+            let maxRingBufferSize = requiredChunkSize * 10
+            if self.pcmBuffer.count > maxRingBufferSize {
+                self.pcmBuffer.removeSubrange(0..<(self.pcmBuffer.count - maxRingBufferSize))
+            }
+
             while self.pcmBuffer.count >= requiredChunkSize {
                 var chunkData = self.pcmBuffer.subdata(in: 0..<requiredChunkSize)
                 self.pcmBuffer.removeSubrange(0..<requiredChunkSize)
@@ -245,7 +251,9 @@ public final class AudioEncoder {
                         let byteSize = abl.pointee.mBuffers.mDataByteSize
                         if byteSize == 0 {
                             ioNumberDataPackets.pointee = 0
-                            return noErr
+                            ioData.pointee.mBuffers.mData = nil
+                            ioData.pointee.mBuffers.mDataByteSize = 0
+                            return 500 // Controlled EOF signal to stop AudioConverter without infinite loop
                         }
 
                         ioData.pointee.mNumberBuffers = 1
@@ -267,7 +275,7 @@ public final class AudioEncoder {
                         &packetDesc
                     )
 
-                    if convStatus == noErr && ioOutputDataPacketSize > 0 {
+                    if (convStatus == noErr || convStatus == 500) && ioOutputDataPacketSize > 0 {
                         let aacSize = Int(packetDesc.mDataByteSize > 0 ? packetDesc.mDataByteSize : outAudioBufferList.mBuffers.mDataByteSize)
                         if aacSize > 0 {
                             // Prepend standard 7-byte ADTS Header (matching ASM @ 0xe56c)
@@ -282,7 +290,7 @@ public final class AudioEncoder {
 
                             self.packetHandler(packet)
                         }
-                    } else if convStatus != noErr {
+                    } else if convStatus != noErr && convStatus != 500 {
                         NSLog("[AudioEncoder] AudioConverterFillComplexBuffer status: %d (packets: %d)", convStatus, ioOutputDataPacketSize)
                     }
                 }
