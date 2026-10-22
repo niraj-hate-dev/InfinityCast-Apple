@@ -29,11 +29,12 @@ public final class ScreenRecorderManager {
     public weak var delegate: ScreenRecorderManagerDelegate?
     private let recorder = RPScreenRecorder.shared()
     private var videoEncoder: VideoEncoder?
+    private var audioEncoder: AudioEncoder?
     private var isRecording = false
 
     // MARK: - Initialization
     private init() {
-        recorder.isMicrophoneEnabled = false
+        recorder.isMicrophoneEnabled = true
     }
 
     public var isCapturing: Bool {
@@ -70,6 +71,12 @@ public final class ScreenRecorderManager {
             WXCastiOSSender.shared.sendRotation(rotation: Int(rotation), width: Int(width), height: Int(height))
         }
 
+        // Initialize hardware AAC AudioEncoder (44.1 kHz, 2 channels)
+        audioEncoder = AudioEncoder(sampleRate: 44100.0, channels: 2) { (packet) in
+            // Stream encoded AAC ADTS packets directly to desktop receiver on port 25335
+            WXCastiOSSender.shared.sendAudioData(packet)
+        }
+
         NSLog("[ScreenRecorderManager] Requesting in-app screen capture permission from iOS...")
 
         recorder.startCapture(handler: { [weak self] (sampleBuffer, bufferType, error) in
@@ -80,10 +87,19 @@ public final class ScreenRecorderManager {
 
             guard let self = self, self.isRecording else { return }
 
-            if bufferType == .video {
+            switch bufferType {
+            case .video:
                 autoreleasepool {
                     self.videoEncoder?.encode(sampleBuffer: sampleBuffer, orientation: .up)
                 }
+            case .audioApp:
+                self.audioEncoder?.encode(sampleBuffer: sampleBuffer)
+            case .audioMic:
+                if self.recorder.isMicrophoneEnabled {
+                    self.audioEncoder?.encode(sampleBuffer: sampleBuffer)
+                }
+            @unknown default:
+                break
             }
         }) { [weak self] (error) in
             DispatchQueue.main.async {
@@ -116,6 +132,8 @@ public final class ScreenRecorderManager {
                 self?.isRecording = false
                 self?.videoEncoder?.invalidate()
                 self?.videoEncoder = nil
+                self?.audioEncoder?.invalidate()
+                self?.audioEncoder = nil
                 if let error = error {
                     NSLog("[ScreenRecorderManager] Stop capture error: %@", error.localizedDescription)
                 } else {

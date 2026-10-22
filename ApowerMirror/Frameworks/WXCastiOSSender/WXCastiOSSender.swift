@@ -56,6 +56,10 @@ public final class WXCastiOSSender: WXCastSenderServerDelegate {
         server.sendVideoData(data)
     }
 
+    public func sendAudioData(_ data: Data) {
+        server.sendAudioData(data)
+    }
+
     public func stopMirrorService() {
         guard isMirroring else { return }
         isMirroring = false
