@@ -226,16 +226,8 @@ public class SampleHandler: RPBroadcastSampleHandler {
                 audioEncoder?.encode(sampleBuffer: sampleBuffer)
 
             case .audioMic:
-                // Microphone commentary (only if explicitly enabled in app group settings)
-                let micEnabled = UserDefaults(suiteName: appGroupName)?.bool(forKey: "kGroupMirrorVoiceSwitch") ?? false
-                if micEnabled {
-                    if audioEncoder == nil {
-                        audioEncoder = AudioEncoder(sampleRate: 44100.0, channels: 2) { [weak self] packet in
-                            self?.sendAudioDataToMainApp(packet)
-                        }
-                    }
-                    audioEncoder?.encode(sampleBuffer: sampleBuffer)
-                }
+                // Only stream system/app audio for mirror sessions (ignore mic to prevent feedback/channel clash)
+                break
 
             @unknown default:
                 break
