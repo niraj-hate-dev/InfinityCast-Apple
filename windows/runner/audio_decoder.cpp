@@ -342,25 +342,17 @@ bool AudioDecoder::DecodeStream(const uint8_t* in_data, size_t in_size) {
 
   if (cur_size <= 0) return true;
 
-  // Sanitize buffer: Strip all embedded [00 00 00 02] tags before passing to FFmpeg parser
-  // to prevent av_parser_parse2 from swallowing tags into ADTS packets or desynchronizing.
-  std::vector<uint8_t> clean_buf;
-  clean_buf.reserve(cur_size);
-  for (int i = 0; i < cur_size; ) {
-    if (i + 4 <= cur_size &&
-        cur_ptr[i] == 0x00 && cur_ptr[i + 1] == 0x00 &&
-        cur_ptr[i + 2] == 0x00 && cur_ptr[i + 3] == 0x02 &&
-        (i + 4 == cur_size || cur_ptr[i + 4] == 0xFF || cur_ptr[i + 4] == 0x00)) {
-      i += 4;
-    } else {
-      clean_buf.push_back(cur_ptr[i++]);
-    }
+  // If the stream is prepended with a 4-byte channel multiplex tag [00 00 00 02], skip it
+  if (cur_size >= 5 &&
+      cur_ptr[0] == 0x00 && cur_ptr[1] == 0x00 &&
+      cur_ptr[2] == 0x00 && cur_ptr[3] == 0x02 &&
+      cur_ptr[4] == 0xFF) {
+    cur_ptr += 4;
+    cur_size -= 4;
   }
 
-  if (clean_buf.empty()) return true;
-
-  const uint8_t* parse_ptr = clean_buf.data();
-  int remaining_size = static_cast<int>(clean_buf.size());
+  const uint8_t* parse_ptr = cur_ptr;
+  int remaining_size = cur_size;
 
   while (remaining_size > 0) {
     uint8_t* poutbuf = nullptr;
