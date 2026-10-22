@@ -276,12 +276,74 @@ void ScreenMirrorPlugin::StreamWorkerLoop(SOCKET sock) {
         // Timed out waiting for next video frame, keep listening!
         continue;
       }
-      Log("STREAM", "Video socket read error (" + std::to_string(err) + "), disconnecting...", "warn");
-      break;
+      Log("STREAM", "Video socket read error (" + std::to_string(err) + "), attempting reconnection...", "warn");
+      closesocket(sock);
+      sock = INVALID_SOCKET;
+      active_tunnel_sock_ = INVALID_SOCKET;
     } else {
-      Log("STREAM", "Video socket closed by peer", "info");
-      break;
+      Log("STREAM", "Video socket closed by peer, attempting reconnection...", "info");
+      closesocket(sock);
+      sock = INVALID_SOCKET;
+      active_tunnel_sock_ = INVALID_SOCKET;
     }
+
+    if (sock == INVALID_SOCKET && is_streaming_) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(250));
+      SOCKET new_sock = INVALID_SOCKET;
+      std::string err;
+
+      if (current_device_id_ > 0) {
+        usbmuxd_client_->ConnectTunnel(current_device_id_, 25334, &new_sock, &err);
+      }
+
+      if (new_sock == INVALID_SOCKET && !current_host_ip_.empty()) {
+        SOCKET direct_sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        if (direct_sock != INVALID_SOCKET) {
+          sockaddr_in addr{};
+          addr.sin_family = AF_INET;
+          addr.sin_port = htons(25334);
+          inet_pton(AF_INET, current_host_ip_.c_str(), &addr.sin_addr);
+
+          u_long mode = 1;
+          ioctlsocket(direct_sock, FIONBIO, &mode);
+          connect(direct_sock, reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
+
+          fd_set write_fds;
+          FD_ZERO(&write_fds);
+          FD_SET(direct_sock, &write_fds);
+          timeval tv{1, 0};
+          if (select(0, nullptr, &write_fds, nullptr, &tv) > 0) {
+            mode = 0;
+            ioctlsocket(direct_sock, FIONBIO, &mode);
+            new_sock = direct_sock;
+          } else {
+            closesocket(direct_sock);
+          }
+        }
+      }
+
+      if (new_sock != INVALID_SOCKET) {
+        const BOOL flag = TRUE;
+        setsockopt(new_sock, IPPROTO_TCP, TCP_NODELAY, reinterpret_cast<const char*>(&flag), sizeof(flag));
+        int rcv_buf = 2 * 1024 * 1024;
+        setsockopt(new_sock, SOL_SOCKET, SO_RCVBUF, reinterpret_cast<const char*>(&rcv_buf), sizeof(rcv_buf));
+        DWORD rcv_timeout = 1000;
+        setsockopt(new_sock, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&rcv_timeout), sizeof(rcv_timeout));
+
+        sock = new_sock;
+        active_tunnel_sock_ = new_sock;
+        Log("STREAM", "Video tunnel reconnected successfully to port 25334!", "success");
+        continue;
+      } else {
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        continue;
+      }
+    }
+  }
+
+  if (sock != INVALID_SOCKET) {
+    closesocket(sock);
+    active_tunnel_sock_ = INVALID_SOCKET;
   }
 
   is_streaming_ = false;
