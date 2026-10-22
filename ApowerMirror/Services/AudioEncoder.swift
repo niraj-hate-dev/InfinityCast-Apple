@@ -18,6 +18,12 @@ import CoreMedia
 import AudioToolbox
 import Darwin
 
+private final class AudioInputContext {
+    let pcm: Data
+    var offset: Int = 0
+    init(pcm: Data) { self.pcm = pcm }
+}
+
 public final class AudioEncoder {
 
     // MARK: - Types
@@ -215,84 +221,87 @@ public final class AudioEncoder {
             }
 
             while self.pcmBuffer.count >= requiredChunkSize {
-                var chunkData = self.pcmBuffer.subdata(in: 0..<requiredChunkSize)
-                self.pcmBuffer.removeSubrange(0..<requiredChunkSize)
+                var outAudioBufferList = AudioBufferList()
+                outAudioBufferList.mNumberBuffers = 1
+                outAudioBufferList.mBuffers.mNumberChannels = 2
+                outAudioBufferList.mBuffers.mDataByteSize = UInt32(self.aacBufferSize)
+                outAudioBufferList.mBuffers.mData = UnsafeMutableRawPointer(self.aacBuffer)
 
-                var inputABL = AudioBufferList()
-                inputABL.mNumberBuffers = 1
-                inputABL.mBuffers.mNumberChannels = 2
-                inputABL.mBuffers.mDataByteSize = UInt32(requiredChunkSize)
+                var ioOutputDataPacketSize: UInt32 = 1
+                var packetDesc = AudioStreamPacketDescription()
 
-                chunkData.withUnsafeMutableBytes { (rawBuf: UnsafeMutableRawBufferPointer) in
-                    guard let basePtr = rawBuf.baseAddress else { return }
-                    inputABL.mBuffers.mData = basePtr
+                let context = AudioInputContext(pcm: self.pcmBuffer)
+                let contextPtr = Unmanaged.passUnretained(context).toOpaque()
 
-                    var outAudioBufferList = AudioBufferList()
-                    outAudioBufferList.mNumberBuffers = 1
-                    outAudioBufferList.mBuffers.mNumberChannels = 2
-                    outAudioBufferList.mBuffers.mDataByteSize = UInt32(self.aacBufferSize)
-                    outAudioBufferList.mBuffers.mData = UnsafeMutableRawPointer(self.aacBuffer)
+                let inputProc: AudioConverterComplexInputDataProc = { (
+                    _,
+                    ioNumberDataPackets,
+                    ioData,
+                    _,
+                    inUserData
+                ) -> OSStatus in
+                    guard let inUserData = inUserData else {
+                        ioNumberDataPackets.pointee = 0
+                        return -50 // paramErr
+                    }
+                    let ctx = Unmanaged<AudioInputContext>.fromOpaque(inUserData).takeUnretainedValue()
+                    let remainingBytes = ctx.pcm.count - ctx.offset
+                    let availablePackets = UInt32(remainingBytes / 4)
 
-                    var ioOutputDataPacketSize: UInt32 = 1
-                    var packetDesc = AudioStreamPacketDescription()
+                    if availablePackets == 0 {
+                        ioNumberDataPackets.pointee = 0
+                        ioData.pointee.mBuffers.mData = nil
+                        ioData.pointee.mBuffers.mDataByteSize = 0
+                        return 500 // Controlled EOF signal
+                    }
 
-                    let inputProc: AudioConverterComplexInputDataProc = { (
-                        _,
-                        ioNumberDataPackets,
-                        ioData,
-                        _,
-                        inUserData
-                    ) -> OSStatus in
-                        guard let inUserData = inUserData else {
-                            ioNumberDataPackets.pointee = 0
-                            return -50 // paramErr
-                        }
-                        let abl = inUserData.assumingMemoryBound(to: AudioBufferList.self)
-                        let byteSize = abl.pointee.mBuffers.mDataByteSize
-                        if byteSize == 0 {
-                            ioNumberDataPackets.pointee = 0
-                            ioData.pointee.mBuffers.mData = nil
-                            ioData.pointee.mBuffers.mDataByteSize = 0
-                            return 500 // Controlled EOF signal to stop AudioConverter without infinite loop
-                        }
+                    let packetsToSupply = min(ioNumberDataPackets.pointee, availablePackets)
+                    let bytesToSupply = Int(packetsToSupply * 4)
 
+                    ctx.pcm.withUnsafeBytes { rawBytes in
+                        guard let basePtr = rawBytes.baseAddress else { return }
                         ioData.pointee.mNumberBuffers = 1
                         ioData.pointee.mBuffers.mNumberChannels = 2
-                        ioData.pointee.mBuffers.mData = abl.pointee.mBuffers.mData
-                        ioData.pointee.mBuffers.mDataByteSize = byteSize
-                        ioNumberDataPackets.pointee = byteSize / 4
-
-                        abl.pointee.mBuffers.mDataByteSize = 0
-                        return noErr
+                        ioData.pointee.mBuffers.mDataByteSize = UInt32(bytesToSupply)
+                        ioData.pointee.mBuffers.mData = UnsafeMutableRawPointer(mutating: basePtr.advanced(by: ctx.offset))
                     }
+                    ctx.offset += bytesToSupply
+                    ioNumberDataPackets.pointee = packetsToSupply
+                    return noErr
+                }
 
-                    let convStatus = AudioConverterFillComplexBuffer(
-                        converter,
-                        inputProc,
-                        &inputABL,
-                        &ioOutputDataPacketSize,
-                        &outAudioBufferList,
-                        &packetDesc
-                    )
+                let convStatus = AudioConverterFillComplexBuffer(
+                    converter,
+                    inputProc,
+                    contextPtr,
+                    &ioOutputDataPacketSize,
+                    &outAudioBufferList,
+                    &packetDesc
+                )
 
-                    if (convStatus == noErr || convStatus == 500) && ioOutputDataPacketSize > 0 {
-                        let aacSize = Int(packetDesc.mDataByteSize > 0 ? packetDesc.mDataByteSize : outAudioBufferList.mBuffers.mDataByteSize)
-                        if aacSize > 0 {
-                            // Prepend standard 7-byte ADTS Header (matching ASM @ 0xe56c)
-                            let adtsHeader = self.createAdtsHeader(packetLength: aacSize)
-                            var packet = Data(adtsHeader)
-                            packet.append(self.aacBuffer, count: aacSize)
+                if context.offset > 0 {
+                    let consumed = min(context.offset, self.pcmBuffer.count)
+                    self.pcmBuffer.removeSubrange(0..<consumed)
+                }
 
-                            self.frameCount += 1
-                            if self.frameCount <= 5 || self.frameCount % 200 == 0 {
-                                NSLog("[AudioEncoder] Encoded AAC frame #%d (%d bytes)", self.frameCount, packet.count)
-                            }
+                if (convStatus == noErr || convStatus == 500) && ioOutputDataPacketSize > 0 {
+                    let aacSize = Int(packetDesc.mDataByteSize > 0 ? packetDesc.mDataByteSize : outAudioBufferList.mBuffers.mDataByteSize)
+                    if aacSize > 0 {
+                        // Prepend standard 7-byte ADTS Header (matching ASM @ 0xe56c)
+                        let adtsHeader = self.createAdtsHeader(packetLength: aacSize)
+                        var packet = Data(adtsHeader)
+                        packet.append(self.aacBuffer, count: aacSize)
 
-                            self.packetHandler(packet)
+                        self.frameCount += 1
+                        if self.frameCount <= 5 || self.frameCount % 200 == 0 {
+                            NSLog("[AudioEncoder] Encoded AAC frame #%d (%d bytes)", self.frameCount, packet.count)
                         }
-                    } else if convStatus != noErr && convStatus != 500 {
-                        NSLog("[AudioEncoder] AudioConverterFillComplexBuffer status: %d (packets: %d)", convStatus, ioOutputDataPacketSize)
+
+                        self.packetHandler(packet)
                     }
+                } else {
+                    // Not enough samples to output a packet yet (priming), wait for next sample buffer
+                    break
                 }
             }
         }
@@ -321,7 +330,7 @@ public final class AudioEncoder {
         var destinationFormat = AudioStreamBasicDescription(
             mSampleRate: self.sampleRate,
             mFormatID: kAudioFormatMPEG4AAC,
-            mFormatFlags: AudioFormatFlags(MPEG4ObjectID.AAC_LC.rawValue), // 2
+            mFormatFlags: 0, // Must be 0 for standard AAC-LC
             mBytesPerPacket: 0,
             mFramesPerPacket: 1024,
             mBytesPerFrame: 0,
@@ -330,22 +339,21 @@ public final class AudioEncoder {
             mReserved: 0
         )
 
-        var description = AudioClassDescription(
-            mType: kAudioEncoderComponentType,
-            mSubType: kAudioFormatMPEG4AAC,
-            mManufacturer: kAppleSoftwareAudioCodecManufacturer
-        )
-
-        var status = AudioConverterNewSpecific(
-            &sourceFormat,
-            &destinationFormat,
-            1,
-            &description,
-            &audioConverter
-        )
+        var status = AudioConverterNew(&sourceFormat, &destinationFormat, &audioConverter)
 
         if status != noErr {
-            status = AudioConverterNew(&sourceFormat, &destinationFormat, &audioConverter)
+            var description = AudioClassDescription(
+                mType: kAudioEncoderComponentType,
+                mSubType: kAudioFormatMPEG4AAC,
+                mManufacturer: kAppleSoftwareAudioCodecManufacturer
+            )
+            status = AudioConverterNewSpecific(
+                &sourceFormat,
+                &destinationFormat,
+                1,
+                &description,
+                &audioConverter
+            )
         }
 
         guard status == noErr, let converter = audioConverter else {
