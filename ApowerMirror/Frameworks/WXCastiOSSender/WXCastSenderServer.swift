@@ -506,7 +506,7 @@ public final class WXCastSenderServer {
             }
         }
 
-        // 2. Dispatch via BSD sockets
+        // 2. Dispatch via BSD sockets (Port 25334)
         bsdSocketLock.lock()
         let clientFds = bsdClientSockets
         bsdSocketLock.unlock()
@@ -524,14 +524,16 @@ public final class WXCastSenderServer {
                             totalSent += sent
                             retries = 0
                         } else {
-                            if (errno == EAGAIN || errno == EWOULDBLOCK) && retries < 5 {
+                            if (errno == EAGAIN || errno == EWOULDBLOCK) && retries < 25 {
                                 retries += 1
-                                usleep(200)
+                                usleep(1000) // Wait up to 25ms for USB tunnel drain
                                 continue
                             }
-                            if errno != EAGAIN && errno != EWOULDBLOCK {
-                                deadFds.append(fd)
-                            }
+                            // If we already wrote part of the frame (`totalSent > 0`), leaving the
+                            // socket open will corrupt the H.264 stream on the desktop!
+                            // Close the stalled client socket or force an immediate IDR keyframe recovery.
+                            deadFds.append(fd)
+                            self.requestEncoderKeyframeRefresh()
                             break
                         }
                     }
@@ -711,14 +713,12 @@ public final class WXCastSenderServer {
                             totalSent += sent
                             retries = 0
                         } else {
-                            if (errno == EAGAIN || errno == EWOULDBLOCK) && retries < 5 {
+                            if (errno == EAGAIN || errno == EWOULDBLOCK) && retries < 25 {
                                 retries += 1
-                                usleep(200)
+                                usleep(1000)
                                 continue
                             }
-                            if errno != EAGAIN && errno != EWOULDBLOCK {
-                                deadFds.append(fd)
-                            }
+                            deadFds.append(fd)
                             break
                         }
                     }
