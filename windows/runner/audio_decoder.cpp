@@ -349,7 +349,8 @@ bool AudioDecoder::DecodeStream(const uint8_t* in_data, size_t in_size) {
   for (int i = 0; i < cur_size; ) {
     if (i + 4 <= cur_size &&
         cur_ptr[i] == 0x00 && cur_ptr[i + 1] == 0x00 &&
-        cur_ptr[i + 2] == 0x00 && cur_ptr[i + 3] == 0x02) {
+        cur_ptr[i + 2] == 0x00 && cur_ptr[i + 3] == 0x02 &&
+        (i + 4 == cur_size || cur_ptr[i + 4] == 0xFF || cur_ptr[i + 4] == 0x00)) {
       i += 4;
     } else {
       clean_buf.push_back(cur_ptr[i++]);
