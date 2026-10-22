@@ -144,40 +144,9 @@ public class SampleHandler: RPBroadcastSampleHandler {
         autoreleasepool {
             switch sampleBufferType {
             case .video:
-                // Mach Memory Footprint Guard (Jetsam 50MB ceiling protection) - sampled every 15 frames
                 self.videoFrameCount += 1
-                if self.videoFrameCount % 15 == 0 {
-                    let currentRamMB = self.getMemoryFootprintMB()
-                    if self.isMemoryLocked {
-                        if currentRamMB < self.kMemoryUnlockThresholdMB {
-                            self.isMemoryLocked = false
-                            self.consecutiveMemoryLockedFrames = 0
-                            self.pendingKeyframeRequest = true
-                            NSLog("[SampleHandler] Memory normalized (%.2f MB < %.2f MB), unlocking video frames", currentRamMB, self.kMemoryUnlockThresholdMB)
-                        }
-                    } else if currentRamMB >= self.kMemoryLockThresholdMB {
-                        self.isMemoryLocked = true
-                        self.consecutiveMemoryLockedFrames = 0
-                        NSLog("[SampleHandler] Memory throttle triggered (%.2f MB >= %.2f MB). Throttling to prevent Jetsam kill", currentRamMB, self.kMemoryLockThresholdMB)
-                    }
-                }
-
-                if self.isMemoryLocked {
-                    self.consecutiveMemoryLockedFrames += 1
-                    self.droppedVideoFramesDueToMemory += 1
-
-                    // If memory remains locked for more than 45 consecutive frames,
-                    // forcefully invalidate the VideoEncoder to release its internal CVPixelBuffer pools!
-                    if self.consecutiveMemoryLockedFrames > 45 && self.videoEncoder != nil {
-                        NSLog("[SampleHandler] Memory locked for %d frames. Releasing VideoEncoder to free buffer pools", self.consecutiveMemoryLockedFrames)
-                        self.videoEncoder?.invalidate()
-                        self.videoEncoder = nil
-                    }
-
-                    if self.droppedVideoFramesDueToMemory % 60 == 0 {
-                        NSLog("[SampleHandler] Memory throttle ACTIVE. Dropped %d video frames", self.droppedVideoFramesDueToMemory)
-                    }
-                    return
+                if self.videoFrameCount <= 5 || self.videoFrameCount % 300 == 0 {
+                    NSLog("[SampleHandler] Processing video frame #%d", self.videoFrameCount)
                 }
 
                 // Lazily initialize hardware VideoEncoder on the very first video frame
