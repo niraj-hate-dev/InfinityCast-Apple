@@ -517,15 +517,23 @@ public final class WXCastSenderServer {
                 var deadFds: [Int32] = []
                 for fd in clientFds {
                     var totalSent = 0
+                    var retries = 0
                     while totalSent < data.count {
                         let sent = send(fd, basePtr.advanced(by: totalSent), data.count - totalSent, 0)
-                        if sent <= 0 {
+                        if sent > 0 {
+                            totalSent += sent
+                            retries = 0
+                        } else {
+                            if (errno == EAGAIN || errno == EWOULDBLOCK) && retries < 5 {
+                                retries += 1
+                                usleep(200)
+                                continue
+                            }
                             if errno != EAGAIN && errno != EWOULDBLOCK {
                                 deadFds.append(fd)
                             }
                             break
                         }
-                        totalSent += sent
                     }
                 }
                 if !deadFds.isEmpty {
@@ -696,15 +704,23 @@ public final class WXCastSenderServer {
                 var deadFds: [Int32] = []
                 for fd in clientFds {
                     var totalSent = 0
+                    var retries = 0
                     while totalSent < data.count {
                         let sent = send(fd, basePtr.advanced(by: totalSent), data.count - totalSent, 0)
-                        if sent <= 0 {
+                        if sent > 0 {
+                            totalSent += sent
+                            retries = 0
+                        } else {
+                            if (errno == EAGAIN || errno == EWOULDBLOCK) && retries < 5 {
+                                retries += 1
+                                usleep(200)
+                                continue
+                            }
                             if errno != EAGAIN && errno != EWOULDBLOCK {
                                 deadFds.append(fd)
                             }
                             break
                         }
-                        totalSent += sent
                     }
                 }
                 if !deadFds.isEmpty {

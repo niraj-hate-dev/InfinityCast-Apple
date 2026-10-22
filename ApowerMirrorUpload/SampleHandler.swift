@@ -55,6 +55,7 @@ public class SampleHandler: RPBroadcastSampleHandler {
     private var consecutiveMemoryLockedFrames = 0
 
     private let networkQueue = DispatchQueue(label: "com.apowermirror.upload.network", qos: .userInteractive)
+    private let audioNetworkQueue = DispatchQueue(label: "com.apowermirror.upload.audio.network", qos: .userInteractive)
     private var targetFps: Int32 = 60
     private var targetBitrate: Int32 = 4_000_000
 
@@ -207,7 +208,7 @@ public class SampleHandler: RPBroadcastSampleHandler {
                 // Feed CVPixelBuffer to hardware encoder
                 videoEncoder?.encode(sampleBuffer: sampleBuffer, orientation: orientation)
 
-            case .audioApp:
+            case .audioApp, .audioMic:
                 // Auto Audio Detector: whenever device audio arrives (YouTube, games, media),
                 // automatically encode and transfer immediately!
                 self.audioFrameCount += 1
@@ -425,7 +426,7 @@ public class SampleHandler: RPBroadcastSampleHandler {
         isAudioConnecting = true
         audioConnectLock.unlock()
 
-        networkQueue.async { [weak self] in
+        audioNetworkQueue.async { [weak self] in
             guard let self = self, self.isBroadcasting else {
                 self?.audioConnectLock.lock()
                 self?.isAudioConnecting = false
@@ -495,7 +496,7 @@ public class SampleHandler: RPBroadcastSampleHandler {
             } else {
                 close(sock)
                 if self.isBroadcasting {
-                    self.networkQueue.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+                    self.audioNetworkQueue.asyncAfter(deadline: .now() + 0.25) { [weak self] in
                         self?.connectToAudioIPC()
                     }
                 }
@@ -522,24 +523,30 @@ public class SampleHandler: RPBroadcastSampleHandler {
             guard let basePtr = rawBuf.baseAddress else { return }
             var totalSent = 0
             let totalLength = data.count
+            var retries = 0
 
             while totalSent < totalLength {
                 let bytesToSend = totalLength - totalSent
                 let sent = send(sock, basePtr.advanced(by: totalSent), bytesToSend, 0)
-                if sent <= 0 {
-                    if errno != EAGAIN && errno != EWOULDBLOCK {
-                        NSLog("[SampleHandler] Audio socket send failed (errno: %d), reconnecting...", errno)
-                        closeAudioSocket()
-                        audioPacketQueueLock.lock()
-                        if audioPacketQueue.count < 30 {
-                            audioPacketQueue.append(data)
-                        }
-                        audioPacketQueueLock.unlock()
-                        connectToAudioIPC()
+                if sent > 0 {
+                    totalSent += sent
+                    retries = 0
+                } else {
+                    if (errno == EAGAIN || errno == EWOULDBLOCK) && retries < 5 {
+                        retries += 1
+                        usleep(500)
+                        continue
                     }
+                    NSLog("[SampleHandler] Audio socket send failed (sent %d/%d, errno: %d), reconnecting...", totalSent, totalLength, errno)
+                    closeAudioSocket()
+                    audioPacketQueueLock.lock()
+                    if audioPacketQueue.count < 30 {
+                        audioPacketQueue.append(data)
+                    }
+                    audioPacketQueueLock.unlock()
+                    connectToAudioIPC()
                     break
                 }
-                totalSent += sent
             }
         }
     }

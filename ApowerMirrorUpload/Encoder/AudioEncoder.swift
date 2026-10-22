@@ -68,11 +68,7 @@ public final class AudioEncoder {
             // ReplayKit dynamically changes format between apps or during pause/resume (44.1kHz / 48kHz, mono / stereo)
             let formatChanged: Bool = {
                 guard let cur = self.currentSourceFormat else { return true }
-                return cur.mSampleRate != newFormat.mSampleRate ||
-                       cur.mChannelsPerFrame != newFormat.mChannelsPerFrame ||
-                       cur.mFormatFlags != newFormat.mFormatFlags ||
-                       cur.mBytesPerFrame != newFormat.mBytesPerFrame ||
-                       cur.mBitsPerChannel != newFormat.mBitsPerChannel
+                return newFormat.mSampleRate > 0 && cur.mSampleRate != newFormat.mSampleRate
             }()
 
             if self.audioConverter == nil || formatChanged {
@@ -90,14 +86,14 @@ public final class AudioEncoder {
             let numSamples = CMSampleBufferGetNumSamples(sampleBuffer)
             guard numSamples > 0 else { return }
 
-            // 2. Discontinuity Detection (Pause / Resume gap > 1.5s)
+            // 2. Discontinuity Detection (Pause / Resume gap > 2.0s)
             let sampleRateVal = newFormat.mSampleRate > 0 ? newFormat.mSampleRate : 44100.0
             let bufferDuration = Double(numSamples) / sampleRateVal
             let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
             let ptsSeconds = pts.isValid ? pts.seconds : -1.0
             if ptsSeconds > 0 && self.lastBufferEndPts > 0 {
                 let gap = ptsSeconds - self.lastBufferEndPts
-                if gap > 1.5 || gap < -0.1 {
+                if gap > 2.0 {
                     // Audio paused & resumed! Clear leftover partial frames and reset converter state
                     self.pcmBuffer.removeAll()
                     AudioConverterReset(converter)
@@ -135,8 +131,9 @@ public final class AudioEncoder {
 
             func readFloatSample(_ ptr: UnsafePointer<Float>, _ idx: Int) -> Float {
                 if isBigEndian {
-                    let u32 = ptr.withMemoryRebound(to: UInt32.self, capacity: idx + 1) { $0[idx] }
-                    return Float(bitPattern: UInt32(bigEndian: u32))
+                    var raw: UInt32 = 0
+                    memcpy(&raw, ptr.advanced(by: idx), 4)
+                    return Float(bitPattern: UInt32(bigEndian: raw))
                 }
                 return ptr[idx]
             }
@@ -241,13 +238,13 @@ public final class AudioEncoder {
                     ) -> OSStatus in
                         guard let inUserData = inUserData else {
                             ioNumberDataPackets.pointee = 0
-                            return -1
+                            return noErr
                         }
                         let abl = inUserData.assumingMemoryBound(to: AudioBufferList.self)
                         let byteSize = abl.pointee.mBuffers.mDataByteSize
                         if byteSize == 0 {
                             ioNumberDataPackets.pointee = 0
-                            return -1
+                            return noErr
                         }
 
                         ioData.pointee.mBuffers.mData = abl.pointee.mBuffers.mData
@@ -268,7 +265,7 @@ public final class AudioEncoder {
                         nil
                     )
 
-                    if convStatus == noErr && ioOutputDataPacketSize > 0 {
+                    if (convStatus == noErr || ioOutputDataPacketSize > 0) && ioOutputDataPacketSize > 0 {
                         let aacSize = Int(outAudioBufferList.mBuffers.mDataByteSize)
                         if aacSize > 0 {
                             // Prepend standard 7-byte ADTS Header (matching ASM @ 0xe56c)
@@ -283,6 +280,8 @@ public final class AudioEncoder {
 
                             self.packetHandler(packet)
                         }
+                    } else if convStatus != noErr {
+                        NSLog("[AudioEncoder] AudioConverterFillComplexBuffer status: %d (packets: %d)", convStatus, ioOutputDataPacketSize)
                     }
                 }
             }
