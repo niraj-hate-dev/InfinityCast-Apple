@@ -228,6 +228,7 @@ public final class AudioEncoder {
                     outAudioBufferList.mBuffers.mData = UnsafeMutableRawPointer(self.aacBuffer)
 
                     var ioOutputDataPacketSize: UInt32 = 1
+                    var packetDesc = AudioStreamPacketDescription()
 
                     let inputProc: AudioConverterComplexInputDataProc = { (
                         _,
@@ -238,17 +239,18 @@ public final class AudioEncoder {
                     ) -> OSStatus in
                         guard let inUserData = inUserData else {
                             ioNumberDataPackets.pointee = 0
-                            return -1
+                            return -50 // paramErr
                         }
                         let abl = inUserData.assumingMemoryBound(to: AudioBufferList.self)
                         let byteSize = abl.pointee.mBuffers.mDataByteSize
                         if byteSize == 0 {
                             ioNumberDataPackets.pointee = 0
-                            return -1
+                            return noErr
                         }
 
-                        ioData.pointee.mBuffers.mData = abl.pointee.mBuffers.mData
+                        ioData.pointee.mNumberBuffers = 1
                         ioData.pointee.mBuffers.mNumberChannels = 2
+                        ioData.pointee.mBuffers.mData = abl.pointee.mBuffers.mData
                         ioData.pointee.mBuffers.mDataByteSize = byteSize
                         ioNumberDataPackets.pointee = byteSize / 4
 
@@ -262,11 +264,11 @@ public final class AudioEncoder {
                         &inputABL,
                         &ioOutputDataPacketSize,
                         &outAudioBufferList,
-                        nil
+                        &packetDesc
                     )
 
-                    if ioOutputDataPacketSize > 0 {
-                        let aacSize = Int(outAudioBufferList.mBuffers.mDataByteSize)
+                    if convStatus == noErr && ioOutputDataPacketSize > 0 {
+                        let aacSize = Int(packetDesc.mDataByteSize > 0 ? packetDesc.mDataByteSize : outAudioBufferList.mBuffers.mDataByteSize)
                         if aacSize > 0 {
                             // Prepend standard 7-byte ADTS Header (matching ASM @ 0xe56c)
                             let adtsHeader = self.createAdtsHeader(packetLength: aacSize)
@@ -280,7 +282,7 @@ public final class AudioEncoder {
 
                             self.packetHandler(packet)
                         }
-                    } else if convStatus != noErr && convStatus != -1 {
+                    } else if convStatus != noErr {
                         NSLog("[AudioEncoder] AudioConverterFillComplexBuffer status: %d (packets: %d)", convStatus, ioOutputDataPacketSize)
                     }
                 }

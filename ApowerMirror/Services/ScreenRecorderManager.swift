@@ -34,7 +34,7 @@ public final class ScreenRecorderManager {
 
     // MARK: - Initialization
     private init() {
-        recorder.isMicrophoneEnabled = true
+        recorder.isMicrophoneEnabled = false
     }
 
     public var isCapturing: Bool {
@@ -95,9 +95,8 @@ public final class ScreenRecorderManager {
             case .audioApp:
                 self.audioEncoder?.encode(sampleBuffer: sampleBuffer)
             case .audioMic:
-                if self.recorder.isMicrophoneEnabled {
-                    self.audioEncoder?.encode(sampleBuffer: sampleBuffer)
-                }
+                // Ignore microphone audio during screen mirror to prevent format resets and echo
+                break
             @unknown default:
                 break
             }

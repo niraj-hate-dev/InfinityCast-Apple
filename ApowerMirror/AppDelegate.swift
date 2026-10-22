@@ -28,8 +28,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate, MMWormholeManagerDelegate
         configureBackgroundAudioSession()
         SilentAudioKeepAlive.shared.start()
 
-        // 2. Initialize and start WXCastiOSSender service (Listening on 25333 / 25334)
-        WXCastiOSSender.shared.startMirrorService(channelPort: 25333, mirrorPort: 25334)
+        // 2. Initialize and start WXCastiOSSender service (Listening on 25333 / 25334 / 25335)
+        WXCastiOSSender.shared.startMirrorService(channelPort: 25333, mirrorPort: 25334, audioPort: 25335)
 
         // 3. Connect MMWormhole IPC Manager
         MMWormholeManager.shared.delegate = self
