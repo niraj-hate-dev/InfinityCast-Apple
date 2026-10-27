@@ -1,12 +1,9 @@
-//
 //  SampleHandler.swift
 //  ApowerMirrorUpload / AppleCast
 //
 //  ReplayKit Broadcast Upload Extension
-//  Subclass: RPBroadcastSampleHandler
-//  Pure POSIX BSD Socket streaming to Main App loopback IPC (127.0.0.1:8888)
-//  Hardened for iOS 18: Immediate XPC handshake return, Zero-Jetsam OOM,
-//  SO_NOSIGPIPE protection against pipe termination signals.
+//  - Direct BSD TCP Server on Port 15334 (Video) & Port 15335 (Audio) for Zero Background Freeze
+//  - Loopback IPC Client to 127.0.0.1:8888 (Video) & 127.0.0.1:8889 (Audio)
 //
 
 import ReplayKit
@@ -20,22 +17,41 @@ public class SampleHandler: RPBroadcastSampleHandler {
     // MARK: - Constants
     private static let kIpcPort: UInt16 = 8888
     private static let kAudioIpcPort: UInt16 = 8889
+    private static let kDirectVideoPort: UInt16 = 15334
+    private static let kDirectAudioPort: UInt16 = 15335
     private static let kStopNotification = "com.apowermirror.broadcast.StopBroadcast"
     private static let kForceKeyframeNotification = "com.apowermirror.forceKeyframe"
 
-    // MARK: - Encoders & Network Transport
+    // MARK: - Encoders & State
     private var videoEncoder: VideoEncoder?
     private var audioEncoder: AudioEncoder?
     private var isBroadcasting = false
+    private var pendingKeyframeRequest = true
+    private var audioFrameCount: Int = 0
+
+    // Direct Extension Server Sockets (Never suspended when Main App is in background!)
+    private var directVideoListenSock: Int32 = -1
+    private var directVideoClients: [Int32] = []
+    private let directVideoLock = NSLock()
+
+    private var directAudioListenSock: Int32 = -1
+    private var directAudioClients: [Int32] = []
+    private let directAudioLock = NSLock()
+
+    // Cached SPS/PPS Header for late-joining direct clients
+    private var latestKeyFrameHeader: Data?
+    private let headerLock = NSLock()
+
+    // Outbound Main App IPC Sockets (8888 / 8889)
     private var bsdClientSocket: Int32 = -1
     private var audioBsdClientSocket: Int32 = -1
     private let socketLock = NSLock()
     private let audioSocketLock = NSLock()
-    private var audioFrameCount: Int = 0
     private var isVideoConnecting = false
     private let videoConnectLock = NSLock()
     private var isAudioConnecting = false
     private let audioConnectLock = NSLock()
+
     private struct VideoQueueItem {
         let data: Data
         let isKeyFrame: Bool
@@ -44,65 +60,51 @@ public class SampleHandler: RPBroadcastSampleHandler {
     private let videoPacketQueueLock = NSLock()
     private var audioPacketQueue: [Data] = []
     private let audioPacketQueueLock = NSLock()
-    private var pendingKeyframeRequest = true
 
     // MARK: - Mach Memory Throttle Thresholds (Jetsam Protection)
     private var videoFrameCount: Int = 0
     private var isMemoryLocked = false
-    private let kMemoryLockThresholdMB: Double = 48.0
-    private let kMemoryUnlockThresholdMB: Double = 45.0
-    private var droppedVideoFramesDueToMemory = 0
+    private let kMemoryLockThresholdMB: Double = 46.0
+    private let kMemoryUnlockThresholdMB: Double = 42.0
     private var consecutiveMemoryLockedFrames = 0
 
     private let networkQueue = DispatchQueue(label: "com.apowermirror.upload.network", qos: .userInteractive)
     private let audioNetworkQueue = DispatchQueue(label: "com.apowermirror.upload.audio.network", qos: .userInteractive)
-    // All writes to the audio IPC socket must be serialized. AudioEncoder runs on
-    // its own queue while reconnect code can flush queued packets concurrently;
-    // concurrent TCP writes can interleave two ADTS frames.
-    private let audioSendQueue = DispatchQueue(label: "com.apowermirror.upload.audio.send", qos: .userInteractive)
     private var targetFps: Int32 = 60
     private var targetBitrate: Int32 = 4_000_000
-
-    // MARK: - Lifecycle
 
     public override init() {
         super.init()
     }
 
     public override func broadcastStarted(withSetupInfo setupInfo: [String : NSObject]?) {
-        // =========================================================================
-        // CRITICAL iOS 18 REQUIREMENT:
-        // Must return in < 20ms so replayd XPC watchdog finishes the handshake.
-        // Calling super turns the indicator pulsating RED and starts frame ingestion.
-        // =========================================================================
         super.broadcastStarted(withSetupInfo: setupInfo)
         isBroadcasting = true
 
-        NSLog("[SampleHandler] ReplayKit broadcast started -> XPC handshake acknowledged")
+        NSLog("[SampleHandler] ReplayKit broadcast started -> Launching direct servers & IPC")
 
-        // 1. Notify Main App via Darwin Notification Center
         notifyMainApp(event: "BroadcastStarted")
-
-        // 2. Setup observer to stop broadcast when user taps Stop in Main App
         setupDarwinStopReceiver()
-
-        // 3. Setup observer for cross-process keyframe requests from desktop
         setupDarwinKeyframeReceiver()
 
-        // 4. Connect non-blocking BSD sockets to Main App IPC on 127.0.0.1:8888 (Video) & 8889 (Audio)
+        // 1. Start Direct Extension Servers (15334 Video, 15335 Audio) - immune to Main App background suspension!
+        startDirectVideoServer(port: Self.kDirectVideoPort)
+        startDirectAudioServer(port: Self.kDirectAudioPort)
+
+        // 2. Also connect to Main App IPC (8888 Video, 8889 Audio)
         connectToMainAppIPC()
         connectToAudioIPC()
     }
 
     public override func broadcastPaused() {
         super.broadcastPaused()
-        NSLog("[SampleHandler] Broadcast paused")
         notifyMainApp(event: "PauseVideo")
     }
 
     public override func broadcastResumed() {
         super.broadcastResumed()
-        NSLog("[SampleHandler] Broadcast resumed")
+        pendingKeyframeRequest = true
+        videoEncoder?.forceKeyFrame()
         notifyMainApp(event: "ResumeVideo")
     }
 
@@ -110,59 +112,62 @@ public class SampleHandler: RPBroadcastSampleHandler {
         super.broadcastFinished()
         isBroadcasting = false
 
-        NSLog("[SampleHandler] Broadcast finished -> cleaning up encoders and sockets")
-
-        // Invalidate and free video encoder
         videoEncoder?.invalidate()
         videoEncoder = nil
         videoPacketQueueLock.lock()
         videoPacketQueue.removeAll()
         videoPacketQueueLock.unlock()
-        consecutiveMemoryLockedFrames = 0
 
-        // Invalidate and free audio encoder
         audioEncoder?.invalidate()
         audioEncoder = nil
-        audioFrameCount = 0
         audioPacketQueueLock.lock()
         audioPacketQueue.removeAll()
         audioPacketQueueLock.unlock()
 
         removeDarwinKeyframeReceiver()
-
-        // Clean up BSD sockets
         closeSocket()
         closeAudioSocket()
+        stopDirectServers()
 
-        // Notify Main App that broadcast finished
         notifyMainApp(event: "Finish")
-        NSLog("[SampleHandler] Clean shutdown complete")
     }
 
-    // MARK: - Frame Processing (Zero Jetsam OOM)
+    // MARK: - Frame Processing
 
     public override func processSampleBuffer(_ sampleBuffer: CMSampleBuffer, with sampleBufferType: RPSampleBufferType) {
         guard isBroadcasting else { return }
 
-        // Wrap in autoreleasepool to prevent memory spikes under high frame rates
         autoreleasepool {
             switch sampleBufferType {
             case .video:
                 self.videoFrameCount += 1
-                if self.videoFrameCount <= 5 || self.videoFrameCount % 300 == 0 {
-                    NSLog("[SampleHandler] Processing video frame #%d", self.videoFrameCount)
+                if self.videoFrameCount % 15 == 0 {
+                    let currentRamMB = self.getMemoryFootprintMB()
+                    if self.isMemoryLocked {
+                        if currentRamMB < self.kMemoryUnlockThresholdMB {
+                            self.isMemoryLocked = false
+                            self.consecutiveMemoryLockedFrames = 0
+                            self.pendingKeyframeRequest = true
+                        }
+                    } else if currentRamMB >= self.kMemoryLockThresholdMB {
+                        self.isMemoryLocked = true
+                        self.consecutiveMemoryLockedFrames = 0
+                    }
                 }
 
-                // Lazily initialize hardware VideoEncoder on the very first video frame
+                if self.isMemoryLocked {
+                    self.consecutiveMemoryLockedFrames += 1
+                    if self.consecutiveMemoryLockedFrames > 30 && self.videoEncoder != nil {
+                        self.videoEncoder?.invalidate()
+                        self.videoEncoder = nil
+                    }
+                    return
+                }
+
                 if videoEncoder == nil {
-                    videoEncoder = VideoEncoder(bitrate: targetBitrate, fps: targetFps) { [weak self] (packet, isKeyFrame, isEndFrame) in
+                    videoEncoder = VideoEncoder(bitrate: targetBitrate, fps: targetFps) { [weak self] (packet, isKeyFrame, _) in
                         self?.enqueueVideoFrame(packet, isKeyFrame: isKeyFrame)
                     }
-
-                    videoEncoder?.setDimensionChangeHandler { [weak self] width, height, rotation in
-                        self?.sendGeometryChange(width: width, height: height, rotation: rotation)
-                    }
-
                     if pendingKeyframeRequest {
                         videoEncoder?.forceKeyFrame()
                         pendingKeyframeRequest = false
@@ -172,34 +177,23 @@ public class SampleHandler: RPBroadcastSampleHandler {
                     pendingKeyframeRequest = false
                 }
 
-                // Extract orientation attachment if available
                 var orientation: CGImagePropertyOrientation = .up
                 if let orientationAttachment = CMGetAttachment(sampleBuffer, key: RPVideoSampleOrientationKey as CFString, attachmentModeOut: nil) as? NSNumber {
                     orientation = CGImagePropertyOrientation(rawValue: orientationAttachment.uint32Value) ?? .up
                 }
 
-                // Feed CVPixelBuffer to hardware encoder
                 videoEncoder?.encode(sampleBuffer: sampleBuffer, orientation: orientation)
 
             case .audioApp:
-                // Auto Audio Detector: whenever device audio arrives (YouTube, games, media),
-                // automatically encode and transfer immediately!
                 self.audioFrameCount += 1
-                if self.audioFrameCount <= 5 || self.audioFrameCount % 200 == 0 {
-                    let numSamples = CMSampleBufferGetNumSamples(sampleBuffer)
-                    NSLog("[SampleHandler] Auto Audio Detector: app audio frame #%d received (%d samples)", self.audioFrameCount, numSamples)
-                }
-
                 if audioEncoder == nil {
-                    NSLog("[SampleHandler] First audio frame received -> Initializing AudioEncoder")
                     audioEncoder = AudioEncoder(sampleRate: 44100.0, channels: 2) { [weak self] packet in
-                        self?.sendAudioDataToMainApp(packet)
+                        self?.dispatchAudioPacket(packet)
                     }
                 }
                 audioEncoder?.encode(sampleBuffer: sampleBuffer)
 
             case .audioMic:
-                // Only stream system/app audio for mirror sessions (ignore mic to prevent feedback/channel clash)
                 break
 
             @unknown default:
@@ -208,115 +202,168 @@ public class SampleHandler: RPBroadcastSampleHandler {
         }
     }
 
-    // MARK: - Outbound POSIX BSD Socket IPC (to 127.0.0.1:8888)
+    // MARK: - Direct Extension TCP Servers (Ports 15334 & 15335)
 
-    private func connectToMainAppIPC() {
-        socketLock.lock()
-        let alreadyConnected = bsdClientSocket >= 0
-        socketLock.unlock()
-        if alreadyConnected {
-            return
-        }
-
-        videoConnectLock.lock()
-        if isVideoConnecting {
-            videoConnectLock.unlock()
-            return
-        }
-        isVideoConnecting = true
-        videoConnectLock.unlock()
-
-        networkQueue.async { [weak self] in
-            guard let self = self, self.isBroadcasting else {
-                self?.videoConnectLock.lock()
-                self?.isVideoConnecting = false
-                self?.videoConnectLock.unlock()
-                return
-            }
-
-            self.socketLock.lock()
-            if self.bsdClientSocket >= 0 {
-                self.socketLock.unlock()
-                self.videoConnectLock.lock()
-                self.isVideoConnecting = false
-                self.videoConnectLock.unlock()
-                return
-            }
-            self.socketLock.unlock()
-
+    private func startDirectVideoServer(port: UInt16) {
+        DispatchQueue.global(qos: .userInteractive).async { [weak self] in
+            guard let self = self else { return }
             let sock = socket(AF_INET, SOCK_STREAM, 0)
-            guard sock >= 0 else {
-                NSLog("[SampleHandler] Failed to create BSD socket: errno %d", errno)
-                self.videoConnectLock.lock()
-                self.isVideoConnecting = false
-                self.videoConnectLock.unlock()
-                return
-            }
+            guard sock >= 0 else { return }
 
-            // CRITICAL: Prevent SIGPIPE signal termination when peer closes connection
-            var noSigpipe: Int32 = 1
-            setsockopt(sock, SOL_SOCKET, SO_NOSIGPIPE, &noSigpipe, socklen_t(MemoryLayout<Int32>.size))
-
-            // Disable Nagle algorithm for real-time low-latency packet streaming
-            var noDelay: Int32 = 1
-            setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, &noDelay, socklen_t(MemoryLayout<Int32>.size))
-
-            // Expand socket send buffer to 2 MB to absorb frame bursts
-            var sndBuf: Int32 = 2 * 1024 * 1024
-            setsockopt(sock, SOL_SOCKET, SO_SNDBUF, &sndBuf, socklen_t(MemoryLayout<Int32>.size))
-
-            // Set sending timeout to 1 second so frame thread is never blocked
-            var timeout = timeval(tv_sec: 1, tv_usec: 0)
-            setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
+            var reuse: Int32 = 1
+            setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &reuse, socklen_t(MemoryLayout<Int32>.size))
+            setsockopt(sock, SOL_SOCKET, SO_REUSEPORT, &reuse, socklen_t(MemoryLayout<Int32>.size))
 
             var addr = sockaddr_in()
             addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
             addr.sin_family = sa_family_t(AF_INET)
-            addr.sin_port = SampleHandler.kIpcPort.bigEndian
-            inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr)
+            addr.sin_port = port.bigEndian
+            addr.sin_addr.s_addr = in_addr_t(0)
 
-            let res = withUnsafePointer(to: &addr) {
+            let bindRes = withUnsafePointer(to: &addr) {
                 $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-                    connect(sock, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+                    bind(sock, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
                 }
             }
-
-            self.videoConnectLock.lock()
-            self.isVideoConnecting = false
-            self.videoConnectLock.unlock()
-
-            if res == 0 {
-                self.socketLock.lock()
-                self.bsdClientSocket = sock
-                self.socketLock.unlock()
-                NSLog("[SampleHandler] Connected to Main App IPC on 127.0.0.1:%d", SampleHandler.kIpcPort)
-                // Mark keyframe required and force an immediate SPS + PPS + IDR keyframe
-                self.pendingKeyframeRequest = true
-                self.videoEncoder?.forceKeyFrame()
-                self.triggerVideoQueueDrain()
-            } else {
-                NSLog("[SampleHandler] Connect to 127.0.0.1:%d failed (errno: %d), retrying in 250ms...", SampleHandler.kIpcPort, errno)
+            guard bindRes >= 0, listen(sock, 5) >= 0 else {
                 close(sock)
-                // Retry connection if broadcast is still active
-                if self.isBroadcasting {
-                    self.networkQueue.asyncAfter(deadline: .now() + 0.25) { [weak self] in
-                        self?.connectToMainAppIPC()
+                return
+            }
+
+            self.directVideoLock.lock()
+            self.directVideoListenSock = sock
+            self.directVideoLock.unlock()
+            NSLog("[SampleHandler] Direct Video Server listening on port %d", port)
+
+            while self.isBroadcasting && self.directVideoListenSock >= 0 {
+                var clientAddr = sockaddr_in()
+                var addrLen = socklen_t(MemoryLayout<sockaddr_in>.size)
+                let clientFd = withUnsafeMutablePointer(to: &clientAddr) {
+                    $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                        accept(sock, $0, &addrLen)
                     }
                 }
+                guard clientFd >= 0 else { break }
+
+                var noSigpipe: Int32 = 1
+                setsockopt(clientFd, SOL_SOCKET, SO_NOSIGPIPE, &noSigpipe, socklen_t(MemoryLayout<Int32>.size))
+                var noDelay: Int32 = 1
+                setsockopt(clientFd, IPPROTO_TCP, TCP_NODELAY, &noDelay, socklen_t(MemoryLayout<Int32>.size))
+                var sndBuf: Int32 = 2 * 1024 * 1024
+                setsockopt(clientFd, SOL_SOCKET, SO_SNDBUF, &sndBuf, socklen_t(MemoryLayout<Int32>.size))
+                var timeout = timeval(tv_sec: 1, tv_usec: 0)
+                setsockopt(clientFd, SOL_SOCKET, SO_SNDTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
+
+                self.headerLock.lock()
+                let cached = self.latestKeyFrameHeader
+                self.headerLock.unlock()
+                if let hdr = cached {
+                    hdr.withUnsafeBytes { rawBuf in
+                        if let base = rawBuf.baseAddress {
+                            _ = send(clientFd, base, hdr.count, 0)
+                        }
+                    }
+                }
+
+                self.directVideoLock.lock()
+                self.directVideoClients.append(clientFd)
+                self.directVideoLock.unlock()
+
+                self.pendingKeyframeRequest = true
+                self.videoEncoder?.forceKeyFrame()
+                NSLog("[SampleHandler] Desktop connected directly to Extension Video port %d", port)
             }
         }
     }
 
+    private func startDirectAudioServer(port: UInt16) {
+        DispatchQueue.global(qos: .userInteractive).async { [weak self] in
+            guard let self = self else { return }
+            let sock = socket(AF_INET, SOCK_STREAM, 0)
+            guard sock >= 0 else { return }
+
+            var reuse: Int32 = 1
+            setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &reuse, socklen_t(MemoryLayout<Int32>.size))
+            setsockopt(sock, SOL_SOCKET, SO_REUSEPORT, &reuse, socklen_t(MemoryLayout<Int32>.size))
+
+            var addr = sockaddr_in()
+            addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+            addr.sin_family = sa_family_t(AF_INET)
+            addr.sin_port = port.bigEndian
+            addr.sin_addr.s_addr = in_addr_t(0)
+
+            let bindRes = withUnsafePointer(to: &addr) {
+                $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                    bind(sock, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+                }
+            }
+            guard bindRes >= 0, listen(sock, 5) >= 0 else {
+                close(sock)
+                return
+            }
+
+            self.directAudioLock.lock()
+            self.directAudioListenSock = sock
+            self.directAudioLock.unlock()
+            NSLog("[SampleHandler] Direct Audio Server listening on port %d", port)
+
+            while self.isBroadcasting && self.directAudioListenSock >= 0 {
+                var clientAddr = sockaddr_in()
+                var addrLen = socklen_t(MemoryLayout<sockaddr_in>.size)
+                let clientFd = withUnsafeMutablePointer(to: &clientAddr) {
+                    $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                        accept(sock, $0, &addrLen)
+                    }
+                }
+                guard clientFd >= 0 else { break }
+
+                var noSigpipe: Int32 = 1
+                setsockopt(clientFd, SOL_SOCKET, SO_NOSIGPIPE, &noSigpipe, socklen_t(MemoryLayout<Int32>.size))
+                var noDelay: Int32 = 1
+                setsockopt(clientFd, IPPROTO_TCP, TCP_NODELAY, &noDelay, socklen_t(MemoryLayout<Int32>.size))
+                var sndBuf: Int32 = 512 * 1024
+                setsockopt(clientFd, SOL_SOCKET, SO_SNDBUF, &sndBuf, socklen_t(MemoryLayout<Int32>.size))
+                var timeout = timeval(tv_sec: 1, tv_usec: 0)
+                setsockopt(clientFd, SOL_SOCKET, SO_SNDTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
+
+                self.directAudioLock.lock()
+                self.directAudioClients.append(clientFd)
+                self.directAudioLock.unlock()
+                NSLog("[SampleHandler] Desktop connected directly to Extension Audio port %d", port)
+            }
+        }
+    }
+
+    private func stopDirectServers() {
+        directVideoLock.lock()
+        if directVideoListenSock >= 0 { close(directVideoListenSock); directVideoListenSock = -1 }
+        directVideoClients.forEach { close($0) }
+        directVideoClients.removeAll()
+        directVideoLock.unlock()
+
+        directAudioLock.lock()
+        if directAudioListenSock >= 0 { close(directAudioListenSock); directAudioListenSock = -1 }
+        directAudioClients.forEach { close($0) }
+        directAudioClients.removeAll()
+        directAudioLock.unlock()
+    }
+
+    // MARK: - Video & Audio Dispatch
+
     private func enqueueVideoFrame(_ data: Data, isKeyFrame: Bool) {
+        if isKeyFrame {
+            headerLock.lock()
+            latestKeyFrameHeader = data
+            headerLock.unlock()
+        }
+
         videoPacketQueueLock.lock()
-        if videoPacketQueue.count >= 15 {
+        if videoPacketQueue.count >= 12 {
             if !isKeyFrame {
-                // Drop non-keyframe under backpressure to avoid buffering delay
                 videoPacketQueueLock.unlock()
                 videoEncoder?.forceKeyFrame()
                 return
             } else {
-                // Keep the keyframe, but drop older non-keyframes in queue
                 videoPacketQueue.removeAll(where: { !$0.isKeyFrame })
             }
         }
@@ -339,22 +386,172 @@ public class SampleHandler: RPBroadcastSampleHandler {
                 let item = self.videoPacketQueue.removeFirst()
                 self.videoPacketQueueLock.unlock()
 
-                self.sendVideoData(item.data, isKeyFrame: item.isKeyFrame)
+                self.sendToDirectVideoClients(item.data)
+                self.sendVideoDataToMainApp(item.data)
             }
         }
     }
 
-    private func sendVideoData(_ data: Data, isKeyFrame: Bool) {
+    private func sendToDirectVideoClients(_ data: Data) {
+        directVideoLock.lock()
+        let clients = directVideoClients
+        directVideoLock.unlock()
+        guard !clients.isEmpty else { return }
+
+        data.withUnsafeBytes { rawBuf in
+            guard let basePtr = rawBuf.baseAddress else { return }
+            var dead: [Int32] = []
+            for fd in clients {
+                var totalSent = 0
+                var retries = 0
+                while totalSent < data.count {
+                    let sent = send(fd, basePtr.advanced(by: totalSent), data.count - totalSent, 0)
+                    if sent > 0 {
+                        totalSent += sent
+                        retries = 0
+                    } else if (errno == EAGAIN || errno == EWOULDBLOCK) && retries < 20 {
+                        retries += 1
+                        usleep(1000)
+                    } else {
+                        dead.append(fd)
+                        self.videoEncoder?.forceKeyFrame()
+                        break
+                    }
+                }
+            }
+            if !dead.isEmpty {
+                directVideoLock.lock()
+                directVideoClients.removeAll { dead.contains($0) }
+                directVideoLock.unlock()
+                dead.forEach { close($0) }
+            }
+        }
+    }
+
+    private func dispatchAudioPacket(_ data: Data) {
+        audioNetworkQueue.async { [weak self] in
+            guard let self = self, self.isBroadcasting else { return }
+            self.sendToDirectAudioClients(data)
+            self.sendAudioDataToMainApp(data)
+        }
+    }
+
+    private func sendToDirectAudioClients(_ data: Data) {
+        directAudioLock.lock()
+        let clients = directAudioClients
+        directAudioLock.unlock()
+        guard !clients.isEmpty else { return }
+
+        data.withUnsafeBytes { rawBuf in
+            guard let basePtr = rawBuf.baseAddress else { return }
+            var dead: [Int32] = []
+            for fd in clients {
+                var totalSent = 0
+                var retries = 0
+                while totalSent < data.count {
+                    let sent = send(fd, basePtr.advanced(by: totalSent), data.count - totalSent, 0)
+                    if sent > 0 {
+                        totalSent += sent
+                        retries = 0
+                    } else if (errno == EAGAIN || errno == EWOULDBLOCK) && retries < 10 {
+                        retries += 1
+                        usleep(1000)
+                    } else {
+                        dead.append(fd)
+                        break
+                    }
+                }
+            }
+            if !dead.isEmpty {
+                directAudioLock.lock()
+                directAudioClients.removeAll { dead.contains($0) }
+                directAudioLock.unlock()
+                dead.forEach { close($0) }
+            }
+        }
+    }
+
+    // MARK: - Outbound Main App IPC (8888 & 8889)
+
+    private func connectToMainAppIPC() {
+        videoConnectLock.lock()
+        if isVideoConnecting { videoConnectLock.unlock(); return }
+        isVideoConnecting = true
+        videoConnectLock.unlock()
+
+        networkQueue.async { [weak self] in
+            guard let self = self, self.isBroadcasting else {
+                self?.videoConnectLock.lock()
+                self?.isVideoConnecting = false
+                self?.videoConnectLock.unlock()
+                return
+            }
+
+            self.socketLock.lock()
+            if self.bsdClientSocket >= 0 { close(self.bsdClientSocket); self.bsdClientSocket = -1 }
+            self.socketLock.unlock()
+
+            let sock = socket(AF_INET, SOCK_STREAM, 0)
+            guard sock >= 0 else {
+                self.videoConnectLock.lock()
+                self.isVideoConnecting = false
+                self.videoConnectLock.unlock()
+                return
+            }
+
+            var noSigpipe: Int32 = 1
+            setsockopt(sock, SOL_SOCKET, SO_NOSIGPIPE, &noSigpipe, socklen_t(MemoryLayout<Int32>.size))
+            var noDelay: Int32 = 1
+            setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, &noDelay, socklen_t(MemoryLayout<Int32>.size))
+            var sndBuf: Int32 = 2 * 1024 * 1024
+            setsockopt(sock, SOL_SOCKET, SO_SNDBUF, &sndBuf, socklen_t(MemoryLayout<Int32>.size))
+            var timeout = timeval(tv_sec: 0, tv_usec: 150_000) // 150ms max timeout so suspended Main App never blocks Extension!
+            setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
+
+            var addr = sockaddr_in()
+            addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+            addr.sin_family = sa_family_t(AF_INET)
+            addr.sin_port = SampleHandler.kIpcPort.bigEndian
+            inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr)
+
+            let res = withUnsafePointer(to: &addr) {
+                $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                    connect(sock, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+                }
+            }
+
+            self.videoConnectLock.lock()
+            self.isVideoConnecting = false
+            self.videoConnectLock.unlock()
+
+            if res == 0 {
+                self.socketLock.lock()
+                self.bsdClientSocket = sock
+                self.socketLock.unlock()
+                self.pendingKeyframeRequest = true
+                self.videoEncoder?.forceKeyFrame()
+            } else {
+                close(sock)
+                if self.isBroadcasting {
+                    self.networkQueue.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+                        self?.connectToMainAppIPC()
+                    }
+                }
+            }
+        }
+    }
+
+    private func sendVideoDataToMainApp(_ data: Data) {
+        // If Desktop is connected directly to the Extension on port 15334, skip Main App IPC to save CPU & RAM!
+        directVideoLock.lock()
+        let hasDirectClients = !directVideoClients.isEmpty
+        directVideoLock.unlock()
+        if hasDirectClients { return }
+
         socketLock.lock()
         let sock = bsdClientSocket
         socketLock.unlock()
-
         guard sock >= 0 else {
-            videoPacketQueueLock.lock()
-            if videoPacketQueue.count < 30 {
-                videoPacketQueue.insert(VideoQueueItem(data: data, isKeyFrame: isKeyFrame), at: 0)
-            }
-            videoPacketQueueLock.unlock()
             connectToMainAppIPC()
             return
         }
@@ -362,65 +559,29 @@ public class SampleHandler: RPBroadcastSampleHandler {
         data.withUnsafeBytes { rawBuf in
             guard let basePtr = rawBuf.baseAddress else { return }
             var totalSent = 0
-            let totalLength = data.count
-            var retries = 0
-
-            while totalSent < totalLength {
-                let bytesToSend = totalLength - totalSent
-                let sent = send(sock, basePtr.advanced(by: totalSent), bytesToSend, 0)
+            while totalSent < data.count {
+                let sent = send(sock, basePtr.advanced(by: totalSent), data.count - totalSent, 0)
                 if sent > 0 {
                     totalSent += sent
-                    retries = 0
                 } else {
-                    if (errno == EAGAIN || errno == EWOULDBLOCK) && retries < 10 {
-                        retries += 1
-                        usleep(1000)
-                        continue
-                    }
-                    // Socket error OR buffer saturated:
-                    // NEVER leave a partial frame on the socket!
-                    // Close the socket to abort the corrupt frame stream cleanly,
-                    // reconnect, and request a fresh IDR keyframe.
-                    NSLog("[SampleHandler] Video send failed (sent %d/%d, errno: %d). Closing socket & requesting keyframe", totalSent, totalLength, errno)
-                    self.closeSocket()
-                    self.videoEncoder?.forceKeyFrame()
-                    self.connectToMainAppIPC()
+                    closeSocket()
+                    videoEncoder?.forceKeyFrame()
+                    connectToMainAppIPC()
                     break
                 }
             }
         }
     }
 
-    private func sendGeometryChange(width: Int32, height: Int32, rotation: Int32) {
-        // Pure H.264 video stream: SPS headers already carry width, height, and display aspect ratio.
-        // Keeping the video stream pure binary prevents socket desynchronization.
-        NSLog("[SampleHandler] Stream geometry updated: %dx%d (rotation: %d)", width, height, rotation)
-    }
-
     private func closeSocket() {
         socketLock.lock()
         defer { socketLock.unlock() }
-        if bsdClientSocket >= 0 {
-            close(bsdClientSocket)
-            bsdClientSocket = -1
-        }
+        if bsdClientSocket >= 0 { close(bsdClientSocket); bsdClientSocket = -1 }
     }
 
-    // MARK: - Outbound Audio POSIX BSD Socket IPC (to 127.0.0.1:8889)
-
     private func connectToAudioIPC() {
-        audioSocketLock.lock()
-        let alreadyConnected = audioBsdClientSocket >= 0
-        audioSocketLock.unlock()
-        if alreadyConnected {
-            return
-        }
-
         audioConnectLock.lock()
-        if isAudioConnecting {
-            audioConnectLock.unlock()
-            return
-        }
+        if isAudioConnecting { audioConnectLock.unlock(); return }
         isAudioConnecting = true
         audioConnectLock.unlock()
 
@@ -433,18 +594,11 @@ public class SampleHandler: RPBroadcastSampleHandler {
             }
 
             self.audioSocketLock.lock()
-            if self.audioBsdClientSocket >= 0 {
-                self.audioSocketLock.unlock()
-                self.audioConnectLock.lock()
-                self.isAudioConnecting = false
-                self.audioConnectLock.unlock()
-                return
-            }
+            if self.audioBsdClientSocket >= 0 { close(self.audioBsdClientSocket); self.audioBsdClientSocket = -1 }
             self.audioSocketLock.unlock()
 
             let sock = socket(AF_INET, SOCK_STREAM, 0)
             guard sock >= 0 else {
-                NSLog("[SampleHandler] Failed to create audio BSD socket: errno %d", errno)
                 self.audioConnectLock.lock()
                 self.isAudioConnecting = false
                 self.audioConnectLock.unlock()
@@ -453,14 +607,11 @@ public class SampleHandler: RPBroadcastSampleHandler {
 
             var noSigpipe: Int32 = 1
             setsockopt(sock, SOL_SOCKET, SO_NOSIGPIPE, &noSigpipe, socklen_t(MemoryLayout<Int32>.size))
-
             var noDelay: Int32 = 1
             setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, &noDelay, socklen_t(MemoryLayout<Int32>.size))
-
             var sndBuf: Int32 = 512 * 1024
             setsockopt(sock, SOL_SOCKET, SO_SNDBUF, &sndBuf, socklen_t(MemoryLayout<Int32>.size))
-
-            var timeout = timeval(tv_sec: 1, tv_usec: 0)
+            var timeout = timeval(tv_sec: 0, tv_usec: 150_000)
             setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
 
             var addr = sockaddr_in()
@@ -483,21 +634,10 @@ public class SampleHandler: RPBroadcastSampleHandler {
                 self.audioSocketLock.lock()
                 self.audioBsdClientSocket = sock
                 self.audioSocketLock.unlock()
-                NSLog("[SampleHandler] Connected to Main App Audio IPC on 127.0.0.1:%d", SampleHandler.kAudioIpcPort)
-
-                // Flush any packets buffered while socket was connecting
-                self.audioPacketQueueLock.lock()
-                let pending = self.audioPacketQueue
-                self.audioPacketQueue.removeAll()
-                self.audioPacketQueueLock.unlock()
-
-                for pkt in pending {
-                    self.sendAudioDataToMainApp(pkt)
-                }
             } else {
                 close(sock)
                 if self.isBroadcasting {
-                    self.audioNetworkQueue.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+                    self.audioNetworkQueue.asyncAfter(deadline: .now() + 1.0) { [weak self] in
                         self?.connectToAudioIPC()
                     }
                 }
@@ -506,22 +646,15 @@ public class SampleHandler: RPBroadcastSampleHandler {
     }
 
     private func sendAudioDataToMainApp(_ data: Data) {
-        audioSendQueue.async { [weak self] in
-            self?.sendAudioPacketToMainApp(data)
-        }
-    }
+        directAudioLock.lock()
+        let hasDirectClients = !directAudioClients.isEmpty
+        directAudioLock.unlock()
+        if hasDirectClients { return }
 
-    private func sendAudioPacketToMainApp(_ data: Data) {
         audioSocketLock.lock()
         let sock = audioBsdClientSocket
         audioSocketLock.unlock()
-
         guard sock >= 0 else {
-            audioPacketQueueLock.lock()
-            if audioPacketQueue.count < 30 {
-                audioPacketQueue.append(data)
-            }
-            audioPacketQueueLock.unlock()
             connectToAudioIPC()
             return
         }
@@ -529,28 +662,12 @@ public class SampleHandler: RPBroadcastSampleHandler {
         data.withUnsafeBytes { rawBuf in
             guard let basePtr = rawBuf.baseAddress else { return }
             var totalSent = 0
-            let totalLength = data.count
-            var retries = 0
-
-            while totalSent < totalLength {
-                let bytesToSend = totalLength - totalSent
-                let sent = send(sock, basePtr.advanced(by: totalSent), bytesToSend, 0)
+            while totalSent < data.count {
+                let sent = send(sock, basePtr.advanced(by: totalSent), data.count - totalSent, 0)
                 if sent > 0 {
                     totalSent += sent
-                    retries = 0
                 } else {
-                    if (errno == EAGAIN || errno == EWOULDBLOCK) && retries < 5 {
-                        retries += 1
-                        usleep(500)
-                        continue
-                    }
-                    NSLog("[SampleHandler] Audio socket send failed (sent %d/%d, errno: %d), reconnecting...", totalSent, totalLength, errno)
                     closeAudioSocket()
-                    audioPacketQueueLock.lock()
-                    if audioPacketQueue.count < 30 {
-                        audioPacketQueue.append(data)
-                    }
-                    audioPacketQueueLock.unlock()
                     connectToAudioIPC()
                     break
                 }
@@ -561,13 +678,10 @@ public class SampleHandler: RPBroadcastSampleHandler {
     private func closeAudioSocket() {
         audioSocketLock.lock()
         defer { audioSocketLock.unlock() }
-        if audioBsdClientSocket >= 0 {
-            close(audioBsdClientSocket)
-            audioBsdClientSocket = -1
-        }
+        if audioBsdClientSocket >= 0 { close(audioBsdClientSocket); audioBsdClientSocket = -1 }
     }
 
-    // MARK: - Darwin Notification Inter-Process Communication
+    // MARK: - Darwin Notifications & Mach Memory
 
     private func notifyMainApp(event: String) {
         let notificationName = "com.apowermirror.broadcast.\(event)" as CFString
@@ -611,7 +725,6 @@ public class SampleHandler: RPBroadcastSampleHandler {
                 let handler = Unmanaged<SampleHandler>.fromOpaque(observer).takeUnretainedValue()
                 handler.pendingKeyframeRequest = true
                 handler.videoEncoder?.forceKeyFrame()
-                NSLog("[SampleHandler] Cross-process forceKeyframe request received -> Keyframe pending")
             },
             SampleHandler.kForceKeyframeNotification as CFString,
             nil,
@@ -624,8 +737,6 @@ public class SampleHandler: RPBroadcastSampleHandler {
         let observer = UnsafeRawPointer(Unmanaged.passUnretained(self).toOpaque())
         CFNotificationCenterRemoveObserver(center, observer, CFNotificationName(SampleHandler.kForceKeyframeNotification as CFString), nil)
     }
-
-    // MARK: - Mach Kernel Memory Introspection
 
     private func getMemoryFootprintMB() -> Double {
         var info = task_vm_info_data_t()
