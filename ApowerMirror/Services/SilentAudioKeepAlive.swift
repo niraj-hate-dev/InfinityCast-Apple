@@ -150,9 +150,7 @@ public final class SilentAudioKeepAlive {
 
         // Persist to temporary file to guarantee bulletproof initialization across all iOS versions
         let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("keepalive.wav")
-        if !FileManager.default.fileExists(atPath: tempURL.path) {
-            try? data.write(to: tempURL)
-        }
+        try? data.write(to: tempURL, options: .atomic)
 
         do {
             let player = try AVAudioPlayer(contentsOf: tempURL)

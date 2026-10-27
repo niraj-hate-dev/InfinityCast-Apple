@@ -67,18 +67,20 @@ class AppDelegate: UIResponder, UIApplicationDelegate, MMWormholeManagerDelegate
 
     // MARK: - Lifecycle & Background Task Keepalive
 
-    private func startContinuousBackgroundTask() {
-        endContinuousBackgroundTask()
+    private func beginBackgroundTransitionTask() {
+        endBackgroundTransitionTask()
         let app = UIApplication.shared
-        backgroundTask = app.beginBackgroundTask(withName: "com.apowermirror.continuous") { [weak self] in
+        backgroundTask = app.beginBackgroundTask(withName: "com.apowermirror.transition") { [weak self] in
             guard let self = self else { return }
-            NSLog("[AppDelegate] Background task chain expiring -> renewing background task chain")
-            SilentAudioKeepAlive.shared.start()
-            self.startContinuousBackgroundTask()
+            NSLog("[AppDelegate] Background transition task reached 30s limit -> cleanly ending task")
+            if self.backgroundTask != .invalid {
+                app.endBackgroundTask(self.backgroundTask)
+                self.backgroundTask = .invalid
+            }
         }
     }
 
-    private func endContinuousBackgroundTask() {
+    private func endBackgroundTransitionTask() {
         if backgroundTask != .invalid {
             UIApplication.shared.endBackgroundTask(backgroundTask)
             backgroundTask = .invalid
@@ -86,20 +88,20 @@ class AppDelegate: UIResponder, UIApplicationDelegate, MMWormholeManagerDelegate
     }
 
     func applicationDidEnterBackground(_ application: UIApplication) {
-        NSLog("[AppDelegate] Application entered background -> activating continuous keepalive")
+        NSLog("[AppDelegate] Application entered background -> ensuring silent keepalive is active")
         SilentAudioKeepAlive.shared.start()
-        startContinuousBackgroundTask()
+        beginBackgroundTransitionTask()
     }
 
     func applicationWillEnterForeground(_ application: UIApplication) {
         NSLog("[AppDelegate] Application will enter foreground")
-        endContinuousBackgroundTask()
+        endBackgroundTransitionTask()
         SilentAudioKeepAlive.shared.start()
     }
 
     func applicationWillTerminate(_ application: UIApplication) {
         NSLog("[AppDelegate] Application terminating -> cleaning up services")
-        endContinuousBackgroundTask()
+        endBackgroundTransitionTask()
         SilentAudioKeepAlive.shared.stop()
         WXCastiOSSender.shared.stopMirrorService()
     }
@@ -109,7 +111,6 @@ class AppDelegate: UIResponder, UIApplicationDelegate, MMWormholeManagerDelegate
     func wormholeDidReceiveBroadcastStarted() {
         NSLog("[AppDelegate] ReplayKit broadcast started in extension -> UI updating to active & starting background keepalive")
         SilentAudioKeepAlive.shared.start()
-        startContinuousBackgroundTask()
     }
 
     func wormholeDidReceiveBroadcastFinished() {

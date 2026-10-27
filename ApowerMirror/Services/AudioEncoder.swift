@@ -257,7 +257,7 @@ public final class AudioEncoder {
                         ioNumberDataPackets.pointee = 0
                         ioData.pointee.mBuffers.mDataByteSize = 0
                         ioData.pointee.mBuffers.mData = nil
-                        return noErr
+                        return 500 // Controlled EOF signal to stop AudioConverter without infinite loop
                     }
 
                     let availablePackets = UInt32(remainingBytes / 4)
@@ -298,22 +298,20 @@ public final class AudioEncoder {
                     break
                 }
 
-                if (convStatus == noErr || convStatus == -1) && ioOutputDataPackets > 0 {
-                    let aacSize = Int(outAbl.mBuffers.mDataByteSize)
-                    if aacSize > 0 {
-                        let adts = self.createAdtsHeader(packetLength: aacSize)
-                        var packet = Data(capacity: 7 + aacSize)
-                        packet.append(adts)
-                        packet.append(self.aacBuffer, count: aacSize)
+                let aacSize = Int(outAbl.mBuffers.mDataByteSize)
+                if ioOutputDataPackets > 0 && aacSize > 0 {
+                    let adts = self.createAdtsHeader(packetLength: aacSize)
+                    var packet = Data(capacity: 7 + aacSize)
+                    packet.append(adts)
+                    packet.append(self.aacBuffer, count: aacSize)
 
-                        self.frameCount += 1
-                        if self.frameCount <= 5 || self.frameCount % 200 == 0 {
-                            NSLog("[AudioEncoder] Encoded AAC frame #%d (%d bytes @ %.0f Hz)", self.frameCount, packet.count, self.sampleRate)
-                        }
-                        self.packetHandler(packet)
+                    self.frameCount += 1
+                    if self.frameCount <= 5 || self.frameCount % 200 == 0 {
+                        NSLog("[AudioEncoder] Encoded AAC frame #%d (%d bytes @ %.0f Hz)", self.frameCount, packet.count, self.sampleRate)
                     }
+                    self.packetHandler(packet)
                 } else {
-                    if convStatus != noErr && convStatus != -1 {
+                    if convStatus != noErr && convStatus != 500 && convStatus != -1 {
                         NSLog("[AudioEncoder] AudioConverterFillComplexBuffer note: status=%d", convStatus)
                     }
                     // Not enough samples to output a packet yet (e.g. priming); wait for next buffer
