@@ -16,12 +16,11 @@ import ReplayKit
 open class WXHomeViewController: UIViewController, ScreenRecorderManagerDelegate, WXCastiOSSenderDelegate, BroadcastPickerManagerDelegate {
 
     // MARK: - UI Components
-    private var scanBtn: UIButton?
-    private var scanBtnLabel: UILabel?
+    private var nativePickerView: RPSystemBroadcastPickerView?
+    private var stopButton: UIButton?
     private var scanBtnSubLabel: UILabel?
     private var hintLabel: UILabel?
     private var pulseLayer: CAShapeLayer?
-    private var nativePickerView: RPSystemBroadcastPickerView?
 
     // Live Diagnostic UI Cards
     private var replayKitStatusCard: UIView?
@@ -70,6 +69,20 @@ open class WXHomeViewController: UIViewController, ScreenRecorderManagerDelegate
         stopPulseAnimation()
     }
 
+    open override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        if let picker = nativePickerView {
+            picker.preferredExtension = BroadcastPickerManager.shared.extensionBundleId
+            for subview in picker.subviews {
+                if let button = subview as? UIButton {
+                    button.frame = picker.bounds
+                    button.tintColor = .white
+                    button.transform = CGAffineTransform(scaleX: 1.6, y: 1.6)
+                }
+            }
+        }
+    }
+
     // MARK: - UI Construction
 
     private func setupUI() {
@@ -115,53 +128,61 @@ open class WXHomeViewController: UIViewController, ScreenRecorderManagerDelegate
         wifiLbl.textColor = UIColor(red: 0.10, green: 0.65, blue: 0.35, alpha: 1.0)
         infoCard.addSubview(wifiLbl)
 
-        // Center Prominent Direct "START SCREEN RECORDING" Button
-        let btn = UIButton(type: .custom)
-        btn.translatesAutoresizingMaskIntoConstraints = false
-        btn.backgroundColor = UIColor(red: 0.15, green: 0.50, blue: 0.98, alpha: 1.0)
-        btn.layer.cornerRadius = 80
-        btn.layer.shadowColor = UIColor(red: 0.15, green: 0.50, blue: 0.98, alpha: 0.45).cgColor
-        btn.layer.shadowOffset = CGSize(width: 0, height: 8)
-        btn.layer.shadowOpacity = 0.5
-        btn.layer.shadowRadius = 16
-        btn.addTarget(self, action: #selector(handleDirectMirrorAction), for: .touchUpInside)
-        view.addSubview(btn)
-        self.scanBtn = btn
-
-        let btnTitle = UILabel()
-        btnTitle.translatesAutoresizingMaskIntoConstraints = false
-        btnTitle.text = "M"
-        btnTitle.font = UIFont.systemFont(ofSize: 56, weight: .black)
-        btnTitle.textColor = .white
-        btnTitle.isUserInteractionEnabled = false
-        btn.addSubview(btnTitle)
-        self.scanBtnLabel = btnTitle
+        // 1. Center Native ReplayKit Broadcast Picker (START) - 100% Direct Apple Touch Interaction
+        let picker = RPSystemBroadcastPickerView()
+        picker.translatesAutoresizingMaskIntoConstraints = false
+        picker.preferredExtension = BroadcastPickerManager.shared.extensionBundleId
+        picker.showsMicrophoneButton = false
+        picker.backgroundColor = UIColor(red: 0.15, green: 0.50, blue: 0.98, alpha: 1.0)
+        picker.layer.cornerRadius = 80
+        picker.layer.shadowColor = UIColor(red: 0.15, green: 0.50, blue: 0.98, alpha: 0.45).cgColor
+        picker.layer.shadowOffset = CGSize(width: 0, height: 8)
+        picker.layer.shadowOpacity = 0.5
+        picker.layer.shadowRadius = 16
+        picker.layer.masksToBounds = false
+        picker.tintColor = .white
+        picker.alpha = 1.0
+        view.addSubview(picker)
+        self.nativePickerView = picker
 
         let btnSub = UILabel()
         btnSub.translatesAutoresizingMaskIntoConstraints = false
         btnSub.text = "START"
         btnSub.font = UIFont.systemFont(ofSize: 13, weight: .heavy)
-        btnSub.textColor = UIColor.white.withAlphaComponent(0.9)
+        btnSub.textColor = UIColor.white.withAlphaComponent(0.95)
         btnSub.isUserInteractionEnabled = false
-        btn.addSubview(btnSub)
+        picker.addSubview(btnSub)
         self.scanBtnSubLabel = btnSub
 
-        // Dedicated Native ReplayKit Picker View overlaid transparently over the START button
-        let picker = RPSystemBroadcastPickerView()
-        picker.translatesAutoresizingMaskIntoConstraints = false
-        picker.preferredExtension = BroadcastPickerManager.shared.extensionBundleId
-        picker.showsMicrophoneButton = false
-        picker.backgroundColor = .clear
-        picker.alpha = 0.05
-        btn.addSubview(picker)
-        self.nativePickerView = picker
+        // 2. Center STOP Button (visible only when active recording is in progress)
+        let stopBtn = UIButton(type: .custom)
+        stopBtn.translatesAutoresizingMaskIntoConstraints = false
+        stopBtn.backgroundColor = UIColor(red: 0.90, green: 0.25, blue: 0.20, alpha: 1.0)
+        stopBtn.layer.cornerRadius = 80
+        stopBtn.layer.shadowColor = UIColor(red: 0.90, green: 0.25, blue: 0.20, alpha: 0.45).cgColor
+        stopBtn.layer.shadowOffset = CGSize(width: 0, height: 8)
+        stopBtn.layer.shadowOpacity = 0.5
+        stopBtn.layer.shadowRadius = 16
+        stopBtn.addTarget(self, action: #selector(handleStopAction), for: .touchUpInside)
+        stopBtn.isHidden = true
+        view.addSubview(stopBtn)
+        self.stopButton = stopBtn
 
-        NSLayoutConstraint.activate([
-            picker.topAnchor.constraint(equalTo: btn.topAnchor),
-            picker.bottomAnchor.constraint(equalTo: btn.bottomAnchor),
-            picker.leadingAnchor.constraint(equalTo: btn.leadingAnchor),
-            picker.trailingAnchor.constraint(equalTo: btn.trailingAnchor)
-        ])
+        let stopLbl = UILabel()
+        stopLbl.translatesAutoresizingMaskIntoConstraints = false
+        stopLbl.text = "STOP"
+        stopLbl.font = UIFont.systemFont(ofSize: 26, weight: .black)
+        stopLbl.textColor = .white
+        stopLbl.isUserInteractionEnabled = false
+        stopBtn.addSubview(stopLbl)
+
+        let stopSubLbl = UILabel()
+        stopSubLbl.translatesAutoresizingMaskIntoConstraints = false
+        stopSubLbl.text = "TAP TO END"
+        stopSubLbl.font = UIFont.systemFont(ofSize: 11, weight: .heavy)
+        stopSubLbl.textColor = UIColor.white.withAlphaComponent(0.9)
+        stopSubLbl.isUserInteractionEnabled = false
+        stopBtn.addSubview(stopSubLbl)
 
         let hint = UILabel()
         hint.translatesAutoresizingMaskIntoConstraints = false
@@ -220,19 +241,27 @@ open class WXHomeViewController: UIViewController, ScreenRecorderManagerDelegate
             wifiLbl.trailingAnchor.constraint(equalTo: infoCard.trailingAnchor, constant: -16),
             wifiLbl.centerYAnchor.constraint(equalTo: infoCard.centerYAnchor),
 
-            btn.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            btn.topAnchor.constraint(equalTo: infoCard.bottomAnchor, constant: 32),
-            btn.widthAnchor.constraint(equalToConstant: 160),
-            btn.heightAnchor.constraint(equalToConstant: 160),
+            picker.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            picker.topAnchor.constraint(equalTo: infoCard.bottomAnchor, constant: 32),
+            picker.widthAnchor.constraint(equalToConstant: 160),
+            picker.heightAnchor.constraint(equalToConstant: 160),
 
-            btnTitle.centerXAnchor.constraint(equalTo: btn.centerXAnchor),
-            btnTitle.centerYAnchor.constraint(equalTo: btn.centerYAnchor, constant: -8),
+            btnSub.centerXAnchor.constraint(equalTo: picker.centerXAnchor),
+            btnSub.bottomAnchor.constraint(equalTo: picker.bottomAnchor, constant: -18),
 
-            btnSub.centerXAnchor.constraint(equalTo: btn.centerXAnchor),
-            btnSub.topAnchor.constraint(equalTo: btnTitle.bottomAnchor, constant: -4),
+            stopBtn.centerXAnchor.constraint(equalTo: picker.centerXAnchor),
+            stopBtn.centerYAnchor.constraint(equalTo: picker.centerYAnchor),
+            stopBtn.widthAnchor.constraint(equalToConstant: 160),
+            stopBtn.heightAnchor.constraint(equalToConstant: 160),
+
+            stopLbl.centerXAnchor.constraint(equalTo: stopBtn.centerXAnchor),
+            stopLbl.centerYAnchor.constraint(equalTo: stopBtn.centerYAnchor, constant: -8),
+
+            stopSubLbl.centerXAnchor.constraint(equalTo: stopBtn.centerXAnchor),
+            stopSubLbl.topAnchor.constraint(equalTo: stopLbl.bottomAnchor, constant: 2),
 
             hint.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            hint.topAnchor.constraint(equalTo: btn.bottomAnchor, constant: 12),
+            hint.topAnchor.constraint(equalTo: picker.bottomAnchor, constant: 14),
 
             rkCard.card.topAnchor.constraint(equalTo: hint.bottomAnchor, constant: 24),
             rkCard.card.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
@@ -301,6 +330,17 @@ open class WXHomeViewController: UIViewController, ScreenRecorderManagerDelegate
     }
 
     // MARK: - Direct Screen Recording Actions
+
+    @objc public func handleStopAction() {
+        NSLog("[WXHomeViewController] User tapped STOP -> Stopping all screen recording")
+        BroadcastPickerManager.shared.stopBroadcast()
+        ScreenRecorderManager.shared.stopRecording { [weak self] _ in
+            self?.updateStatusCards()
+        }
+        SilentAudioKeepAlive.shared.stop()
+        lastErrorMessage = nil
+        updateStatusCards()
+    }
 
     @objc public func handleDirectMirrorAction() {
         let isCapturing = UIScreen.main.isCaptured || ScreenRecorderManager.shared.isCapturing
@@ -409,38 +449,34 @@ open class WXHomeViewController: UIViewController, ScreenRecorderManagerDelegate
 
         if isCapturing {
             // Screen Recording ACTIVE
-            nativePickerView?.isUserInteractionEnabled = false
             nativePickerView?.isHidden = true
+            stopButton?.isHidden = false
+
             replayKitDotView?.backgroundColor = UIColor(red: 0.10, green: 0.75, blue: 0.35, alpha: 1.0)
             replayKitTitleLabel?.text = "ReplayKit: Screen Recording ACTIVE"
             replayKitDetailLabel?.text = "Screen recording successfully! Full phone mirroring active."
-
-            scanBtn?.backgroundColor = UIColor(red: 0.90, green: 0.25, blue: 0.20, alpha: 1.0)
-            scanBtnSubLabel?.text = "STOP"
-            hintLabel?.text = "Full device screen recording is live • Tap to stop"
+            hintLabel?.text = "Broadcasting live • Tap STOP to end"
 
             startDurationTimer()
         } else if let err = lastErrorMessage {
             // Screen Recording FAILED / CANCELLED / NOT STARTED
             stopDurationTimer()
+            nativePickerView?.isHidden = false
+            stopButton?.isHidden = true
+
             replayKitDotView?.backgroundColor = UIColor.systemRed
             replayKitTitleLabel?.text = "ReplayKit: Screen is not started"
             replayKitDetailLabel?.text = err
-
-            scanBtn?.backgroundColor = UIColor(red: 0.15, green: 0.50, blue: 0.98, alpha: 1.0)
-            scanBtnSubLabel?.text = "START"
-            hintLabel?.text = "Tap to retry screen recording"
+            hintLabel?.text = "Tap START and choose 'Start Broadcast'"
         } else {
             // Screen Recording INACTIVE / READY
-            nativePickerView?.isUserInteractionEnabled = true
-            nativePickerView?.isHidden = false
             stopDurationTimer()
+            nativePickerView?.isHidden = false
+            stopButton?.isHidden = true
+
             replayKitDotView?.backgroundColor = UIColor.systemGray
             replayKitTitleLabel?.text = "ReplayKit: Ready"
-            replayKitDetailLabel?.text = "Tap 'M' START above to start full device screen recording."
-
-            scanBtn?.backgroundColor = UIColor(red: 0.15, green: 0.50, blue: 0.98, alpha: 1.0)
-            scanBtnSubLabel?.text = "START"
+            replayKitDetailLabel?.text = "Tap START circle above to begin screen broadcast."
             hintLabel?.text = "Tap START and choose 'Start Broadcast'"
         }
 
@@ -479,7 +515,7 @@ open class WXHomeViewController: UIViewController, ScreenRecorderManagerDelegate
 
     private func startPulseAnimation() {
         stopPulseAnimation()
-        guard let btn = scanBtn else { return }
+        guard let btn = nativePickerView ?? stopButton else { return }
 
         let pulse = CAShapeLayer()
         pulse.frame = btn.bounds
