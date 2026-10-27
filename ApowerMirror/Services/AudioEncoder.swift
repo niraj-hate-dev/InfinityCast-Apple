@@ -47,7 +47,8 @@ public final class AudioEncoder {
 
     public func encode(sampleBuffer: CMSampleBuffer) {
         audioQueue.async { [weak self] in
-            guard let self = self else { return }
+            autoreleasepool {
+                guard let self = self else { return }
 
             let numSamples = CMSampleBufferGetNumSamples(sampleBuffer)
             guard numSamples > 0,
@@ -283,6 +284,7 @@ public final class AudioEncoder {
                         self.packetHandler(packet)
                     }
                 }
+            }
             }
         }
     }

@@ -42,14 +42,7 @@ public final class SilentAudioKeepAlive {
 
             switch type {
             case .began:
-                NSLog("[SilentAudioKeepAlive] Audio interruption began (e.g. YouTube/media started) -> Re-asserting mixWithOthers keepalive")
-                // When YouTube or media plays, re-assert audio session with mixWithOthers so the silent player coexists
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
-                    self?.resumeIfPlaying()
-                }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-                    self?.resumeIfPlaying()
-                }
+                NSLog("[SilentAudioKeepAlive] Audio interruption began (e.g. YouTube started) -> Yielding gracefully")
             case .ended:
                 NSLog("[SilentAudioKeepAlive] Audio interruption ended -> Resuming silent keepalive loop")
                 self?.resumeIfPlaying()
@@ -186,9 +179,11 @@ public final class SilentAudioKeepAlive {
             self.lock.unlock()
 
             if playing && !isPlayerActive {
-                NSLog("[SilentAudioKeepAlive] Watchdog: Silent player paused, reviving keepalive immediately")
-                DispatchQueue.main.async { [weak self] in
-                    self?.resumeIfPlaying()
+                if !AVAudioSession.sharedInstance().isOtherAudioPlaying {
+                    NSLog("[SilentAudioKeepAlive] Watchdog: Silent player paused, reviving keepalive")
+                    DispatchQueue.main.async { [weak self] in
+                        self?.resumeIfPlaying()
+                    }
                 }
             }
         }

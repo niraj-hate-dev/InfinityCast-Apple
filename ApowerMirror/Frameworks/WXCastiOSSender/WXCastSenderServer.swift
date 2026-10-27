@@ -93,11 +93,10 @@ public final class WXCastSenderServer {
             self.isRunning = true
 
             self.setupChannelListener(port: channelPort)
-            self.setupBsdMirrorServer(port: mirrorPort)
-            self.setupBsdAudioServer(port: audioPort)
-            self.setupIpcListener(port: ipcPort)
-            self.setupAudioIpcListener(port: audioIpcPort)
-            NSLog("[WXCastSenderServer] Control (0.0.0.0:%d), Video (0.0.0.0:%d), Audio (0.0.0.0:%d), Video IPC (127.0.0.1:%d), Audio IPC (127.0.0.1:%d) active", channelPort, mirrorPort, audioPort, ipcPort, audioIpcPort)
+            // Video (25334) and Audio (25335) ports are hosted directly by the ReplayKit Broadcast Extension
+            // (SampleHandler) so usbmuxd connects directly into the background-safe replayd daemon without
+            // main app background proxy suspension!
+            NSLog("[WXCastSenderServer] Control (0.0.0.0:%d) active. Ports %d/%d yielded to ReplayKit Extension.", channelPort, mirrorPort, audioPort)
         }
     }
 

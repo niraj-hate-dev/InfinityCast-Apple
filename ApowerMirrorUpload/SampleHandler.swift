@@ -17,8 +17,8 @@ public class SampleHandler: RPBroadcastSampleHandler {
     // MARK: - Constants
     private static let kIpcPort: UInt16 = 8888
     private static let kAudioIpcPort: UInt16 = 8889
-    private static let kDirectVideoPort: UInt16 = 15334
-    private static let kDirectAudioPort: UInt16 = 15335
+    private static let kDirectVideoPort: UInt16 = 25334
+    private static let kDirectAudioPort: UInt16 = 25335
     private static let kStopNotification = "com.apowermirror.broadcast.StopBroadcast"
     private static let kForceKeyframeNotification = "com.apowermirror.forceKeyframe"
 
@@ -141,28 +141,6 @@ public class SampleHandler: RPBroadcastSampleHandler {
             switch sampleBufferType {
             case .video:
                 self.videoFrameCount += 1
-                if self.videoFrameCount % 15 == 0 {
-                    let currentRamMB = self.getMemoryFootprintMB()
-                    if self.isMemoryLocked {
-                        if currentRamMB < self.kMemoryUnlockThresholdMB {
-                            self.isMemoryLocked = false
-                            self.consecutiveMemoryLockedFrames = 0
-                            self.pendingKeyframeRequest = true
-                        }
-                    } else if currentRamMB >= self.kMemoryLockThresholdMB {
-                        self.isMemoryLocked = true
-                        self.consecutiveMemoryLockedFrames = 0
-                    }
-                }
-
-                if self.isMemoryLocked {
-                    self.consecutiveMemoryLockedFrames += 1
-                    if self.consecutiveMemoryLockedFrames > 30 && self.videoEncoder != nil {
-                        self.videoEncoder?.invalidate()
-                        self.videoEncoder = nil
-                    }
-                    return
-                }
 
                 if videoEncoder == nil {
                     videoEncoder = VideoEncoder(bitrate: targetBitrate, fps: targetFps) { [weak self] (packet, isKeyFrame, _) in

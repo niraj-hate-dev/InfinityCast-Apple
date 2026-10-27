@@ -172,8 +172,10 @@ public final class VideoEncoder {
         var newSession: VTCompressionSession?
         let callback: VTCompressionOutputCallback = { outputCallbackRefCon, _, status, infoFlags, sampleBuffer in
             guard status == noErr, let buffer = sampleBuffer, let refCon = outputCallbackRefCon else { return }
-            let encoder = Unmanaged<VideoEncoder>.fromOpaque(refCon).takeUnretainedValue()
-            encoder.handleEncodedSampleBuffer(buffer)
+            autoreleasepool {
+                let encoder = Unmanaged<VideoEncoder>.fromOpaque(refCon).takeUnretainedValue()
+                encoder.handleEncodedSampleBuffer(buffer)
+            }
         }
 
         let createStatus = VTCompressionSessionCreate(
