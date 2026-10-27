@@ -293,15 +293,15 @@ void ScreenMirrorPlugin::StreamWorkerLoop(SOCKET sock) {
       std::string err;
 
       if (current_device_id_ > 0) {
-        // Try extension direct video port 15334 first
-        if (!usbmuxd_client_->ConnectTunnel(current_device_id_, 15334, &new_sock, &err)) {
-          // Fall back to main app video port 25334
-          usbmuxd_client_->ConnectTunnel(current_device_id_, 25334, &new_sock, &err);
+        // Try extension direct video port 25334 first
+        if (!usbmuxd_client_->ConnectTunnel(current_device_id_, 25334, &new_sock, &err)) {
+          // Fall back to alternative port 15334
+          usbmuxd_client_->ConnectTunnel(current_device_id_, 15334, &new_sock, &err);
         }
       }
 
       if (new_sock == INVALID_SOCKET && !current_host_ip_.empty()) {
-        const uint16_t fallback_ports[] = {15334, 25334};
+        const uint16_t fallback_ports[] = {25334, 15334};
         for (uint16_t port : fallback_ports) {
           SOCKET direct_sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
           if (direct_sock != INVALID_SOCKET) {
@@ -412,16 +412,16 @@ void ScreenMirrorPlugin::AudioStreamWorkerLoop() {
 
       // Primary: usbmuxd tunnel if USB device is present
       if (current_device_id_ > 0) {
-        // Try extension direct audio port 15335 first
-        if (!usbmuxd_client_->ConnectTunnel(current_device_id_, 15335, &new_sock, &err)) {
-          // Fall back to main app audio port 25335
-          usbmuxd_client_->ConnectTunnel(current_device_id_, 25335, &new_sock, &err);
+        // Try extension direct audio port 25335 first
+        if (!usbmuxd_client_->ConnectTunnel(current_device_id_, 25335, &new_sock, &err)) {
+          // Fall back to alternative port 15335
+          usbmuxd_client_->ConnectTunnel(current_device_id_, 15335, &new_sock, &err);
         }
       }
 
       // Secondary: Direct TCP to target IP (Wi-Fi)
       if (new_sock == INVALID_SOCKET && !current_host_ip_.empty()) {
-        const uint16_t fallback_ports[] = {15335, 25335};
+        const uint16_t fallback_ports[] = {25335, 15335};
         for (uint16_t port : fallback_ports) {
           SOCKET direct_sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
           if (direct_sock != INVALID_SOCKET) {
@@ -576,11 +576,11 @@ void ScreenMirrorPlugin::HandleMethodCall(
     bool success = false;
 
     if (target_port == 25334) {
-      // 1. Try extension direct video port 15334 first
-      success = usbmuxd_client_->ConnectTunnel(device_id, 15334, &tunnel_sock, &err_msg);
+      // 1. Try extension direct video port 25334 first
+      success = usbmuxd_client_->ConnectTunnel(device_id, 25334, &tunnel_sock, &err_msg);
       if (!success) {
-        // 2. Fall back to main app video port 25334
-        success = usbmuxd_client_->ConnectTunnel(device_id, 25334, &tunnel_sock, &err_msg);
+        // 2. Fall back to alternative video port 15334
+        success = usbmuxd_client_->ConnectTunnel(device_id, 15334, &tunnel_sock, &err_msg);
       }
       if (!success) {
         // 3. Fall back to legacy port 15333
@@ -591,8 +591,8 @@ void ScreenMirrorPlugin::HandleMethodCall(
     }
 
     if (!success) {
-      // Direct TCP fallback: check if iPhone is directly reachable on local network (e.g. 172.20.10.1:15334 / 25334)
-      const uint16_t wifi_ports[] = { (target_port == 25334 ? static_cast<uint16_t>(15334) : target_port), target_port };
+      // Direct TCP fallback: check if iPhone is directly reachable on local network (e.g. 172.20.10.1:25334 / 15334)
+      const uint16_t wifi_ports[] = { target_port, (target_port == 25334 ? static_cast<uint16_t>(15334) : target_port) };
       for (uint16_t port : wifi_ports) {
         SOCKET direct_sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
         if (direct_sock != INVALID_SOCKET) {
