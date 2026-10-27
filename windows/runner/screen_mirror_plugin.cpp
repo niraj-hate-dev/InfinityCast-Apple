@@ -293,31 +293,39 @@ void ScreenMirrorPlugin::StreamWorkerLoop(SOCKET sock) {
       std::string err;
 
       if (current_device_id_ > 0) {
-        usbmuxd_client_->ConnectTunnel(current_device_id_, 25334, &new_sock, &err);
+        // Try extension direct video port 15334 first
+        if (!usbmuxd_client_->ConnectTunnel(current_device_id_, 15334, &new_sock, &err)) {
+          // Fall back to main app video port 25334
+          usbmuxd_client_->ConnectTunnel(current_device_id_, 25334, &new_sock, &err);
+        }
       }
 
       if (new_sock == INVALID_SOCKET && !current_host_ip_.empty()) {
-        SOCKET direct_sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-        if (direct_sock != INVALID_SOCKET) {
-          sockaddr_in addr{};
-          addr.sin_family = AF_INET;
-          addr.sin_port = htons(25334);
-          inet_pton(AF_INET, current_host_ip_.c_str(), &addr.sin_addr);
+        const uint16_t fallback_ports[] = {15334, 25334};
+        for (uint16_t port : fallback_ports) {
+          SOCKET direct_sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+          if (direct_sock != INVALID_SOCKET) {
+            sockaddr_in addr{};
+            addr.sin_family = AF_INET;
+            addr.sin_port = htons(port);
+            inet_pton(AF_INET, current_host_ip_.c_str(), &addr.sin_addr);
 
-          u_long mode = 1;
-          ioctlsocket(direct_sock, FIONBIO, &mode);
-          connect(direct_sock, reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
-
-          fd_set write_fds;
-          FD_ZERO(&write_fds);
-          FD_SET(direct_sock, &write_fds);
-          timeval tv{1, 0};
-          if (select(0, nullptr, &write_fds, nullptr, &tv) > 0) {
-            mode = 0;
+            u_long mode = 1;
             ioctlsocket(direct_sock, FIONBIO, &mode);
-            new_sock = direct_sock;
-          } else {
-            closesocket(direct_sock);
+            connect(direct_sock, reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
+
+            fd_set write_fds;
+            FD_ZERO(&write_fds);
+            FD_SET(direct_sock, &write_fds);
+            timeval tv{1, 0};
+            if (select(0, nullptr, &write_fds, nullptr, &tv) > 0) {
+              mode = 0;
+              ioctlsocket(direct_sock, FIONBIO, &mode);
+              new_sock = direct_sock;
+              break;
+            } else {
+              closesocket(direct_sock);
+            }
           }
         }
       }
@@ -332,7 +340,7 @@ void ScreenMirrorPlugin::StreamWorkerLoop(SOCKET sock) {
 
         sock = new_sock;
         active_tunnel_sock_ = new_sock;
-        Log("STREAM", "Video tunnel reconnected successfully to port 25334!", "success");
+        Log("STREAM", "Video tunnel reconnected successfully!", "success");
         continue;
       } else {
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
@@ -397,39 +405,47 @@ void ScreenMirrorPlugin::AudioStreamWorkerLoop() {
   Log("AUDIO", "Audio stream worker started (resilient background engine active)", "info");
 
   while (is_audio_streaming_) {
-    // 1. Ensure connection to Port 25335
+    // 1. Ensure connection to Port 15335 / 25335
     if (active_audio_tunnel_sock_ == INVALID_SOCKET) {
       SOCKET new_sock = INVALID_SOCKET;
       std::string err;
 
       // Primary: usbmuxd tunnel if USB device is present
       if (current_device_id_ > 0) {
-        usbmuxd_client_->ConnectTunnel(current_device_id_, 25335, &new_sock, &err);
+        // Try extension direct audio port 15335 first
+        if (!usbmuxd_client_->ConnectTunnel(current_device_id_, 15335, &new_sock, &err)) {
+          // Fall back to main app audio port 25335
+          usbmuxd_client_->ConnectTunnel(current_device_id_, 25335, &new_sock, &err);
+        }
       }
 
       // Secondary: Direct TCP to target IP (Wi-Fi)
       if (new_sock == INVALID_SOCKET && !current_host_ip_.empty()) {
-        SOCKET direct_sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-        if (direct_sock != INVALID_SOCKET) {
-          sockaddr_in addr{};
-          addr.sin_family = AF_INET;
-          addr.sin_port = htons(25335);
-          inet_pton(AF_INET, current_host_ip_.c_str(), &addr.sin_addr);
+        const uint16_t fallback_ports[] = {15335, 25335};
+        for (uint16_t port : fallback_ports) {
+          SOCKET direct_sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+          if (direct_sock != INVALID_SOCKET) {
+            sockaddr_in addr{};
+            addr.sin_family = AF_INET;
+            addr.sin_port = htons(port);
+            inet_pton(AF_INET, current_host_ip_.c_str(), &addr.sin_addr);
 
-          u_long mode = 1;
-          ioctlsocket(direct_sock, FIONBIO, &mode);
-          connect(direct_sock, reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
-
-          fd_set write_fds;
-          FD_ZERO(&write_fds);
-          FD_SET(direct_sock, &write_fds);
-          timeval tv{1, 0};
-          if (select(0, nullptr, &write_fds, nullptr, &tv) > 0) {
-            mode = 0;
+            u_long mode = 1;
             ioctlsocket(direct_sock, FIONBIO, &mode);
-            new_sock = direct_sock;
-          } else {
-            closesocket(direct_sock);
+            connect(direct_sock, reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
+
+            fd_set write_fds;
+            FD_ZERO(&write_fds);
+            FD_SET(direct_sock, &write_fds);
+            timeval tv{1, 0};
+            if (select(0, nullptr, &write_fds, nullptr, &tv) > 0) {
+              mode = 0;
+              ioctlsocket(direct_sock, FIONBIO, &mode);
+              new_sock = direct_sock;
+              break;
+            } else {
+              closesocket(direct_sock);
+            }
           }
         }
       }
@@ -445,7 +461,7 @@ void ScreenMirrorPlugin::AudioStreamWorkerLoop() {
         setsockopt(new_sock, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&rcv_timeout), sizeof(rcv_timeout));
 
         active_audio_tunnel_sock_ = new_sock;
-        Log("AUDIO", "Successfully connected audio tunnel to port 25335", "success");
+        Log("AUDIO", "Successfully connected audio tunnel (ports 15335/25335)", "success");
       } else {
         // Broadcast might not have started yet on iPhone; wait 500ms before retrying
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
@@ -557,32 +573,47 @@ void ScreenMirrorPlugin::HandleMethodCall(
 
     SOCKET tunnel_sock = INVALID_SOCKET;
     std::string err_msg;
-    bool success = usbmuxd_client_->ConnectTunnel(device_id, target_port, &tunnel_sock, &err_msg);
-    if (!success && target_port == 25334) {
-      // Auto-fallback to port 15333
-      success = usbmuxd_client_->ConnectTunnel(device_id, 15333, &tunnel_sock, &err_msg);
+    bool success = false;
+
+    if (target_port == 25334) {
+      // 1. Try extension direct video port 15334 first
+      success = usbmuxd_client_->ConnectTunnel(device_id, 15334, &tunnel_sock, &err_msg);
+      if (!success) {
+        // 2. Fall back to main app video port 25334
+        success = usbmuxd_client_->ConnectTunnel(device_id, 25334, &tunnel_sock, &err_msg);
+      }
+      if (!success) {
+        // 3. Fall back to legacy port 15333
+        success = usbmuxd_client_->ConnectTunnel(device_id, 15333, &tunnel_sock, &err_msg);
+      }
+    } else {
+      success = usbmuxd_client_->ConnectTunnel(device_id, target_port, &tunnel_sock, &err_msg);
     }
 
     if (!success) {
-      // Direct TCP fallback: check if iPhone is directly reachable on local network (e.g. 172.20.10.1:25334)
-      SOCKET direct_sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-      if (direct_sock != INVALID_SOCKET) {
-        const BOOL flag = TRUE;
-        setsockopt(direct_sock, IPPROTO_TCP, TCP_NODELAY, reinterpret_cast<const char*>(&flag), sizeof(flag));
-        sockaddr_in direct_addr{};
-        direct_addr.sin_family = AF_INET;
-        direct_addr.sin_port = htons(target_port);
-        inet_pton(AF_INET, "172.20.10.1", &direct_addr.sin_addr);
+      // Direct TCP fallback: check if iPhone is directly reachable on local network (e.g. 172.20.10.1:15334 / 25334)
+      const uint16_t wifi_ports[] = { (target_port == 25334 ? static_cast<uint16_t>(15334) : target_port), target_port };
+      for (uint16_t port : wifi_ports) {
+        SOCKET direct_sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        if (direct_sock != INVALID_SOCKET) {
+          const BOOL flag = TRUE;
+          setsockopt(direct_sock, IPPROTO_TCP, TCP_NODELAY, reinterpret_cast<const char*>(&flag), sizeof(flag));
+          sockaddr_in direct_addr{};
+          direct_addr.sin_family = AF_INET;
+          direct_addr.sin_port = htons(port);
+          inet_pton(AF_INET, "172.20.10.1", &direct_addr.sin_addr);
 
-        DWORD timeout = 2000;
-        setsockopt(direct_sock, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&timeout), sizeof(timeout));
-        setsockopt(direct_sock, SOL_SOCKET, SO_SNDTIMEO, reinterpret_cast<const char*>(&timeout), sizeof(timeout));
+          DWORD timeout = 2000;
+          setsockopt(direct_sock, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&timeout), sizeof(timeout));
+          setsockopt(direct_sock, SOL_SOCKET, SO_SNDTIMEO, reinterpret_cast<const char*>(&timeout), sizeof(timeout));
 
-        if (connect(direct_sock, reinterpret_cast<sockaddr*>(&direct_addr), sizeof(direct_addr)) == 0) {
-          tunnel_sock = direct_sock;
-          success = true;
-        } else {
-          closesocket(direct_sock);
+          if (connect(direct_sock, reinterpret_cast<sockaddr*>(&direct_addr), sizeof(direct_addr)) == 0) {
+            tunnel_sock = direct_sock;
+            success = true;
+            break;
+          } else {
+            closesocket(direct_sock);
+          }
         }
       }
     }
