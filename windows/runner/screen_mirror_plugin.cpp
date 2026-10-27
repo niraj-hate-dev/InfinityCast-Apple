@@ -364,7 +364,13 @@ void ScreenMirrorPlugin::StartAudioStreamingWorker(uint32_t device_id, const std
   is_audio_streaming_ = true;
 
   if (audio_decoder_) {
-    audio_decoder_->Initialize();
+    if (!audio_decoder_->Initialize()) {
+      Log("AUDIO", "AAC decoder initialization failed; audio worker will keep retrying the transport", "error");
+    } else {
+      // A reconnect can leave a partial ADTS frame in the decoder. Start each
+      // session at an ADTS boundary so video and audio can recover independently.
+      audio_decoder_->Flush();
+    }
   }
 
   audio_stream_thread_ = std::thread(&ScreenMirrorPlugin::AudioStreamWorkerLoop, this);

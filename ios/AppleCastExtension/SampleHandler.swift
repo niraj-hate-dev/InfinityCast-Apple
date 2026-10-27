@@ -42,6 +42,9 @@ public class SampleHandler: RPBroadcastSampleHandler {
     private var audioClientSocket: Int32 = -1
     private let audioSocketLock = NSLock()
     private let audioNetworkQueue = DispatchQueue(label: "com.applecast.audioNetworkQueue", qos: .userInteractive)
+    // Keep each AAC/ADTS access unit intact when capture and reconnect events
+    // happen at the same time.
+    private let audioSendQueue = DispatchQueue(label: "com.applecast.audioSendQueue", qos: .userInteractive)
 
     // MARK: - Memory Management & Backpressure State
     private var sharedDefaults: UserDefaults?
@@ -556,6 +559,12 @@ public class SampleHandler: RPBroadcastSampleHandler {
     }
 
     private func sendAudioSocketData(_ data: Data) {
+        audioSendQueue.async { [weak self] in
+            self?.sendAudioPacket(data)
+        }
+    }
+
+    private func sendAudioPacket(_ data: Data) {
         audioSocketLock.lock()
         let activeBsd = audioClientSocket
         audioSocketLock.unlock()

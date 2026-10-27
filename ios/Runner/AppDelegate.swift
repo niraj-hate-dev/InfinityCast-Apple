@@ -9,6 +9,7 @@ import Darwin
 
   private let appGroup = "group.applecast.mirror"
   private let defaultPort: UInt16 = 25334
+  private let defaultAudioPort: UInt16 = 25335
   private let controlPort: UInt16 = 25333
 
   private var flutterChannel: FlutterMethodChannel?
@@ -256,8 +257,9 @@ import Darwin
   private func synchronizeBroadcastConfiguration(targetPort: UInt16) {
     let defaults = UserDefaults(suiteName: appGroup) ?? UserDefaults.standard
     defaults.set(Int(targetPort), forKey: "wxiosserverport")
+    defaults.set(Int(defaultAudioPort), forKey: "wxiosserveraudioport")
     defaults.set(0, forKey: "kGroupReplayKitRecordType") // 0 = Custom Local TCP stream
-    defaults.set(false, forKey: "kGroupMirrorVoiceSwitch")
+    defaults.set(true, forKey: "kGroupMirrorVoiceSwitch")
     defaults.set(60, forKey: "videoFps")
     defaults.set(8_000_000, forKey: "videoBitrate") // 8 Mbps safe budget under 50MB Jetsam limit
     defaults.set(1080, forKey: "videoResolution")
