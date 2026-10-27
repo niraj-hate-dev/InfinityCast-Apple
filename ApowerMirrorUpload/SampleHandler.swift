@@ -56,6 +56,10 @@ public class SampleHandler: RPBroadcastSampleHandler {
 
     private let networkQueue = DispatchQueue(label: "com.apowermirror.upload.network", qos: .userInteractive)
     private let audioNetworkQueue = DispatchQueue(label: "com.apowermirror.upload.audio.network", qos: .userInteractive)
+    // All writes to the audio IPC socket must be serialized. AudioEncoder runs on
+    // its own queue while reconnect code can flush queued packets concurrently;
+    // concurrent TCP writes can interleave two ADTS frames.
+    private let audioSendQueue = DispatchQueue(label: "com.apowermirror.upload.audio.send", qos: .userInteractive)
     private var targetFps: Int32 = 60
     private var targetBitrate: Int32 = 4_000_000
 
@@ -390,6 +394,13 @@ public class SampleHandler: RPBroadcastSampleHandler {
     // MARK: - Outbound Audio POSIX BSD Socket IPC (to 127.0.0.1:8889)
 
     private func connectToAudioIPC() {
+        audioSocketLock.lock()
+        let alreadyConnected = audioBsdClientSocket >= 0
+        audioSocketLock.unlock()
+        if alreadyConnected {
+            return
+        }
+
         audioConnectLock.lock()
         if isAudioConnecting {
             audioConnectLock.unlock()
@@ -477,6 +488,12 @@ public class SampleHandler: RPBroadcastSampleHandler {
     }
 
     private func sendAudioDataToMainApp(_ data: Data) {
+        audioSendQueue.async { [weak self] in
+            self?.sendAudioPacketToMainApp(data)
+        }
+    }
+
+    private func sendAudioPacketToMainApp(_ data: Data) {
         audioSocketLock.lock()
         let sock = audioBsdClientSocket
         audioSocketLock.unlock()

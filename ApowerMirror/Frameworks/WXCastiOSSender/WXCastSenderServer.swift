@@ -74,6 +74,10 @@ public final class WXCastSenderServer {
     private let parameterSetLock = NSLock()
 
     private let serverQueue = DispatchQueue(label: "com.apowermirror.server.queue", qos: .userInteractive)
+    // Audio can arrive from the ReplayKit IPC receiver or the in-app recorder.
+    // Serialize the complete dispatch so AAC packets cannot interleave on a TCP
+    // client when both capture paths are active.
+    private let audioSendQueue = DispatchQueue(label: "com.apowermirror.server.audio.send", qos: .userInteractive)
     private var isRunning = false
 
     // MARK: - Initialization
@@ -687,6 +691,12 @@ public final class WXCastSenderServer {
     // MARK: - Audio Dispatcher (Port 25335 & Port 25334 /mirrorVoice)
 
     public func sendAudioData(_ data: Data) {
+        audioSendQueue.async { [weak self] in
+            self?.sendAudioDataSerialized(data)
+        }
+    }
+
+    private func sendAudioDataSerialized(_ data: Data) {
         // 1. Dispatch via NWConnection audio clients
         serverQueue.async { [weak self] in
             guard let self = self else { return }
