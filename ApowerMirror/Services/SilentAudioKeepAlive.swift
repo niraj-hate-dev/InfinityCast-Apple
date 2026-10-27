@@ -20,6 +20,7 @@ public final class SilentAudioKeepAlive {
     private var audioPlayer: AVAudioPlayer?
     private var isPlaying = false
     private let lock = NSLock()
+    private var watchdogTimer: DispatchSourceTimer?
 
     private init() {
         setupObservers()
@@ -39,9 +40,21 @@ public final class SilentAudioKeepAlive {
                 return
             }
 
-            if type == .ended {
+            switch type {
+            case .began:
+                NSLog("[SilentAudioKeepAlive] Audio interruption began (e.g. YouTube/media started) -> Re-asserting mixWithOthers keepalive")
+                // When YouTube or media plays, re-assert audio session with mixWithOthers so the silent player coexists
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+                    self?.resumeIfPlaying()
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                    self?.resumeIfPlaying()
+                }
+            case .ended:
                 NSLog("[SilentAudioKeepAlive] Audio interruption ended -> Resuming silent keepalive loop")
                 self?.resumeIfPlaying()
+            @unknown default:
+                break
             }
         }
 
@@ -163,9 +176,37 @@ public final class SilentAudioKeepAlive {
         }
     }
 
+    private func startWatchdog() {
+        stopWatchdog()
+        let timer = DispatchSource.makeTimerSource(flags: [], queue: DispatchQueue.global(qos: .userInteractive))
+        timer.schedule(deadline: .now() + 2.0, repeating: 2.0)
+        timer.setEventHandler { [weak self] in
+            guard let self = self else { return }
+            self.lock.lock()
+            let playing = self.isPlaying
+            let isPlayerActive = self.audioPlayer?.isPlaying ?? false
+            self.lock.unlock()
+
+            if playing && !isPlayerActive {
+                NSLog("[SilentAudioKeepAlive] Watchdog: Silent player paused, reviving keepalive immediately")
+                DispatchQueue.main.async { [weak self] in
+                    self?.resumeIfPlaying()
+                }
+            }
+        }
+        timer.resume()
+        watchdogTimer = timer
+    }
+
+    private func stopWatchdog() {
+        watchdogTimer?.cancel()
+        watchdogTimer = nil
+    }
+
     public func start() {
         lock.lock()
         defer { lock.unlock() }
+        startWatchdog()
         guard !isPlaying else {
             // Already active, ensure player is actually playing
             if audioPlayer?.isPlaying == false {
@@ -192,6 +233,7 @@ public final class SilentAudioKeepAlive {
     public func stop() {
         lock.lock()
         defer { lock.unlock() }
+        stopWatchdog()
         guard isPlaying else { return }
 
         audioPlayer?.pause()

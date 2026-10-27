@@ -89,30 +89,17 @@ public final class AudioEncoder {
                 self.lastBufferEndPts = startSec + durationSec
             }
 
-            // 3. Dynamically allocate AudioBufferList with enough space for non-interleaved stereo (up to 8 buffers)
-            var bufferListSizeNeeded: Int = 0
-            CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(
-                sampleBuffer,
-                bufferListSizeNeededOut: &bufferListSizeNeeded,
-                bufferListOut: nil,
-                bufferListSize: 0,
-                blockBufferAllocator: nil,
-                blockBufferMemoryAllocator: nil,
-                flags: 0,
-                blockBufferOut: nil
-            )
-
-            let allocSize = max(bufferListSizeNeeded, AudioBufferList.sizeInBytes(maximumBuffers: 2))
-            let rawAblPtr = UnsafeMutableRawPointer.allocate(byteCount: allocSize, alignment: MemoryLayout<AudioBufferList>.alignment)
-            defer { rawAblPtr.deallocate() }
-            let ablPtr = rawAblPtr.bindMemory(to: AudioBufferList.self, capacity: 1)
+            // 3. Dynamically allocate AudioBufferList with capacity for non-interleaved stereo (4 buffers)
+            let maxBuffers = 4
+            let ablPointer = AudioBufferList.allocate(maximumBuffers: maxBuffers)
+            defer { free(ablPointer.unsafeMutablePointer) }
 
             var blockBuffer: CMBlockBuffer? = nil
             let status = CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(
                 sampleBuffer,
                 bufferListSizeNeededOut: nil,
-                bufferListOut: ablPtr,
-                bufferListSize: allocSize,
+                bufferListOut: ablPointer.unsafeMutablePointer,
+                bufferListSize: AudioBufferList.sizeInBytes(maximumBuffers: maxBuffers),
                 blockBufferAllocator: nil,
                 blockBufferMemoryAllocator: nil,
                 flags: 0,
@@ -126,7 +113,7 @@ public final class AudioEncoder {
 
             // 4. Normalize any ReplayKit PCM format (Big-Endian/Little-Endian, Float/Int, Planar/Interleaved)
             //    into standard Little-Endian 16-bit Interleaved Stereo PCM (4 bytes/frame)
-            let abl = UnsafeMutableAudioBufferListPointer(ablPtr)
+            let abl = ablPointer
             let flags = inFormat.mFormatFlags
             let isFloat = (flags & kAudioFormatFlagIsFloat) != 0
             let isBigEndian = (flags & kAudioFormatFlagIsBigEndian) != 0
@@ -231,6 +218,11 @@ public final class AudioEncoder {
 
             _ = blockBuffer
 
+            // Cap ring buffer to prevent memory buildup if encoding is delayed
+            if self.pcmRingBuffer.count > 176_400 { // > 1 second of 44.1kHz 16-bit stereo PCM
+                self.pcmRingBuffer.removeSubrange(0..<(self.pcmRingBuffer.count - 4096 * 4))
+            }
+
             // 5. Feed into AudioConverterFillComplexBuffer dynamically from the ring buffer
             let kMinInputBytes = 1024 * self.bytesPerFrame // 4096 bytes
 
@@ -300,6 +292,10 @@ public final class AudioEncoder {
                 if finalOffset > 0 {
                     let removeCount = min(finalOffset, self.pcmRingBuffer.count)
                     self.pcmRingBuffer.removeSubrange(0..<removeCount)
+                }
+
+                if finalOffset == 0 && ioOutputDataPackets == 0 {
+                    break
                 }
 
                 if (convStatus == noErr || convStatus == -1) && ioOutputDataPackets > 0 {
