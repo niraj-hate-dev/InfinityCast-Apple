@@ -405,6 +405,14 @@ bool AudioDecoder::DecodeStream(const uint8_t* in_data, size_t in_size) {
         const int16_t* samples = reinterpret_cast<const int16_t*>(f->data[0]);
         PlayPcm(samples, static_cast<size_t>(f->nb_samples) * 2);
       }
+
+      static uint64_t s_audio_frames_played = 0;
+      s_audio_frames_played++;
+      if (s_audio_frames_played == 1 || s_audio_frames_played % 200 == 0) {
+        Log("AUDIO", "Decoded audio frame #" + std::to_string(s_audio_frames_played) +
+            " (" + std::to_string(f->nb_samples) + " samples @ " +
+            std::to_string(sample_rate) + " Hz)", "success");
+      }
     }
   }
 

@@ -351,7 +351,12 @@ class MirrorController extends ChangeNotifier {
     addLog('CONTROL', 'Probing device control channel on port ${AppleCastConstants.defaultDeviceControlPort}...', level: LogLevel.info);
     final probeResult = await _channelService.probeDevice(deviceId: targetDevice.deviceId);
     if (probeResult['connected'] == true) {
-      addLog('CONTROL', 'iPhone companion confirmed online! (Screen Captured: ${probeResult["isCaptured"]})', level: LogLevel.success);
+      final bool isCaptured = probeResult['isCaptured'] == true;
+      if (isCaptured) {
+        addLog('CONTROL', 'iPhone companion confirmed online! (Screen Recording: ACTIVE)', level: LogLevel.success);
+      } else {
+        addLog('CONTROL', 'iPhone companion confirmed online, but Screen Recording is NOT active! Please tap START on ApowerMirror on iPhone and tap "Start Broadcast".', level: LogLevel.warning);
+      }
     }
 
     // 3. Connect virtual TCP tunnel to iOS streaming port 25334 (with fallback)
