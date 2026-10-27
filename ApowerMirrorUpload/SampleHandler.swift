@@ -211,6 +211,13 @@ public class SampleHandler: RPBroadcastSampleHandler {
     // MARK: - Outbound POSIX BSD Socket IPC (to 127.0.0.1:8888)
 
     private func connectToMainAppIPC() {
+        socketLock.lock()
+        let alreadyConnected = bsdClientSocket >= 0
+        socketLock.unlock()
+        if alreadyConnected {
+            return
+        }
+
         videoConnectLock.lock()
         if isVideoConnecting {
             videoConnectLock.unlock()
@@ -229,8 +236,11 @@ public class SampleHandler: RPBroadcastSampleHandler {
 
             self.socketLock.lock()
             if self.bsdClientSocket >= 0 {
-                close(self.bsdClientSocket)
-                self.bsdClientSocket = -1
+                self.socketLock.unlock()
+                self.videoConnectLock.lock()
+                self.isVideoConnecting = false
+                self.videoConnectLock.unlock()
+                return
             }
             self.socketLock.unlock()
 
@@ -340,6 +350,11 @@ public class SampleHandler: RPBroadcastSampleHandler {
         socketLock.unlock()
 
         guard sock >= 0 else {
+            videoPacketQueueLock.lock()
+            if videoPacketQueue.count < 30 {
+                videoPacketQueue.insert(VideoQueueItem(data: data, isKeyFrame: isKeyFrame), at: 0)
+            }
+            videoPacketQueueLock.unlock()
             connectToMainAppIPC()
             return
         }
@@ -419,8 +434,11 @@ public class SampleHandler: RPBroadcastSampleHandler {
 
             self.audioSocketLock.lock()
             if self.audioBsdClientSocket >= 0 {
-                close(self.audioBsdClientSocket)
-                self.audioBsdClientSocket = -1
+                self.audioSocketLock.unlock()
+                self.audioConnectLock.lock()
+                self.isAudioConnecting = false
+                self.audioConnectLock.unlock()
+                return
             }
             self.audioSocketLock.unlock()
 

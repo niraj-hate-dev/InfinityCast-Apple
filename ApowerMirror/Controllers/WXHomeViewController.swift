@@ -21,6 +21,7 @@ open class WXHomeViewController: UIViewController, ScreenRecorderManagerDelegate
     private var scanBtnSubLabel: UILabel?
     private var hintLabel: UILabel?
     private var pulseLayer: CAShapeLayer?
+    private var nativePickerView: RPSystemBroadcastPickerView?
 
     // Live Diagnostic UI Cards
     private var replayKitStatusCard: UIView?
@@ -144,6 +145,23 @@ open class WXHomeViewController: UIViewController, ScreenRecorderManagerDelegate
         btnSub.isUserInteractionEnabled = false
         btn.addSubview(btnSub)
         self.scanBtnSubLabel = btnSub
+
+        // Dedicated Native ReplayKit Picker View overlaid transparently over the START button
+        let picker = RPSystemBroadcastPickerView()
+        picker.translatesAutoresizingMaskIntoConstraints = false
+        picker.preferredExtension = BroadcastPickerManager.shared.extensionBundleId
+        picker.showsMicrophoneButton = false
+        picker.backgroundColor = .clear
+        picker.alpha = 0.05
+        btn.addSubview(picker)
+        self.nativePickerView = picker
+
+        NSLayoutConstraint.activate([
+            picker.topAnchor.constraint(equalTo: btn.topAnchor),
+            picker.bottomAnchor.constraint(equalTo: btn.bottomAnchor),
+            picker.leadingAnchor.constraint(equalTo: btn.leadingAnchor),
+            picker.trailingAnchor.constraint(equalTo: btn.trailingAnchor)
+        ])
 
         let hint = UILabel()
         hint.translatesAutoresizingMaskIntoConstraints = false
@@ -391,6 +409,8 @@ open class WXHomeViewController: UIViewController, ScreenRecorderManagerDelegate
 
         if isCapturing {
             // Screen Recording ACTIVE
+            nativePickerView?.isUserInteractionEnabled = false
+            nativePickerView?.isHidden = true
             replayKitDotView?.backgroundColor = UIColor(red: 0.10, green: 0.75, blue: 0.35, alpha: 1.0)
             replayKitTitleLabel?.text = "ReplayKit: Screen Recording ACTIVE"
             replayKitDetailLabel?.text = "Screen recording successfully! Full phone mirroring active."
@@ -412,6 +432,8 @@ open class WXHomeViewController: UIViewController, ScreenRecorderManagerDelegate
             hintLabel?.text = "Tap to retry screen recording"
         } else {
             // Screen Recording INACTIVE / READY
+            nativePickerView?.isUserInteractionEnabled = true
+            nativePickerView?.isHidden = false
             stopDurationTimer()
             replayKitDotView?.backgroundColor = UIColor.systemGray
             replayKitTitleLabel?.text = "ReplayKit: Ready"
@@ -419,7 +441,7 @@ open class WXHomeViewController: UIViewController, ScreenRecorderManagerDelegate
 
             scanBtn?.backgroundColor = UIColor(red: 0.15, green: 0.50, blue: 0.98, alpha: 1.0)
             scanBtnSubLabel?.text = "START"
-            hintLabel?.text = "Tap to Launch Screen Recording"
+            hintLabel?.text = "Tap START and choose 'Start Broadcast'"
         }
 
         // Update Windows Connection Card

@@ -193,12 +193,9 @@ public final class WXCastSenderServer {
         parameterSetLock.lock()
         defer { parameterSetLock.unlock() }
         guard let sps = cachedSps, let pps = cachedPps else { return nil }
-        var combined = Data(capacity: sps.count + pps.count + (cachedIdr?.count ?? 0))
+        var combined = Data(capacity: sps.count + pps.count)
         combined.append(sps)
         combined.append(pps)
-        if let idr = cachedIdr {
-            combined.append(idr)
-        }
         return combined
     }
 
@@ -528,17 +525,22 @@ public final class WXCastSenderServer {
                             totalSent += sent
                             retries = 0
                         } else {
-                            if (errno == EAGAIN || errno == EWOULDBLOCK) && retries < 25 {
+                            if (errno == EAGAIN || errno == EWOULDBLOCK) && retries < 100 {
                                 retries += 1
-                                usleep(1000) // Wait up to 25ms for USB tunnel drain
+                                usleep(2000) // Wait up to 200ms for USB tunnel drain
                                 continue
                             }
-                            // If we already wrote part of the frame (`totalSent > 0`), leaving the
-                            // socket open will corrupt the H.264 stream on the desktop!
-                            // Close the stalled client socket or force an immediate IDR keyframe recovery.
-                            deadFds.append(fd)
-                            self.requestEncoderKeyframeRefresh()
-                            break
+                            if totalSent == 0 {
+                                // Frame not yet started on the wire. Drop under temporary backpressure
+                                // without corrupting the bitstream or disconnecting the socket.
+                                self.requestEncoderKeyframeRefresh()
+                                break
+                            } else {
+                                // Frame was partially written: close socket cleanly to prevent bitstream corruption.
+                                deadFds.append(fd)
+                                self.requestEncoderKeyframeRefresh()
+                                break
+                            }
                         }
                     }
                 }
@@ -723,9 +725,9 @@ public final class WXCastSenderServer {
                             totalSent += sent
                             retries = 0
                         } else {
-                            if (errno == EAGAIN || errno == EWOULDBLOCK) && retries < 25 {
+                            if (errno == EAGAIN || errno == EWOULDBLOCK) && retries < 100 {
                                 retries += 1
-                                usleep(1000)
+                                usleep(2000)
                                 continue
                             }
                             deadFds.append(fd)

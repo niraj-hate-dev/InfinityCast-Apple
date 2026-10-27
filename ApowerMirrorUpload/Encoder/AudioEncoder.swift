@@ -14,6 +14,12 @@ import CoreMedia
 import AudioToolbox
 import Darwin
 
+private struct AudioEncoderInputState {
+    var basePtr: UnsafePointer<UInt8>
+    var totalBytes: Int
+    var offset: Int
+}
+
 public final class AudioEncoder {
 
     public typealias EncodedAudioHandler = (_ packet: Data) -> Void
@@ -240,11 +246,6 @@ public final class AudioEncoder {
 
                 var ioOutputDataPackets: UInt32 = 1
 
-                final class InputTracker {
-                    var offset: Int = 0
-                }
-                let tracker = InputTracker()
-
                 let inputProc: AudioConverterComplexInputDataProc = { (
                     _,
                     ioNumberDataPackets,
@@ -254,13 +255,17 @@ public final class AudioEncoder {
                 ) -> OSStatus in
                     guard let inUserData = inUserData else {
                         ioNumberDataPackets.pointee = 0
-                        return -1
+                        ioData.pointee.mBuffers.mDataByteSize = 0
+                        ioData.pointee.mBuffers.mData = nil
+                        return noErr
                     }
-                    let (bufPtr, totalBytes, tracker) = inUserData.assumingMemoryBound(to: (UnsafePointer<UInt8>, Int, InputTracker).self).pointee
-                    let remainingBytes = totalBytes - tracker.offset
+                    let state = inUserData.assumingMemoryBound(to: AudioEncoderInputState.self)
+                    let remainingBytes = state.pointee.totalBytes - state.pointee.offset
                     if remainingBytes < 4 {
                         ioNumberDataPackets.pointee = 0
-                        return -1
+                        ioData.pointee.mBuffers.mDataByteSize = 0
+                        ioData.pointee.mBuffers.mData = nil
+                        return noErr
                     }
 
                     let availablePackets = UInt32(remainingBytes / 4)
@@ -270,16 +275,17 @@ public final class AudioEncoder {
 
                     ioData.pointee.mBuffers.mNumberChannels = 2
                     ioData.pointee.mBuffers.mDataByteSize = bytesToGive
-                    ioData.pointee.mBuffers.mData = UnsafeMutableRawPointer(mutating: bufPtr.advanced(by: tracker.offset))
+                    ioData.pointee.mBuffers.mData = UnsafeMutableRawPointer(mutating: state.pointee.basePtr.advanced(by: state.pointee.offset))
                     ioNumberDataPackets.pointee = toGive
-                    tracker.offset += Int(bytesToGive)
+                    state.pointee.offset += Int(bytesToGive)
                     return noErr
                 }
 
+                var finalOffset = 0
                 let convStatus = self.pcmRingBuffer.withUnsafeBytes { rawBytes -> OSStatus in
                     guard let basePtr = rawBytes.baseAddress?.assumingMemoryBound(to: UInt8.self) else { return -1 }
-                    var state = (basePtr, self.pcmRingBuffer.count, tracker)
-                    return AudioConverterFillComplexBuffer(
+                    var state = AudioEncoderInputState(basePtr: basePtr, totalBytes: self.pcmRingBuffer.count, offset: 0)
+                    let st = AudioConverterFillComplexBuffer(
                         converter,
                         inputProc,
                         &state,
@@ -287,10 +293,12 @@ public final class AudioEncoder {
                         &outAbl,
                         nil
                     )
+                    finalOffset = state.offset
+                    return st
                 }
 
-                if tracker.offset > 0 {
-                    let removeCount = min(tracker.offset, self.pcmRingBuffer.count)
+                if finalOffset > 0 {
+                    let removeCount = min(finalOffset, self.pcmRingBuffer.count)
                     self.pcmRingBuffer.removeSubrange(0..<removeCount)
                 }
 
@@ -309,6 +317,9 @@ public final class AudioEncoder {
                         self.packetHandler(packet)
                     }
                 } else {
+                    if convStatus != noErr && convStatus != -1 {
+                        NSLog("[AudioEncoder] AudioConverterFillComplexBuffer note: status=%d", convStatus)
+                    }
                     // Not enough samples to output a packet yet (e.g. priming); wait for next buffer
                     break
                 }

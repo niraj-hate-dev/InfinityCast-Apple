@@ -44,18 +44,30 @@ public final class BroadcastPickerManager {
 
     // MARK: - Setup & Programmatic Presentation
 
+    private func findButton(in view: UIView) -> UIButton? {
+        if let button = view as? UIButton {
+            return button
+        }
+        for subview in view.subviews {
+            if let button = findButton(in: subview) {
+                return button
+            }
+        }
+        return nil
+    }
+
     /// Creates and configures the RPSystemBroadcastPickerView
     public func preparePickerView(in view: UIView) {
         if let existing = pickerView, existing.superview != nil {
             existing.removeFromSuperview()
         }
-        let picker = RPSystemBroadcastPickerView(frame: CGRect(x: 0, y: 0, width: 44, height: 44))
+        let picker = RPSystemBroadcastPickerView(frame: CGRect(x: 0, y: 0, width: 64, height: 64))
         picker.preferredExtension = extensionBundleId
         picker.showsMicrophoneButton = false
         picker.autoresizingMask = [.flexibleTopMargin, .flexibleLeftMargin]
         
         // Keep in view hierarchy with minimal opacity so touch events can be synthesized
-        picker.alpha = 0.02
+        picker.alpha = 0.05
         view.addSubview(picker)
         self.pickerView = picker
         NSLog("[BroadcastPickerManager] Prepared RPSystemBroadcastPickerView with extension: %@", extensionBundleId)
@@ -70,13 +82,12 @@ public final class BroadcastPickerManager {
         guard let picker = pickerView else { return }
         picker.preferredExtension = extensionBundleId
 
-        // Find the internal UIButton inside RPSystemBroadcastPickerView
-        for subview in picker.subviews {
-            if let button = subview as? UIButton {
-                button.sendActions(for: .touchUpInside)
-                NSLog("[BroadcastPickerManager] Programmatically triggered RPSystemBroadcastPickerView modal for %@", extensionBundleId)
-                return
-            }
+        // Recursively search the internal view hierarchy of RPSystemBroadcastPickerView
+        if let button = findButton(in: picker) {
+            button.sendActions(for: .allTouchEvents)
+            button.sendActions(for: .touchUpInside)
+            NSLog("[BroadcastPickerManager] Programmatically triggered RPSystemBroadcastPickerView modal for %@", extensionBundleId)
+            return
         }
 
         NSLog("[BroadcastPickerManager] Warning: Could not find internal button inside RPSystemBroadcastPickerView")
