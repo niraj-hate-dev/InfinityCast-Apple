@@ -28,6 +28,8 @@ public class SampleHandler: RPBroadcastSampleHandler {
     private var isBroadcasting = false
     private var pendingKeyframeRequest = true
     private var audioFrameCount: Int = 0
+    private var lastAudioReceivedTime: CFTimeInterval = 0
+    private var silentAudioTimer: DispatchSourceTimer?
 
     // Direct Extension Server Sockets (Never suspended when Main App is in background!)
     private var directVideoListenSock: Int32 = -1
@@ -77,6 +79,35 @@ public class SampleHandler: RPBroadcastSampleHandler {
         super.init()
     }
 
+    
+    // MARK: - Comfort Noise / Continuous Audio Carrier
+    private func startComfortNoiseGenerator() {
+        stopComfortNoiseGenerator()
+        lastAudioReceivedTime = CACurrentMediaTime()
+        let timer = DispatchSource.makeTimerSource(queue: audioNetworkQueue)
+        timer.schedule(deadline: .now() + 0.3, repeating: 0.1)
+        timer.setEventHandler { [weak self] in
+            guard let self = self, self.isBroadcasting else { return }
+            let now = CACurrentMediaTime()
+            if now - self.lastAudioReceivedTime >= 0.25 {
+                if self.audioEncoder == nil {
+                    self.audioEncoder = AudioEncoder(sampleRate: 44100.0, channels: 2) { [weak self] packet in
+                        self?.dispatchAudioPacket(packet)
+                    }
+                }
+                let silentPcm = Data(count: 4096)
+                self.audioEncoder?.encodePCM(silentPcm)
+            }
+        }
+        silentAudioTimer = timer
+        timer.resume()
+    }
+
+    private func stopComfortNoiseGenerator() {
+        silentAudioTimer?.cancel()
+        silentAudioTimer = nil
+    }
+
     public override func broadcastStarted(withSetupInfo setupInfo: [String : NSObject]?) {
         super.broadcastStarted(withSetupInfo: setupInfo)
         isBroadcasting = true
@@ -90,6 +121,7 @@ public class SampleHandler: RPBroadcastSampleHandler {
         // 1. Start Direct Extension Servers (15334 Video, 15335 Audio) - immune to Main App background suspension!
         startDirectVideoServer(port: Self.kDirectVideoPort)
         startDirectAudioServer(port: Self.kDirectAudioPort)
+        startComfortNoiseGenerator()
 
         // 2. Also connect to Main App IPC (8888 Video, 8889 Audio)
         connectToMainAppIPC()
@@ -127,6 +159,7 @@ public class SampleHandler: RPBroadcastSampleHandler {
         removeDarwinKeyframeReceiver()
         closeSocket()
         closeAudioSocket()
+        stopComfortNoiseGenerator()
         stopDirectServers()
 
         notifyMainApp(event: "Finish")
@@ -163,6 +196,7 @@ public class SampleHandler: RPBroadcastSampleHandler {
                 videoEncoder?.encode(sampleBuffer: sampleBuffer, orientation: orientation)
 
             case .audioApp:
+                self.lastAudioReceivedTime = CACurrentMediaTime()
                 self.audioFrameCount += 1
                 if self.audioFrameCount <= 5 || self.audioFrameCount % 200 == 0 {
                     NSLog("[SampleHandler] Received audioApp buffer #%d", self.audioFrameCount)
@@ -175,6 +209,7 @@ public class SampleHandler: RPBroadcastSampleHandler {
                 audioEncoder?.encode(sampleBuffer: sampleBuffer)
 
             case .audioMic:
+                self.lastAudioReceivedTime = CACurrentMediaTime()
                 if audioEncoder == nil {
                     audioEncoder = AudioEncoder(sampleRate: 44100.0, channels: 2) { [weak self] packet in
                         self?.dispatchAudioPacket(packet)
@@ -317,6 +352,13 @@ public class SampleHandler: RPBroadcastSampleHandler {
                 self.directAudioClients.append(clientFd)
                 self.directAudioLock.unlock()
                 NSLog("[SampleHandler] Desktop connected directly to Extension Audio port %d", port)
+                if self.audioEncoder == nil {
+                    self.audioEncoder = AudioEncoder(sampleRate: 44100.0, channels: 2) { [weak self] packet in
+                        self?.dispatchAudioPacket(packet)
+                    }
+                }
+                let initialSilence = Data(count: 8192)
+                self.audioEncoder?.encodePCM(initialSilence)
             }
         }
     }
