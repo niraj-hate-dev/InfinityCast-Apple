@@ -61,6 +61,9 @@ class _DebugConsoleState extends State<DebugConsole> {
 
   List<DebugLogEntry> get _filteredLogs {
     if (_filter == 'ALL') return widget.logs;
+    if (_filter == 'AUDIO') {
+      return widget.logs.where((l) => l.tag == 'AUDIO' || l.tag == 'AUDIO_DETECTOR').toList();
+    }
     if (_filter == 'STREAM') {
       return widget.logs.where((l) => l.tag == 'STREAM' || l.tag == 'DECODER').toList();
     }
@@ -232,6 +235,7 @@ class _DebugConsoleState extends State<DebugConsole> {
   Widget _buildFilterBar() {
     final filters = [
       {'id': 'ALL', 'label': 'All'},
+      {'id': 'AUDIO', 'label': 'Audio Detector'},
       {'id': 'STREAM', 'label': 'Video/FPS'},
       {'id': 'USBMUXD', 'label': 'Usbmuxd'},
       {'id': 'ERRORS', 'label': 'Warnings/Errors'},

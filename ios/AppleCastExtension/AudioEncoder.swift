@@ -6,7 +6,7 @@
 //  - Handles Interleaved & Non-Interleaved 32-bit Float PCM (iOS ReplayKit Native Format)
 //  - Converts to Linear 16-bit Signed Integer PCM
 //  - Encodes to standard AAC-LC using native CoreAudio AudioConverterNew
-//  - Non-destructive dynamic ring buffer consumption (preserves priming lookahead frames)
+//  - Safe AudioInputContext container with clean CoreAudio EOF contract (noErr with 0 packets)
 //  - Formats with standard MPEG-4 7-byte ADTS header for real-time streaming
 //
 
@@ -14,6 +14,17 @@ import Foundation
 import CoreMedia
 import AudioToolbox
 import Darwin
+
+private final class AudioInputContext {
+    let pcmData: Data
+    var pcmOffset: Int = 0
+    let channels: UInt32
+
+    init(pcmData: Data, channels: UInt32) {
+        self.pcmData = pcmData
+        self.channels = channels
+    }
+}
 
 public final class AudioEncoder {
 
@@ -205,15 +216,18 @@ public final class AudioEncoder {
                     self.pcmRingBuffer.removeSubrange(0..<(self.pcmRingBuffer.count - 32768))
                 }
 
-                // 5. Feed into AudioConverterFillComplexBuffer dynamically from the ring buffer
+                // 5. Feed into AudioConverterFillComplexBuffer dynamically
                 // AAC-LC packet requires 1024 frames = 4096 bytes
-                let kMinInputBytes = 1024 * self.bytesPerFrame // 4096 bytes
+                let kChunkBytes = 1024 * self.bytesPerFrame // 4096 bytes
 
-                while self.pcmRingBuffer.count >= kMinInputBytes {
+                while self.pcmRingBuffer.count >= kChunkBytes {
+                    let chunkData = self.pcmRingBuffer.subdata(in: 0..<kChunkBytes)
+                    let context = AudioInputContext(pcmData: chunkData, channels: self.channels)
+
                     var outAbl = AudioBufferList(
                         mNumberBuffers: 1,
                         mBuffers: AudioBuffer(
-                            mNumberChannels: 2,
+                            mNumberChannels: self.channels,
                             mDataByteSize: UInt32(self.aacBufferSize),
                             mData: UnsafeMutableRawPointer(self.aacBuffer)
                         )
@@ -221,11 +235,6 @@ public final class AudioEncoder {
 
                     var ioOutputDataPackets: UInt32 = 1
                     var packetDesc = AudioStreamPacketDescription()
-
-                    final class InputTracker {
-                        var offset: Int = 0
-                    }
-                    let tracker = InputTracker()
 
                     let inputProc: AudioConverterComplexInputDataProc = { (
                         _,
@@ -236,26 +245,31 @@ public final class AudioEncoder {
                     ) -> OSStatus in
                         guard let inUserData = inUserData else {
                             ioNumberDataPackets.pointee = 0
-                            return -1
+                            return noErr
                         }
-                        let (bufPtr, totalBytes, tracker) = inUserData.assumingMemoryBound(to: (UnsafePointer<UInt8>, Int, InputTracker).self).pointee
-                        let remainingBytes = totalBytes - tracker.offset
-                        if remainingBytes < 4 {
+                        let ctx = Unmanaged<AudioInputContext>.fromOpaque(inUserData).takeUnretainedValue()
+                        let remainingBytes = ctx.pcmData.count - ctx.pcmOffset
+                        if remainingBytes <= 0 {
                             ioNumberDataPackets.pointee = 0
-                            return -1 // Data temporarily unavailable; halt FillComplexBuffer gracefully
+                            return noErr // Signal EOF for this chunk
                         }
 
                         let availablePackets = UInt32(remainingBytes / 4)
                         let requestedPackets = ioNumberDataPackets.pointee
                         let toGive = min(requestedPackets, availablePackets)
-                        let bytesToGive = toGive * 4
+                        let bytesToGive = Int(toGive * 4)
 
-                        ioData.pointee.mNumberBuffers = 1
-                        ioData.pointee.mBuffers.mNumberChannels = 2
-                        ioData.pointee.mBuffers.mDataByteSize = bytesToGive
-                        ioData.pointee.mBuffers.mData = UnsafeMutableRawPointer(mutating: bufPtr.advanced(by: tracker.offset))
+                        ctx.pcmData.withUnsafeBytes { rawBuf in
+                            if let basePtr = rawBuf.baseAddress {
+                                ioData.pointee.mNumberBuffers = 1
+                                ioData.pointee.mBuffers.mNumberChannels = ctx.channels
+                                ioData.pointee.mBuffers.mDataByteSize = UInt32(bytesToGive)
+                                ioData.pointee.mBuffers.mData = UnsafeMutableRawPointer(mutating: basePtr.advanced(by: ctx.pcmOffset))
+                            }
+                        }
+
+                        ctx.pcmOffset += bytesToGive
                         ioNumberDataPackets.pointee = toGive
-                        tracker.offset += Int(bytesToGive)
 
                         if let outDesc = outDataPacketDescription {
                             outDesc.pointee = nil
@@ -263,27 +277,22 @@ public final class AudioEncoder {
                         return noErr
                     }
 
-                    let convStatus = self.pcmRingBuffer.withUnsafeBytes { rawBytes -> OSStatus in
-                        guard let basePtr = rawBytes.baseAddress?.assumingMemoryBound(to: UInt8.self) else { return -1 }
-                        var state = (basePtr, self.pcmRingBuffer.count, tracker)
-                        return AudioConverterFillComplexBuffer(
-                            converter,
-                            inputProc,
-                            &state,
-                            &ioOutputDataPackets,
-                            &outAbl,
-                            &packetDesc
-                        )
-                    }
+                    let convStatus = AudioConverterFillComplexBuffer(
+                        converter,
+                        inputProc,
+                        Unmanaged.passUnretained(context).toOpaque(),
+                        &ioOutputDataPackets,
+                        &outAbl,
+                        &packetDesc
+                    )
 
-                    // Remove ONLY the bytes actually consumed by AudioConverter
-                    if tracker.offset > 0 {
-                        let removeCount = min(tracker.offset, self.pcmRingBuffer.count)
-                        self.pcmRingBuffer.removeSubrange(0..<removeCount)
+                    if context.pcmOffset > 0 {
+                        let toRemove = min(context.pcmOffset, self.pcmRingBuffer.count)
+                        self.pcmRingBuffer.removeSubrange(0..<toRemove)
                     }
 
                     let aacSize = Int(packetDesc.mDataByteSize > 0 ? packetDesc.mDataByteSize : outAbl.mBuffers.mDataByteSize)
-                    if (convStatus == noErr || convStatus == -1) && ioOutputDataPackets > 0 && aacSize > 0 {
+                    if convStatus == noErr && ioOutputDataPackets > 0 && aacSize > 0 {
                         let adts = self.createAdtsHeader(packetLength: aacSize)
                         var packet = Data(capacity: 7 + aacSize)
                         packet.append(adts)
@@ -295,7 +304,7 @@ public final class AudioEncoder {
                         }
                         self.packetHandler(packet)
                     } else {
-                        // Not enough samples to output a complete packet yet (e.g. encoder priming); wait for next buffer
+                        // Could not produce packet (priming); wait for next buffer
                         break
                     }
                 }

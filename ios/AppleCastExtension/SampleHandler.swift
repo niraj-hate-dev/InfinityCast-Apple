@@ -175,14 +175,12 @@ public class SampleHandler: RPBroadcastSampleHandler {
                 audioEncoder?.encode(sampleBuffer: sampleBuffer)
 
             case .audioMic:
-                if self.audioFrameCount == 0 {
-                    if audioEncoder == nil {
-                        audioEncoder = AudioEncoder(sampleRate: 44100.0, channels: 2) { [weak self] packet in
-                            self?.dispatchAudioPacket(packet)
-                        }
+                if audioEncoder == nil {
+                    audioEncoder = AudioEncoder(sampleRate: 44100.0, channels: 2) { [weak self] packet in
+                        self?.dispatchAudioPacket(packet)
                     }
-                    audioEncoder?.encode(sampleBuffer: sampleBuffer)
                 }
+                audioEncoder?.encode(sampleBuffer: sampleBuffer)
 
             @unknown default:
                 break
@@ -214,6 +212,7 @@ public class SampleHandler: RPBroadcastSampleHandler {
                 }
             }
             guard bindRes >= 0, listen(sock, 5) >= 0 else {
+                NSLog("[SampleHandler] Failed to bind direct audio server on port %d, error: %d (%s)", port, errno, strerror(errno))
                 close(sock)
                 return
             }

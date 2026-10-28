@@ -38,6 +38,10 @@ class AudioDecoder {
   bool is_initialized() const { return is_initialized_; }
   uint32_t sample_rate() const { return current_sample_rate_; }
   uint32_t channels() const { return current_channels_; }
+  uint64_t total_frames_decoded() const { return total_frames_decoded_; }
+  float current_peak_amplitude() const { return current_peak_amplitude_; }
+  float current_rms_dbfs() const { return current_rms_dbfs_; }
+  bool is_sound_detected() const { return is_sound_detected_; }
 
  private:
   bool LoadFfmpegSymbols();
@@ -45,6 +49,12 @@ class AudioDecoder {
   void CloseWaveOut();
   void PlayPcm(const int16_t* pcm_data, size_t num_samples);
   static void CALLBACK WaveOutProc(HWAVEOUT hwo, UINT uMsg, DWORD_PTR dwInstance, DWORD_PTR dwParam1, DWORD_PTR dwParam2);
+
+  // Live Audio Detector Telemetry
+  std::atomic<uint64_t> total_frames_decoded_{0};
+  std::atomic<float> current_peak_amplitude_{0.0f};
+  std::atomic<float> current_rms_dbfs_{-100.0f};
+  std::atomic<bool> is_sound_detected_{false};
 
   // FFmpeg DLL handles
   HMODULE avcodec_module_ = nullptr;

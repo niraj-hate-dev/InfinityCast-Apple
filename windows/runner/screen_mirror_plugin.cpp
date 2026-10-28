@@ -472,11 +472,23 @@ void ScreenMirrorPlugin::AudioStreamWorkerLoop() {
     // 2. Read incoming audio frames
     const int bytes_read = recv(active_audio_tunnel_sock_, reinterpret_cast<char*>(recv_buf.data()), static_cast<int>(recv_buf.size()), 0);
 
+    static auto s_last_transport_log = std::chrono::steady_clock::now();
+    static uint64_t s_chunks_received = 0;
+    auto now_transport = std::chrono::steady_clock::now();
+
     if (bytes_read > 0) {
       total_audio_bytes += bytes_read;
+      s_chunks_received++;
       if (first_chunk) {
         first_chunk = false;
-        Log("AUDIO", "First audio stream chunk (" + std::to_string(bytes_read) + " bytes) received on port 25335!", "success");
+        Log("AUDIO_DETECTOR", "First audio stream chunk (" + std::to_string(bytes_read) + " bytes) received from iPhone on port 25335! Transport verified.", "success");
+      }
+
+      auto elapsed_transport_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now_transport - s_last_transport_log).count();
+      if (elapsed_transport_ms >= 2500) {
+        s_last_transport_log = now_transport;
+        Log("AUDIO_DETECTOR", "Receiving audio stream from iPhone: " + std::to_string(total_audio_bytes) +
+            " bytes (" + std::to_string(s_chunks_received) + " TCP packets)", "info");
       }
 
       if (audio_decoder_) {
@@ -484,12 +496,21 @@ void ScreenMirrorPlugin::AudioStreamWorkerLoop() {
       }
     } else if (bytes_read < 0) {
       const int err = WSAGetLastError();
-      // If timed out or would block, this is just normal silence when user has no sound playing
+      // If timed out or would block, periodically log waiting status so user knows where issue is
       if (err == WSAETIMEDOUT || err == WSAEWOULDBLOCK) {
+        auto elapsed_timeout_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now_transport - s_last_transport_log).count();
+        if (elapsed_timeout_ms >= 3000) {
+          s_last_transport_log = now_transport;
+          if (total_audio_bytes == 0) {
+            Log("AUDIO_DETECTOR", "Listening on port 25335: Connected to iPhone tunnel, but 0 bytes received so far. (iPhone has not emitted audio packets yet: play YouTube or verify broadcast on iPhone)", "warn");
+          } else {
+            Log("AUDIO_DETECTOR", "Audio stream idle (0 new bytes in last 3s; total received: " + std::to_string(total_audio_bytes) + " bytes)", "info");
+          }
+        }
         continue; // Keep listening! Never terminate!
       }
       // Actual socket failure: reset socket and auto-reconnect on next loop iteration
-      Log("AUDIO", "Audio socket read error (" + std::to_string(err) + "), reconnecting...", "warn");
+      Log("AUDIO_DETECTOR", "Audio socket read error (" + std::to_string(err) + "), reconnecting...", "warn");
       closesocket(active_audio_tunnel_sock_);
       active_audio_tunnel_sock_ = INVALID_SOCKET;
       if (audio_decoder_) {
@@ -498,7 +519,7 @@ void ScreenMirrorPlugin::AudioStreamWorkerLoop() {
       std::this_thread::sleep_for(std::chrono::milliseconds(250));
     } else {
       // bytes_read == 0: peer closed connection (e.g. broadcast stopped/restarted)
-      Log("AUDIO", "Audio connection closed by server, reconnecting...", "info");
+      Log("AUDIO_DETECTOR", "Audio connection closed by server (0 bytes read), reconnecting...", "info");
       closesocket(active_audio_tunnel_sock_);
       active_audio_tunnel_sock_ = INVALID_SOCKET;
       if (audio_decoder_) {

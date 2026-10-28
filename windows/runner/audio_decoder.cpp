@@ -380,38 +380,79 @@ bool AudioDecoder::DecodeStream(const uint8_t* in_data, size_t in_size) {
         InitWaveOut(static_cast<uint32_t>(sample_rate), 2);
       }
 
+      std::vector<int16_t> pcm;
+
       // AAC decodes to AV_SAMPLE_FMT_FLTP (format == 8): data[0] = Left, data[1] = Right
       if (f->format == 8 /* AV_SAMPLE_FMT_FLTP */) {
         const float* left = reinterpret_cast<const float*>(f->data[0]);
         const float* right = (f->data[1] != nullptr) ? reinterpret_cast<const float*>(f->data[1]) : left;
-        std::vector<int16_t> pcm(static_cast<size_t>(f->nb_samples) * 2);
+        pcm.resize(static_cast<size_t>(f->nb_samples) * 2);
         for (int i = 0; i < f->nb_samples; ++i) {
           const float l = std::isfinite(left[i]) ? std::clamp(left[i], -1.0f, 1.0f) : 0.0f;
           const float r = std::isfinite(right[i]) ? std::clamp(right[i], -1.0f, 1.0f) : 0.0f;
           pcm[i * 2]     = static_cast<int16_t>(l * 32767.0f);
           pcm[i * 2 + 1] = static_cast<int16_t>(r * 32767.0f);
         }
-        PlayPcm(pcm.data(), pcm.size());
       } else if (f->format == 6 /* AV_SAMPLE_FMT_S16P */) {
         const int16_t* left = reinterpret_cast<const int16_t*>(f->data[0]);
         const int16_t* right = (f->data[1] != nullptr) ? reinterpret_cast<const int16_t*>(f->data[1]) : left;
-        std::vector<int16_t> pcm(static_cast<size_t>(f->nb_samples) * 2);
+        pcm.resize(static_cast<size_t>(f->nb_samples) * 2);
         for (int i = 0; i < f->nb_samples; ++i) {
           pcm[i * 2]     = left[i];
           pcm[i * 2 + 1] = right[i];
         }
-        PlayPcm(pcm.data(), pcm.size());
       } else if (f->format == 1 /* AV_SAMPLE_FMT_S16 */) {
         const int16_t* samples = reinterpret_cast<const int16_t*>(f->data[0]);
-        PlayPcm(samples, static_cast<size_t>(f->nb_samples) * 2);
+        pcm.assign(samples, samples + static_cast<size_t>(f->nb_samples) * 2);
       }
 
-      static uint64_t s_audio_frames_played = 0;
-      s_audio_frames_played++;
-      if (s_audio_frames_played == 1 || s_audio_frames_played % 200 == 0) {
-        Log("AUDIO", "Decoded audio frame #" + std::to_string(s_audio_frames_played) +
-            " (" + std::to_string(f->nb_samples) + " samples @ " +
-            std::to_string(sample_rate) + " Hz)", "success");
+      if (!pcm.empty()) {
+        PlayPcm(pcm.data(), pcm.size());
+
+        // Live Audio Detector - Calculate Peak Amplitude & RMS Energy
+        float peak = 0.0f;
+        double sum_sq = 0.0;
+        const size_t total_samples = pcm.size();
+        for (size_t i = 0; i < total_samples; ++i) {
+          const float abs_val = std::abs(pcm[i]) / 32767.0f;
+          if (abs_val > peak) peak = abs_val;
+          sum_sq += abs_val * abs_val;
+        }
+        const double rms = (total_samples > 0) ? std::sqrt(sum_sq / total_samples) : 0.0;
+        const double dbfs = (rms > 1e-5) ? 20.0 * std::log10(rms) : -100.0;
+
+        current_peak_amplitude_ = peak;
+        current_rms_dbfs_ = static_cast<float>(dbfs);
+        total_frames_decoded_++;
+
+        const bool sound_detected = (peak > 0.005f); // > -46 dBFS indicates audible speech/music
+        is_sound_detected_ = sound_detected;
+
+        static auto s_last_detector_log = std::chrono::steady_clock::now();
+        static bool s_last_state = false;
+        auto now = std::chrono::steady_clock::now();
+        auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - s_last_detector_log).count();
+
+        // Log on sound transition OR periodically every 1500ms
+        if (sound_detected != s_last_state || elapsed_ms >= 1500 || total_frames_decoded_ == 1) {
+          s_last_detector_log = now;
+          s_last_state = sound_detected;
+
+          char db_buf[16];
+          snprintf(db_buf, sizeof(db_buf), "%.1f", dbfs);
+          const int peak_pct = static_cast<int>(peak * 100.0f);
+
+          if (sound_detected) {
+            Log("AUDIO_DETECTOR", "🔊 SOUND DETECTED! Level: " + std::string(db_buf) +
+                " dBFS (Peak: " + std::to_string(peak_pct) + "%) | Frame #" +
+                std::to_string(total_frames_decoded_.load()) + " (" +
+                std::to_string(f->nb_samples) + " samples @ " +
+                std::to_string(sample_rate) + " Hz Stereo) -> Playing on Speakers", "success");
+          } else {
+            Log("AUDIO_DETECTOR", "🔇 SILENCE / ZERO PCM (iPhone is streaming audio, but volume is silent/muted) | Frame #" +
+                std::to_string(total_frames_decoded_.load()) + " @ " + std::to_string(sample_rate) + " Hz", "info");
+          }
+        }
       }
     }
   }
