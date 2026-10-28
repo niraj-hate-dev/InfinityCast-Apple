@@ -31,8 +31,7 @@ public class SampleHandler: RPBroadcastSampleHandler {
     private let audioPort: UInt16 = 25335
     private var lastAudioReceivedTime: CFTimeInterval = 0
     private var silentAudioTimer: DispatchSourceTimer?
-    private var isComfortNoisePrimed: Bool = false
-
+    
     // Direct Extension Server Sockets (Never suspended when Main App is in background!)
     private var directVideoListenSock: Int32 = -1
     private var directVideoClients: [Int32] = []
@@ -91,10 +90,9 @@ public class SampleHandler: RPBroadcastSampleHandler {
 
             // Mark active audio arrival so comfortNoiseGenerator yields
             self.lastAudioReceivedTime = CACurrentMediaTime()
-            self.isComfortNoisePrimed = true
 
             if self.audioEncoder == nil {
-                self.audioEncoder = AudioEncoder(sampleRate: 44100.0, channels: 2) { [weak self] packet in
+                self.audioEncoder = AudioEncoder(sampleRate: 48000.0, channels: 2) { [weak self] packet in
                     self?.dispatchAudioPacket(packet)
                 }
             }
@@ -106,10 +104,9 @@ public class SampleHandler: RPBroadcastSampleHandler {
     private func startComfortNoiseGenerator() {
         stopComfortNoiseGenerator()
         lastAudioReceivedTime = CACurrentMediaTime()
-        isComfortNoisePrimed = false
 
         let timer = DispatchSource.makeTimerSource(queue: audioNetworkQueue)
-        timer.schedule(deadline: .now() + 0.3, repeating: 0.1)
+        timer.schedule(deadline: .now() + 0.1, repeating: 0.05)
         timer.setEventHandler { [weak self] in
             guard let self = self, self.isBroadcasting else { return }
             let now = CACurrentMediaTime()
@@ -117,17 +114,13 @@ public class SampleHandler: RPBroadcastSampleHandler {
             // Yield whenever ReplayKit .audioApp or .audioMic buffers are actively arriving
             if now - self.lastAudioReceivedTime >= 0.25 {
                 if self.audioEncoder == nil {
-                    self.audioEncoder = AudioEncoder(sampleRate: 44100.0, channels: 2) { [weak self] packet in
+                    self.audioEncoder = AudioEncoder(sampleRate: 48000.0, channels: 2) { [weak self] packet in
                         self?.dispatchAudioPacket(packet)
                     }
-                    self.isComfortNoisePrimed = false
                 }
 
-                // Push 8192 bytes initially to satisfy priming lookahead, then 4096 bytes per idle tick
-                let chunkSize = self.isComfortNoisePrimed ? 4096 : 8192
-                self.isComfortNoisePrimed = true
-
-                let silentPcm = Data(count: chunkSize)
+                // Push 4096 bytes (1024 frames @ 48kHz stereo) per idle tick
+                let silentPcm = Data(count: 4096)
                 self.audioEncoder?.encodePCM(silentPcm)
             }
         }
@@ -138,7 +131,6 @@ public class SampleHandler: RPBroadcastSampleHandler {
     private func stopComfortNoiseGenerator() {
         silentAudioTimer?.cancel()
         silentAudioTimer = nil
-        isComfortNoisePrimed = false
     }
 
     public override func broadcastStarted(withSetupInfo setupInfo: [String : NSObject]?) {
@@ -373,6 +365,18 @@ public class SampleHandler: RPBroadcastSampleHandler {
                 self.directAudioClients.append(clientFd)
                 self.directAudioLock.unlock()
                 NSLog("[SampleHandler] Desktop connected directly to Extension Audio port %d", port)
+
+                // Prime initial comfort silence immediately upon desktop connection so transport is verified instantly
+                self.audioNetworkQueue.async { [weak self] in
+                    guard let self = self, self.isBroadcasting else { return }
+                    if self.audioEncoder == nil {
+                        self.audioEncoder = AudioEncoder(sampleRate: 48000.0, channels: 2) { [weak self] packet in
+                            self?.dispatchAudioPacket(packet)
+                        }
+                    }
+                    let initialSilence = Data(count: 8192)
+                    self.audioEncoder?.encodePCM(initialSilence)
+                }
             }
         }
     }
