@@ -12,7 +12,7 @@ import Darwin
 private final class PcmChunkBox {
     let ptr: UnsafeMutableRawPointer
     var byteSize: UInt32
-    var consumed: Bool = false
+    var offset: UInt32 = 0
 
     init(ptr: UnsafeMutableRawPointer, byteSize: UInt32) {
         self.ptr = ptr
@@ -76,7 +76,7 @@ public final class AudioEncoder {
             // 2. Extract AudioBufferList safely (supports both interleaved 1-buffer and non-interleaved 2-buffer stereo)
             let maxBuffers = 4
             let ablPointer = AudioBufferList.allocate(maximumBuffers: maxBuffers)
-            defer { free(ablPointer.unsafeMutablePointer) }
+            defer { ablPointer.unsafeMutablePointer.deallocate() }
 
             var blockBuffer: CMBlockBuffer? = nil
             let status = CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(
@@ -101,7 +101,8 @@ public final class AudioEncoder {
             let isBigEndian = (flags & kAudioFormatFlagIsBigEndian) != 0
             let isNonInterleaved = (flags & kAudioFormatFlagIsNonInterleaved) != 0
             let inChannels = max(1, Int(inFormat.mChannelsPerFrame))
-            let bitsPerChannel = Int(inFormat.mBitsPerChannel)
+            let rawBits = Int(inFormat.mBitsPerChannel)
+            let bitsPerChannel = rawBits > 0 ? rawBits : (inChannels > 0 && inFormat.mBytesPerFrame > 0 ? Int((inFormat.mBytesPerFrame / UInt32(inChannels)) * 8) : 32)
 
             var stereoPcm16 = [Int16](repeating: 0, count: numSamples * 2)
 
@@ -198,7 +199,7 @@ public final class AudioEncoder {
 
             _ = blockBuffer
 
-            // Prevent unbounded memory growth
+            // Prevent unbounded memory growth (keep max 1 sec of audio buffer)
             if self.pcmRingBuffer.count > 176_400 {
                 self.pcmRingBuffer.removeSubrange(0..<(self.pcmRingBuffer.count - 16384))
             }
@@ -237,22 +238,23 @@ public final class AudioEncoder {
                     ) -> OSStatus in
                         guard let inUserData = inUserData else {
                             ioNumberDataPackets.pointee = 0
-                            return -1
+                            return noErr
                         }
                         let chunkBox = Unmanaged<PcmChunkBox>.fromOpaque(inUserData).takeUnretainedValue()
-                        if chunkBox.consumed {
+                        let remainingBytes = chunkBox.byteSize - chunkBox.offset
+                        if remainingBytes == 0 {
                             ioNumberDataPackets.pointee = 0
-                            return -1
+                            return noErr
                         }
 
-                        chunkBox.consumed = true
-                        let framesAvailable = chunkBox.byteSize / 4
+                        let framesAvailable = remainingBytes / 4
                         let framesToProvide = min(ioNumberDataPackets.pointee, framesAvailable)
 
                         ioData.pointee.mNumberBuffers = 1
                         ioData.pointee.mBuffers.mNumberChannels = 2
                         ioData.pointee.mBuffers.mDataByteSize = framesToProvide * 4
-                        ioData.pointee.mBuffers.mData = chunkBox.ptr
+                        ioData.pointee.mBuffers.mData = chunkBox.ptr.advanced(by: Int(chunkBox.offset))
+                        chunkBox.offset += framesToProvide * 4
                         ioNumberDataPackets.pointee = framesToProvide
 
                         if let outDesc = outDataPacketDescription {
@@ -270,8 +272,8 @@ public final class AudioEncoder {
                         &packetDesc
                     )
 
-                    let aacSize = Int(outAbl.mBuffers.mDataByteSize)
-                    if (convStatus == noErr || convStatus == -1) && ioOutputDataPackets > 0 && aacSize > 0 {
+                    let aacSize = Int(packetDesc.mDataByteSize > 0 ? packetDesc.mDataByteSize : outAbl.mBuffers.mDataByteSize)
+                    if convStatus == noErr && ioOutputDataPackets > 0 && aacSize > 0 {
                         let adts = self.createAdtsHeader(packetLength: aacSize)
                         var packet = Data(capacity: 7 + aacSize)
                         packet.append(adts)
@@ -282,6 +284,8 @@ public final class AudioEncoder {
                             NSLog("[AudioEncoder] Encoded AAC frame #%d (%d bytes @ %.0f Hz)", self.frameCount, packet.count, self.sampleRate)
                         }
                         self.packetHandler(packet)
+                    } else if convStatus != noErr {
+                        NSLog("[AudioEncoder] AudioConverterFillComplexBuffer returned OSStatus %d", convStatus)
                     }
                 }
             }
@@ -349,12 +353,12 @@ public final class AudioEncoder {
         let totalLength = packetLength + 7
         var header = [UInt8](repeating: 0, count: 7)
 
-        let profile: UInt8 = 2 // AAC-LC
+        let profile: UInt8 = 2 // AAC-LC (MPEG-4 profile is 2, in ADTS header profile-1 = 1)
         let freqIdx = getSampleRateIndex(sampleRate: sampleRate)
         let chanCfg: UInt8 = 2
 
         header[0] = 0xFF
-        header[1] = 0xF9
+        header[1] = 0xF1 // 0b11110001: syncword(4) 1111, ID 0 (MPEG-4), layer 00, protection_absent 1
         header[2] = ((profile - 1) << 6) | (freqIdx << 2) | ((chanCfg >> 2) & 0x01)
         header[3] = ((chanCfg & 0x03) << 6) | UInt8((totalLength >> 11) & 0x03)
         header[4] = UInt8((totalLength >> 3) & 0xFF)

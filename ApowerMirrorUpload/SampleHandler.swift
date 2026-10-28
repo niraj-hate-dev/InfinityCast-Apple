@@ -164,6 +164,9 @@ public class SampleHandler: RPBroadcastSampleHandler {
 
             case .audioApp:
                 self.audioFrameCount += 1
+                if self.audioFrameCount <= 5 || self.audioFrameCount % 200 == 0 {
+                    NSLog("[SampleHandler] Received audioApp buffer #%d", self.audioFrameCount)
+                }
                 if audioEncoder == nil {
                     audioEncoder = AudioEncoder(sampleRate: 44100.0, channels: 2) { [weak self] packet in
                         self?.dispatchAudioPacket(packet)
@@ -172,7 +175,14 @@ public class SampleHandler: RPBroadcastSampleHandler {
                 audioEncoder?.encode(sampleBuffer: sampleBuffer)
 
             case .audioMic:
-                break
+                if self.audioFrameCount == 0 {
+                    if audioEncoder == nil {
+                        audioEncoder = AudioEncoder(sampleRate: 44100.0, channels: 2) { [weak self] packet in
+                            self?.dispatchAudioPacket(packet)
+                        }
+                    }
+                    audioEncoder?.encode(sampleBuffer: sampleBuffer)
+                }
 
             @unknown default:
                 break
@@ -414,11 +424,18 @@ public class SampleHandler: RPBroadcastSampleHandler {
         }
     }
 
+    private var audioPacketsDispatched: Int = 0
+
     private func sendToDirectAudioClients(_ data: Data) {
         directAudioLock.lock()
         let clients = directAudioClients
         directAudioLock.unlock()
         guard !clients.isEmpty else { return }
+
+        self.audioPacketsDispatched += 1
+        if self.audioPacketsDispatched <= 5 || self.audioPacketsDispatched % 200 == 0 {
+            NSLog("[SampleHandler] Dispatched audio packet #%d (%d bytes) to %d direct client(s)", self.audioPacketsDispatched, data.count, clients.count)
+        }
 
         data.withUnsafeBytes { rawBuf in
             guard let basePtr = rawBuf.baseAddress else { return }
