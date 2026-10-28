@@ -7,10 +7,14 @@ on:
     branches: [ niraj, main ]
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-ipa:
     name: Build Native iOS IPA (Unsigned)
-    runs-on: macos-14
+    runs-on: macos-latest
     permissions:
       contents: write
 
