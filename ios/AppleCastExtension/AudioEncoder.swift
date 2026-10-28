@@ -3,11 +3,6 @@
 //  ApowerMirrorUpload / AppleCast
 //
 //  Hardened CoreAudio AAC-LC Real-time Streaming Encoder for ReplayKit
-//  - Handles Interleaved & Non-Interleaved 32-bit Float PCM (iOS ReplayKit Native Format)
-//  - Converts to Linear 16-bit Signed Integer PCM
-//  - Dynamic CoreAudio AudioConverter with Lookahead & Priming Preservation
-//  - Multi-chunk pcmRingBuffer with custom non-EOF status to prevent buffer discarding
-//  - Formats with standard MPEG-4 7-byte ADTS header for real-time streaming
 //
 
 import Foundation
@@ -27,7 +22,6 @@ private final class AudioInputContext {
 }
 
 public final class AudioEncoder {
-
     public typealias EncodedAudioHandler = (_ packet: Data) -> Void
 
     private var audioConverter: AudioConverterRef?
@@ -65,6 +59,8 @@ public final class AudioEncoder {
                 self.audioConverter = nil
             }
             self.pcmRingBuffer.removeAll()
+            self.frameCount = 0
+            self.lastBufferEndPts = -1.0
         }
     }
 
@@ -85,7 +81,6 @@ public final class AudioEncoder {
         audioQueue.async { [weak self] in
             autoreleasepool {
                 guard let self = self else { return }
-
                 let numSamples = CMSampleBufferGetNumSamples(sampleBuffer)
                 guard numSamples > 0,
                       let formatDesc = CMSampleBufferGetFormatDescription(sampleBuffer),
@@ -94,22 +89,25 @@ public final class AudioEncoder {
                 }
 
                 let inFormat = asbdPtr.pointee
-                let inSampleRate = (inFormat.mSampleRate >= 8000 && inFormat.mSampleRate <= 96000) ? inFormat.mSampleRate : 44100.0
+                let inSampleRate = (inFormat.mSampleRate >= 8000 && inFormat.mSampleRate <= 96000)
+                    ? inFormat.mSampleRate
+                    : 44100.0
 
-                // 1. Initialize or rebuild converter if sample rate changed
+                // 1. Rebuild converter if sample rate changed (e.g. 44.1kHz -> 48kHz)
                 if self.audioConverter == nil || abs(self.sampleRate - inSampleRate) > 1.0 {
                     if let old = self.audioConverter {
                         AudioConverterDispose(old)
                         self.audioConverter = nil
                     }
                     self.pcmRingBuffer.removeAll(keepingCapacity: true)
+                    self.frameCount = 0
                     self.lastBufferEndPts = -1.0
                     guard self.setupAudioConverter(sampleRate: inSampleRate) else { return }
                 }
 
                 guard let converter = self.audioConverter else { return }
 
-                // 2. Discontinuity Detection (gap > 1.0s or backward jump)
+                // 2. Discontinuity Detection
                 let bufferDuration = Double(numSamples) / self.sampleRate
                 let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
                 let ptsSeconds = pts.isValid ? pts.seconds : -1.0
@@ -117,6 +115,7 @@ public final class AudioEncoder {
                     let gap = ptsSeconds - self.lastBufferEndPts
                     if gap > 1.0 || gap < -0.1 {
                         self.pcmRingBuffer.removeAll(keepingCapacity: true)
+                        self.frameCount = 0
                         AudioConverterReset(converter)
                     }
                 }
@@ -124,7 +123,7 @@ public final class AudioEncoder {
                     self.lastBufferEndPts = ptsSeconds + bufferDuration
                 }
 
-                // 3. Extract AudioBufferList safely
+                // 3. Extract AudioBufferList
                 let maxBuffers = 4
                 let ablPointer = AudioBufferList.allocate(maximumBuffers: maxBuffers)
                 defer { free(ablPointer.unsafeMutablePointer) }
@@ -140,19 +139,20 @@ public final class AudioEncoder {
                     flags: 0,
                     blockBufferOut: &blockBuffer
                 )
+                guard status == noErr else { return }
 
-                guard status == noErr else {
-                    return
-                }
-
-                // 4. Convert incoming ReplayKit PCM layout into Little-Endian 16-bit Interleaved Stereo
+                // 4. Convert incoming PCM layout into Little-Endian 16-bit Interleaved Stereo
                 let flags = inFormat.mFormatFlags
                 let isFloat = (flags & kAudioFormatFlagIsFloat) != 0
                 let isBigEndian = (flags & kAudioFormatFlagIsBigEndian) != 0
                 let isNonInterleaved = (flags & kAudioFormatFlagIsNonInterleaved) != 0
                 let inChannels = max(1, Int(inFormat.mChannelsPerFrame))
                 let rawBits = Int(inFormat.mBitsPerChannel)
-                let bitsPerChannel = rawBits > 0 ? rawBits : (inChannels > 0 && inFormat.mBytesPerFrame > 0 ? Int((inFormat.mBytesPerFrame / UInt32(inChannels)) * 8) : 32)
+                let bitsPerChannel = rawBits > 0
+                    ? rawBits
+                    : (inChannels > 0 && inFormat.mBytesPerFrame > 0
+                        ? Int((inFormat.mBytesPerFrame / UInt32(inChannels)) * 8)
+                        : 32)
 
                 var stereoPcm16 = [Int16](repeating: 0, count: numSamples * 2)
 
@@ -227,7 +227,9 @@ public final class AudioEncoder {
                     if let b0 = ablPointer[0].mData {
                         let byteCount = min(Int(ablPointer[0].mDataByteSize), stereoPcm16.count * 2)
                         stereoPcm16.withUnsafeMutableBytes { dstBuf in
-                            memcpy(dstBuf.baseAddress, b0, byteCount)
+                            if let baseAddress = dstBuf.baseAddress {
+                                memcpy(baseAddress, b0, byteCount)
+                            }
                         }
                     }
                 }
@@ -235,9 +237,7 @@ public final class AudioEncoder {
                 stereoPcm16.withUnsafeBytes { rawBytes in
                     self.pcmRingBuffer.append(contentsOf: rawBytes)
                 }
-
                 _ = blockBuffer
-
                 self.processPcmRingBuffer()
             }
         }
@@ -246,18 +246,16 @@ public final class AudioEncoder {
     private func processPcmRingBuffer() {
         guard let converter = self.audioConverter else { return }
 
-        // Prevent unbounded memory growth (keep max 1 sec of audio buffer = 176,400 bytes)
+        // Prevent unbounded memory growth (max 1 second @ 44.1kHz stereo 16-bit = 176,400 bytes)
         if self.pcmRingBuffer.count > 176_400 {
             self.pcmRingBuffer.removeSubrange(0..<(self.pcmRingBuffer.count - 32768))
         }
 
-        // For initial AAC-LC encoder priming (delay of 2112 samples),
-        // wait until we have at least 8192 bytes (2048 stereo 16-bit frames).
+        // Wait for priming frames on startup
         if self.frameCount == 0 && self.pcmRingBuffer.count < 8192 {
             return
         }
 
-        // AAC-LC frame requires 1024 frames = 4096 bytes
         while self.pcmRingBuffer.count >= 4096 {
             let context = AudioInputContext(pcmData: self.pcmRingBuffer, channels: self.channels)
 
@@ -287,9 +285,10 @@ public final class AudioEncoder {
                 let ctx = Unmanaged<AudioInputContext>.fromOpaque(inUserData).takeUnretainedValue()
                 let remainingBytes = ctx.pcmData.count - ctx.pcmOffset
                 let availablePackets = UInt32(remainingBytes / 4)
+
                 if availablePackets == 0 {
                     ioNumberDataPackets.pointee = 0
-                    return 100 // Custom status: out of input data for now, NOT EOF!
+                    return 100 // Out of data for this iteration; not EOF!
                 }
 
                 let requestedPackets = ioNumberDataPackets.pointee
@@ -301,7 +300,9 @@ public final class AudioEncoder {
                         ioData.pointee.mNumberBuffers = 1
                         ioData.pointee.mBuffers.mNumberChannels = ctx.channels
                         ioData.pointee.mBuffers.mDataByteSize = UInt32(bytesToGive)
-                        ioData.pointee.mBuffers.mData = UnsafeMutableRawPointer(mutating: basePtr.advanced(by: ctx.pcmOffset))
+                        ioData.pointee.mBuffers.mData = UnsafeMutableRawPointer(
+                            mutating: basePtr.advanced(by: ctx.pcmOffset)
+                        )
                     }
                 }
 
@@ -323,14 +324,16 @@ public final class AudioEncoder {
                 &packetDesc
             )
 
-            // Consume exactly the bytes CoreAudio read from pcmRingBuffer
-            if context.pcmOffset > 0 {
-                let toRemove = min(context.pcmOffset, self.pcmRingBuffer.count)
-                self.pcmRingBuffer.removeSubrange(0..<toRemove)
-            }
-
             let aacSize = Int(packetDesc.mDataByteSize > 0 ? packetDesc.mDataByteSize : outAbl.mBuffers.mDataByteSize)
+
+            // CRITICAL FIX: Only remove consumed PCM bytes when an AAC packet is produced!
+            // If ioOutputDataPackets == 0, keep all PCM bytes in pcmRingBuffer so the next buffer can complete the packet!
             if (convStatus == noErr || convStatus == 100) && ioOutputDataPackets > 0 && aacSize > 0 {
+                if context.pcmOffset > 0 {
+                    let toRemove = min(context.pcmOffset, self.pcmRingBuffer.count)
+                    self.pcmRingBuffer.removeSubrange(0..<toRemove)
+                }
+
                 let adts = self.createAdtsHeader(packetLength: aacSize)
                 var packet = Data(capacity: 7 + aacSize)
                 packet.append(adts)
@@ -342,7 +345,7 @@ public final class AudioEncoder {
                 }
                 self.packetHandler(packet)
             } else {
-                // Not enough input remaining to complete another packet; wait for next buffer
+                // Not enough input data to complete an output packet yet; wait for next buffer!
                 break
             }
         }
@@ -366,7 +369,7 @@ public final class AudioEncoder {
         var destinationFormat = AudioStreamBasicDescription(
             mSampleRate: sampleRate,
             mFormatID: kAudioFormatMPEG4AAC,
-            mFormatFlags: UInt32(MPEG4ObjectID.AAC_LC.rawValue), // MUST ALWAYS BE 2 (AAC-LC)!
+            mFormatFlags: UInt32(MPEG4ObjectID.AAC_LC.rawValue),
             mBytesPerPacket: 0,
             mFramesPerPacket: 1024,
             mBytesPerFrame: 0,
@@ -374,6 +377,18 @@ public final class AudioEncoder {
             mBitsPerChannel: 0,
             mReserved: 0
         )
+
+        var dstFormatSize = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
+        let formatStatus = AudioFormatGetProperty(
+            kAudioFormatProperty_FormatInfo,
+            0,
+            nil,
+            &dstFormatSize,
+            &destinationFormat
+        )
+        if formatStatus != noErr {
+            NSLog("[AudioEncoder] kAudioFormatProperty_FormatInfo query warning: %d", formatStatus)
+        }
 
         var status = AudioConverterNew(&sourceFormat, &destinationFormat, &audioConverter)
         if status != noErr {
@@ -386,7 +401,7 @@ public final class AudioEncoder {
         }
 
         guard status == noErr, let converter = audioConverter else {
-            NSLog("[AudioEncoder] AudioConverter initialization failed with status: %d", status)
+            NSLog("[AudioEncoder] AudioConverter initialization failed: %d", status)
             return false
         }
 
@@ -405,28 +420,16 @@ public final class AudioEncoder {
     private func createAdtsHeader(packetLength: Int) -> Data {
         let totalLength = packetLength + 7
         var header = [UInt8](repeating: 0, count: 7)
-
-        let profile: UInt8 = 2 // AAC-LC (MPEG-4 profile is 2, in ADTS header profile-1 = 1)
+        let profile: UInt8 = 2 // AAC-LC
         let freqIdx = getSampleRateIndex(sampleRate: sampleRate)
         let chanCfg: UInt8 = 2
 
-        // Syncword: 0xFFF + MPEG-4 (ID=0), Layer 0, No CRC (0xFFF1)
         header[0] = 0xFF
         header[1] = 0xF1
-
-        // Profile (2 bits) + Frequency Index (4 bits) + Private (1 bit) + Channel (1 bit)
         header[2] = ((profile - 1) << 6) | (freqIdx << 2) | ((chanCfg >> 2) & 0x01)
-
-        // Channel (2 bits) + Copy (1 bit) + Home (1 bit) + Frame Length MSB (2 bits)
         header[3] = ((chanCfg & 0x03) << 6) | UInt8((totalLength >> 11) & 0x03)
-
-        // Frame Length middle (8 bits)
         header[4] = UInt8((totalLength >> 3) & 0xFF)
-
-        // Frame Length LSB (3 bits) + Buffer Fullness MSB (5 bits)
         header[5] = UInt8((totalLength & 0x07) << 5) | 0x1F
-
-        // Buffer Fullness LSB (6 bits) + Number of AAC frames (2 bits)
         header[6] = 0xFC
 
         return Data(header)
@@ -447,7 +450,7 @@ public final class AudioEncoder {
         case 11025: return 10
         case 8000:  return 11
         case 7350:  return 12
-        default:    return 4 // fallback 44.1 kHz
+        default:    return 4
         }
     }
 }

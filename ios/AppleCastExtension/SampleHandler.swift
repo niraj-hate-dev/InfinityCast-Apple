@@ -28,8 +28,10 @@ public class SampleHandler: RPBroadcastSampleHandler {
     private var isBroadcasting = false
     private var pendingKeyframeRequest = true
     private var audioFrameCount: Int = 0
+    private let audioPort: UInt16 = 25335
     private var lastAudioReceivedTime: CFTimeInterval = 0
     private var silentAudioTimer: DispatchSourceTimer?
+    private var isComfortNoisePrimed: Bool = false
 
     // Direct Extension Server Sockets (Never suspended when Main App is in background!)
     private var directVideoListenSock: Int32 = -1
@@ -80,22 +82,52 @@ public class SampleHandler: RPBroadcastSampleHandler {
     }
 
     
-    // MARK: - Comfort Noise / Continuous Audio Carrier
+    // MARK: - ReplayKit Audio Sample Handling
+    private func handleAudioSampleBuffer(_ sampleBuffer: CMSampleBuffer, sampleBufferType: RPSampleBufferType) {
+        guard isBroadcasting, CMSampleBufferDataIsReady(sampleBuffer) else { return }
+
+        audioNetworkQueue.async { [weak self] in
+            guard let self = self, self.isBroadcasting else { return }
+
+            // Mark active audio arrival so comfortNoiseGenerator yields
+            self.lastAudioReceivedTime = CACurrentMediaTime()
+            self.isComfortNoisePrimed = true
+
+            if self.audioEncoder == nil {
+                self.audioEncoder = AudioEncoder(sampleRate: 44100.0, channels: 2) { [weak self] packet in
+                    self?.dispatchAudioPacket(packet)
+                }
+            }
+            self.audioEncoder?.encode(sampleBuffer: sampleBuffer)
+        }
+    }
+
+    // MARK: - Comfort Noise / Continuous Audio Carrier (Port 25335)
     private func startComfortNoiseGenerator() {
         stopComfortNoiseGenerator()
         lastAudioReceivedTime = CACurrentMediaTime()
+        isComfortNoisePrimed = false
+
         let timer = DispatchSource.makeTimerSource(queue: audioNetworkQueue)
         timer.schedule(deadline: .now() + 0.3, repeating: 0.1)
         timer.setEventHandler { [weak self] in
             guard let self = self, self.isBroadcasting else { return }
             let now = CACurrentMediaTime()
+
+            // Yield whenever ReplayKit .audioApp or .audioMic buffers are actively arriving
             if now - self.lastAudioReceivedTime >= 0.25 {
                 if self.audioEncoder == nil {
                     self.audioEncoder = AudioEncoder(sampleRate: 44100.0, channels: 2) { [weak self] packet in
                         self?.dispatchAudioPacket(packet)
                     }
+                    self.isComfortNoisePrimed = false
                 }
-                let silentPcm = Data(count: 4096)
+
+                // Push 8192 bytes initially to satisfy priming lookahead, then 4096 bytes per idle tick
+                let chunkSize = self.isComfortNoisePrimed ? 4096 : 8192
+                self.isComfortNoisePrimed = true
+
+                let silentPcm = Data(count: chunkSize)
                 self.audioEncoder?.encodePCM(silentPcm)
             }
         }
@@ -106,6 +138,7 @@ public class SampleHandler: RPBroadcastSampleHandler {
     private func stopComfortNoiseGenerator() {
         silentAudioTimer?.cancel()
         silentAudioTimer = nil
+        isComfortNoisePrimed = false
     }
 
     public override func broadcastStarted(withSetupInfo setupInfo: [String : NSObject]?) {
@@ -196,26 +229,14 @@ public class SampleHandler: RPBroadcastSampleHandler {
                 videoEncoder?.encode(sampleBuffer: sampleBuffer, orientation: orientation)
 
             case .audioApp:
-                self.lastAudioReceivedTime = CACurrentMediaTime()
                 self.audioFrameCount += 1
                 if self.audioFrameCount <= 5 || self.audioFrameCount % 200 == 0 {
                     NSLog("[SampleHandler] Received audioApp buffer #%d", self.audioFrameCount)
                 }
-                if audioEncoder == nil {
-                    audioEncoder = AudioEncoder(sampleRate: 44100.0, channels: 2) { [weak self] packet in
-                        self?.dispatchAudioPacket(packet)
-                    }
-                }
-                audioEncoder?.encode(sampleBuffer: sampleBuffer)
+                self.handleAudioSampleBuffer(sampleBuffer, sampleBufferType: .audioApp)
 
             case .audioMic:
-                self.lastAudioReceivedTime = CACurrentMediaTime()
-                if audioEncoder == nil {
-                    audioEncoder = AudioEncoder(sampleRate: 44100.0, channels: 2) { [weak self] packet in
-                        self?.dispatchAudioPacket(packet)
-                    }
-                }
-                audioEncoder?.encode(sampleBuffer: sampleBuffer)
+                self.handleAudioSampleBuffer(sampleBuffer, sampleBufferType: .audioMic)
 
             @unknown default:
                 break
@@ -352,13 +373,6 @@ public class SampleHandler: RPBroadcastSampleHandler {
                 self.directAudioClients.append(clientFd)
                 self.directAudioLock.unlock()
                 NSLog("[SampleHandler] Desktop connected directly to Extension Audio port %d", port)
-                if self.audioEncoder == nil {
-                    self.audioEncoder = AudioEncoder(sampleRate: 44100.0, channels: 2) { [weak self] packet in
-                        self?.dispatchAudioPacket(packet)
-                    }
-                }
-                let initialSilence = Data(count: 8192)
-                self.audioEncoder?.encodePCM(initialSilence)
             }
         }
     }
