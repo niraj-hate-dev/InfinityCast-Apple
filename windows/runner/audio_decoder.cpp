@@ -215,7 +215,7 @@ bool AudioDecoder::InitWaveOut(uint32_t sample_rate, uint32_t /*channels*/) {
   }
 
   for (size_t i = 0; i < kNumWaveBuffers; ++i) {
-    wave_buffer_data_[i].resize(16384);
+    wave_buffer_data_[i].resize(4096);
     std::memset(&wave_headers_[i], 0, sizeof(WAVEHDR));
   }
   current_wave_buffer_idx_ = 0;
