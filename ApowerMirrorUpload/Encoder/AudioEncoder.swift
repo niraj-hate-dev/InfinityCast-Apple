@@ -10,7 +10,7 @@
 //  - -[WXCastSenderServer sendAACData:] @ 0x10680
 //
 //  Hardened with Persistent FIFO PCM Ring Buffer, Discontinuity Reset (>250ms gap),
-//  Dynamic ASBD Adaptation (44.1kHz / 48kHz, mono / stereo), and Instant Silence Priming.
+//  Dynamic ASBD Adaptation (44.1kHz / 48kHz, mono / stereo), and Compliant CoreAudio EOF.
 //
 
 import Foundation
@@ -99,7 +99,6 @@ public final class AudioEncoder {
             let newFormat = asbd.pointee
 
             // 1. Dynamic ASBD Format Re-initialization
-            // ReplayKit dynamically changes format between apps or during pause/resume (44.1kHz / 48kHz, mono / stereo)
             let formatChanged: Bool = {
                 guard let cur = self.currentSourceFormat else { return true }
                 return cur.mSampleRate != newFormat.mSampleRate ||
@@ -127,7 +126,6 @@ public final class AudioEncoder {
             if ptsSeconds > 0 && self.lastBufferPts > 0 {
                 let gap = ptsSeconds - self.lastBufferPts
                 if gap > 0.25 || gap < 0 {
-                    // Audio paused & resumed! Clear leftover partial frames and reset converter state
                     self.pcmBuffer.removeAll()
                     if let conv = self.audioConverter {
                         AudioConverterReset(conv)
@@ -140,7 +138,6 @@ public final class AudioEncoder {
             }
 
             // 3. Extract PCM samples from CMSampleBuffer into persistent ring buffer
-            // Handles both Interleaved & Non-Interleaved 32-bit Float (ReplayKit app audio) and 16-bit Int
             let inFlags = newFormat.mFormatFlags
             let inChannels = max(1, Int(newFormat.mChannelsPerFrame))
             let isNonInterleaved = (inFlags & kAudioFormatFlagIsNonInterleaved) != 0
@@ -169,13 +166,12 @@ public final class AudioEncoder {
 
             if isFloat {
                 if isNonInterleaved && ablPointer.count >= 2 && inChannels >= 2 {
-                    // Non-interleaved stereo float (Standard iOS ReplayKit App Audio)
                     if let leftPtr = ablPointer[0].mData?.assumingMemoryBound(to: Float.self),
                        let rightPtr = ablPointer[1].mData?.assumingMemoryBound(to: Float.self) {
                         for i in 0..<numSamples {
                             let l = max(-1.0, min(1.0, leftPtr[i]))
                             let r = max(-1.0, min(1.0, rightPtr[i]))
-                            pcm16[i * 2] = Int16(l * 32767.0)
+                            pcm16[i * 2]     = Int16(l * 32767.0)
                             pcm16[i * 2 + 1] = Int16(r * 32767.0)
                         }
                     }
@@ -183,30 +179,29 @@ public final class AudioEncoder {
                     if inChannels == 1 {
                         for i in 0..<numSamples {
                             let s = Int16(max(-1.0, min(1.0, floatPtr[i])) * 32767.0)
-                            pcm16[i * 2] = s
+                            pcm16[i * 2]     = s
                             pcm16[i * 2 + 1] = s
                         }
                     } else {
                         for i in 0..<numSamples {
-                            pcm16[i * 2] = Int16(max(-1.0, min(1.0, floatPtr[i * 2])) * 32767.0)
+                            pcm16[i * 2]     = Int16(max(-1.0, min(1.0, floatPtr[i * 2])) * 32767.0)
                             pcm16[i * 2 + 1] = Int16(max(-1.0, min(1.0, floatPtr[i * 2 + 1])) * 32767.0)
                         }
                     }
                 }
             } else {
-                // 16-bit integer PCM
                 if isNonInterleaved && ablPointer.count >= 2 && inChannels >= 2 {
                     if let leftPtr = ablPointer[0].mData?.assumingMemoryBound(to: Int16.self),
                        let rightPtr = ablPointer[1].mData?.assumingMemoryBound(to: Int16.self) {
                         for i in 0..<numSamples {
-                            pcm16[i * 2] = leftPtr[i]
+                            pcm16[i * 2]     = leftPtr[i]
                             pcm16[i * 2 + 1] = rightPtr[i]
                         }
                     }
                 } else if let intPtr = ablPointer[0].mData?.assumingMemoryBound(to: Int16.self) {
                     if inChannels == 1 {
                         for i in 0..<numSamples {
-                            pcm16[i * 2] = intPtr[i]
+                            pcm16[i * 2]     = intPtr[i]
                             pcm16[i * 2 + 1] = intPtr[i]
                         }
                     } else {
@@ -270,15 +265,16 @@ public final class AudioEncoder {
                 ) -> OSStatus in
                     guard let inUserData = inUserData else {
                         ioNumberDataPackets.pointee = 0
-                        return -1
+                        return noErr
                     }
                     let abl = inUserData.assumingMemoryBound(to: AudioBufferList.self)
                     let byteSize = abl.pointee.mBuffers.mDataByteSize
                     if byteSize == 0 {
                         ioNumberDataPackets.pointee = 0
-                        return -1
+                        return noErr // CoreAudio standard EOF return
                     }
 
+                    ioData.pointee.mNumberBuffers = 1
                     ioData.pointee.mBuffers.mData = abl.pointee.mBuffers.mData
                     ioData.pointee.mBuffers.mNumberChannels = 2
                     ioData.pointee.mBuffers.mDataByteSize = byteSize
@@ -297,7 +293,7 @@ public final class AudioEncoder {
                     nil
                 )
 
-                if convStatus == noErr && ioOutputDataPacketSize > 0 {
+                if (convStatus == noErr || ioOutputDataPacketSize > 0) && outAudioBufferList.mBuffers.mDataByteSize > 0 {
                     let aacSize = Int(outAudioBufferList.mBuffers.mDataByteSize)
                     if aacSize > 0 {
                         // Prepend standard 7-byte ADTS Header (matching ASM @ 0xe56c)

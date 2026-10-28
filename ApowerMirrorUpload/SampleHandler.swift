@@ -2,8 +2,8 @@
 //  ApowerMirrorUpload / AppleCast
 //
 //  ReplayKit Broadcast Upload Extension
-//  - Direct BSD TCP Server on Port 15334 (Video) & Port 15335 (Audio) for Zero Background Freeze
-//  - Loopback IPC Client to 127.0.0.1:8888 (Video) & 127.0.0.1:8889 (Audio)
+//  - Direct BSD TCP Server on Port 25334 (Video) & Port 25335 (Audio) for Zero Background Freeze
+//  - Loopback IPC Client to 127.0.0.1:8888 (Video)
 //
 
 import ReplayKit
@@ -16,7 +16,6 @@ public class SampleHandler: RPBroadcastSampleHandler {
 
     // MARK: - Constants
     private static let kIpcPort: UInt16 = 8888
-    private static let kAudioIpcPort: UInt16 = 8889
     private static let kDirectVideoPort: UInt16 = 25334
     private static let kDirectAudioPort: UInt16 = 25335
     private static let kStopNotification = "com.apowermirror.broadcast.StopBroadcast"
@@ -28,10 +27,9 @@ public class SampleHandler: RPBroadcastSampleHandler {
     private var isBroadcasting = false
     private var pendingKeyframeRequest = true
     private var audioFrameCount: Int = 0
-    private let audioPort: UInt16 = 25335
     private var lastAudioReceivedTime: CFTimeInterval = 0
     private var silentAudioTimer: DispatchSourceTimer?
-    
+
     // Direct Extension Server Sockets (Never suspended when Main App is in background!)
     private var directVideoListenSock: Int32 = -1
     private var directVideoClients: [Int32] = []
@@ -45,15 +43,11 @@ public class SampleHandler: RPBroadcastSampleHandler {
     private var latestKeyFrameHeader: Data?
     private let headerLock = NSLock()
 
-    // Outbound Main App IPC Sockets (8888 / 8889)
+    // Outbound Main App Video IPC Socket (8888)
     private var bsdClientSocket: Int32 = -1
-    private var audioBsdClientSocket: Int32 = -1
     private let socketLock = NSLock()
-    private let audioSocketLock = NSLock()
     private var isVideoConnecting = false
     private let videoConnectLock = NSLock()
-    private var isAudioConnecting = false
-    private let audioConnectLock = NSLock()
 
     private struct VideoQueueItem {
         let data: Data
@@ -61,8 +55,6 @@ public class SampleHandler: RPBroadcastSampleHandler {
     }
     private var videoPacketQueue: [VideoQueueItem] = []
     private let videoPacketQueueLock = NSLock()
-    private var audioPacketQueue: [Data] = []
-    private let audioPacketQueueLock = NSLock()
 
     // MARK: - Mach Memory Throttle Thresholds (Jetsam Protection)
     private var videoFrameCount: Int = 0
@@ -72,7 +64,6 @@ public class SampleHandler: RPBroadcastSampleHandler {
     private var consecutiveMemoryLockedFrames = 0
 
     private let networkQueue = DispatchQueue(label: "com.apowermirror.upload.network", qos: .userInteractive)
-    private let audioNetworkQueue = DispatchQueue(label: "com.apowermirror.upload.audio.network", qos: .userInteractive)
     private var targetFps: Int32 = 60
     private var targetBitrate: Int32 = 4_000_000
 
@@ -80,46 +71,45 @@ public class SampleHandler: RPBroadcastSampleHandler {
         super.init()
     }
 
-    
     // MARK: - ReplayKit Audio Sample Handling
+
     private func handleAudioSampleBuffer(_ sampleBuffer: CMSampleBuffer, sampleBufferType: RPSampleBufferType) {
         guard isBroadcasting, CMSampleBufferDataIsReady(sampleBuffer) else { return }
 
-        audioNetworkQueue.async { [weak self] in
-            guard let self = self, self.isBroadcasting else { return }
+        self.lastAudioReceivedTime = CACurrentMediaTime()
 
-            // Mark active audio arrival so comfortNoiseGenerator yields
-            self.lastAudioReceivedTime = CACurrentMediaTime()
-
-            if self.audioEncoder == nil {
-                self.audioEncoder = AudioEncoder(sampleRate: 48000.0, channels: 2) { [weak self] packet in
-                    self?.dispatchAudioPacket(packet)
-                }
+        if self.audioEncoder == nil {
+            self.audioEncoder = AudioEncoder(sampleRate: 44100.0, channels: 2) { [weak self] packet in
+                self?.sendToDirectAudioClients(packet)
             }
-            self.audioEncoder?.encode(sampleBuffer: sampleBuffer)
         }
+        self.audioEncoder?.encode(sampleBuffer: sampleBuffer)
     }
 
     // MARK: - Comfort Noise / Continuous Audio Carrier (Port 25335)
+
     private func startComfortNoiseGenerator() {
         stopComfortNoiseGenerator()
         lastAudioReceivedTime = CACurrentMediaTime()
 
-        let timer = DispatchSource.makeTimerSource(queue: audioNetworkQueue)
-        timer.schedule(deadline: .now() + 0.1, repeating: 0.05)
+        let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .default))
+        timer.schedule(deadline: .now() + 0.1, repeating: 0.1) // 10 times a second
         timer.setEventHandler { [weak self] in
             guard let self = self, self.isBroadcasting else { return }
-            let now = CACurrentMediaTime()
 
-            // Yield whenever ReplayKit .audioApp or .audioMic buffers are actively arriving
+            // Only generate comfort silence when a desktop client is connected to port 25335
+            self.directAudioLock.lock()
+            let hasClients = !self.directAudioClients.isEmpty
+            self.directAudioLock.unlock()
+            guard hasClients else { return }
+
+            let now = CACurrentMediaTime()
             if now - self.lastAudioReceivedTime >= 0.25 {
                 if self.audioEncoder == nil {
-                    self.audioEncoder = AudioEncoder(sampleRate: 48000.0, channels: 2) { [weak self] packet in
-                        self?.dispatchAudioPacket(packet)
+                    self.audioEncoder = AudioEncoder(sampleRate: 44100.0, channels: 2) { [weak self] packet in
+                        self?.sendToDirectAudioClients(packet)
                     }
                 }
-
-                // Push 4096 bytes (1024 frames @ 48kHz stereo) per idle tick
                 let silentPcm = Data(count: 4096)
                 self.audioEncoder?.encodePCM(silentPcm)
             }
@@ -133,6 +123,8 @@ public class SampleHandler: RPBroadcastSampleHandler {
         silentAudioTimer = nil
     }
 
+    // MARK: - ReplayKit Lifecycle
+
     public override func broadcastStarted(withSetupInfo setupInfo: [String : NSObject]?) {
         super.broadcastStarted(withSetupInfo: setupInfo)
         isBroadcasting = true
@@ -143,14 +135,13 @@ public class SampleHandler: RPBroadcastSampleHandler {
         setupDarwinStopReceiver()
         setupDarwinKeyframeReceiver()
 
-        // 1. Start Direct Extension Servers (15334 Video, 15335 Audio) - immune to Main App background suspension!
+        // 1. Start Direct Extension Servers (25334 Video, 25335 Audio) - immune to Main App background suspension!
         startDirectVideoServer(port: Self.kDirectVideoPort)
         startDirectAudioServer(port: Self.kDirectAudioPort)
         startComfortNoiseGenerator()
 
-        // 2. Also connect to Main App IPC (8888 Video, 8889 Audio)
+        // 2. Also connect to Main App Video IPC (8888)
         connectToMainAppIPC()
-        connectToAudioIPC()
     }
 
     public override func broadcastPaused() {
@@ -177,13 +168,9 @@ public class SampleHandler: RPBroadcastSampleHandler {
 
         audioEncoder?.invalidate()
         audioEncoder = nil
-        audioPacketQueueLock.lock()
-        audioPacketQueue.removeAll()
-        audioPacketQueueLock.unlock()
 
         removeDarwinKeyframeReceiver()
         closeSocket()
-        closeAudioSocket()
         stopComfortNoiseGenerator()
         stopDirectServers()
 
@@ -236,7 +223,7 @@ public class SampleHandler: RPBroadcastSampleHandler {
         }
     }
 
-    // MARK: - Direct Extension TCP Servers (Ports 15334 & 15335)
+    // MARK: - Direct Extension TCP Servers (Ports 25334 & 25335)
 
     private func startDirectVideoServer(port: UInt16) {
         DispatchQueue.global(qos: .userInteractive).async { [weak self] in
@@ -260,7 +247,7 @@ public class SampleHandler: RPBroadcastSampleHandler {
                 }
             }
             guard bindRes >= 0, listen(sock, 5) >= 0 else {
-                NSLog("[SampleHandler] Failed to bind direct audio server on port %d, error: %d (%s)", port, errno, strerror(errno))
+                NSLog("[SampleHandler] Failed to bind direct video server on port %d, error: %d (%s)", port, errno, strerror(errno))
                 close(sock)
                 return
             }
@@ -367,14 +354,14 @@ public class SampleHandler: RPBroadcastSampleHandler {
                 NSLog("[SampleHandler] Desktop connected directly to Extension Audio port %d", port)
 
                 // Prime initial comfort silence immediately upon desktop connection so transport is verified instantly
-                self.audioNetworkQueue.async { [weak self] in
+                DispatchQueue.global(qos: .userInteractive).async { [weak self] in
                     guard let self = self, self.isBroadcasting else { return }
                     if self.audioEncoder == nil {
-                        self.audioEncoder = AudioEncoder(sampleRate: 48000.0, channels: 2) { [weak self] packet in
-                            self?.dispatchAudioPacket(packet)
+                        self.audioEncoder = AudioEncoder(sampleRate: 44100.0, channels: 2) { [weak self] packet in
+                            self?.sendToDirectAudioClients(packet)
                         }
                     }
-                    let initialSilence = Data(count: 8192)
+                    let initialSilence = Data(count: 4096)
                     self.audioEncoder?.encodePCM(initialSilence)
                 }
             }
@@ -475,14 +462,6 @@ public class SampleHandler: RPBroadcastSampleHandler {
         }
     }
 
-    private func dispatchAudioPacket(_ data: Data) {
-        audioNetworkQueue.async { [weak self] in
-            guard let self = self, self.isBroadcasting else { return }
-            self.sendToDirectAudioClients(data)
-            self.sendAudioDataToMainApp(data)
-        }
-    }
-
     private var audioPacketsDispatched: Int = 0
 
     private func sendToDirectAudioClients(_ data: Data) {
@@ -525,7 +504,7 @@ public class SampleHandler: RPBroadcastSampleHandler {
         }
     }
 
-    // MARK: - Outbound Main App IPC (8888 & 8889)
+    // MARK: - Outbound Main App Video IPC (8888)
 
     private func connectToMainAppIPC() {
         videoConnectLock.lock()
@@ -596,7 +575,7 @@ public class SampleHandler: RPBroadcastSampleHandler {
     }
 
     private func sendVideoDataToMainApp(_ data: Data) {
-        // If Desktop is connected directly to the Extension on port 15334, skip Main App IPC to save CPU & RAM!
+        // If Desktop is connected directly to the Extension on port 25334, skip Main App IPC to save CPU & RAM!
         directVideoLock.lock()
         let hasDirectClients = !directVideoClients.isEmpty
         directVideoLock.unlock()
@@ -631,108 +610,6 @@ public class SampleHandler: RPBroadcastSampleHandler {
         socketLock.lock()
         defer { socketLock.unlock() }
         if bsdClientSocket >= 0 { close(bsdClientSocket); bsdClientSocket = -1 }
-    }
-
-    private func connectToAudioIPC() {
-        audioConnectLock.lock()
-        if isAudioConnecting { audioConnectLock.unlock(); return }
-        isAudioConnecting = true
-        audioConnectLock.unlock()
-
-        audioNetworkQueue.async { [weak self] in
-            guard let self = self, self.isBroadcasting else {
-                self?.audioConnectLock.lock()
-                self?.isAudioConnecting = false
-                self?.audioConnectLock.unlock()
-                return
-            }
-
-            self.audioSocketLock.lock()
-            if self.audioBsdClientSocket >= 0 { close(self.audioBsdClientSocket); self.audioBsdClientSocket = -1 }
-            self.audioSocketLock.unlock()
-
-            let sock = socket(AF_INET, SOCK_STREAM, 0)
-            guard sock >= 0 else {
-                self.audioConnectLock.lock()
-                self.isAudioConnecting = false
-                self.audioConnectLock.unlock()
-                return
-            }
-
-            var noSigpipe: Int32 = 1
-            setsockopt(sock, SOL_SOCKET, SO_NOSIGPIPE, &noSigpipe, socklen_t(MemoryLayout<Int32>.size))
-            var noDelay: Int32 = 1
-            setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, &noDelay, socklen_t(MemoryLayout<Int32>.size))
-            var sndBuf: Int32 = 512 * 1024
-            setsockopt(sock, SOL_SOCKET, SO_SNDBUF, &sndBuf, socklen_t(MemoryLayout<Int32>.size))
-            var timeout = timeval(tv_sec: 0, tv_usec: 150_000)
-            setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
-
-            var addr = sockaddr_in()
-            addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
-            addr.sin_family = sa_family_t(AF_INET)
-            addr.sin_port = SampleHandler.kAudioIpcPort.bigEndian
-            inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr)
-
-            let res = withUnsafePointer(to: &addr) {
-                $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-                    connect(sock, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
-                }
-            }
-
-            self.audioConnectLock.lock()
-            self.isAudioConnecting = false
-            self.audioConnectLock.unlock()
-
-            if res == 0 {
-                self.audioSocketLock.lock()
-                self.audioBsdClientSocket = sock
-                self.audioSocketLock.unlock()
-            } else {
-                close(sock)
-                if self.isBroadcasting {
-                    self.audioNetworkQueue.asyncAfter(deadline: .now() + 1.0) { [weak self] in
-                        self?.connectToAudioIPC()
-                    }
-                }
-            }
-        }
-    }
-
-    private func sendAudioDataToMainApp(_ data: Data) {
-        directAudioLock.lock()
-        let hasDirectClients = !directAudioClients.isEmpty
-        directAudioLock.unlock()
-        if hasDirectClients { return }
-
-        audioSocketLock.lock()
-        let sock = audioBsdClientSocket
-        audioSocketLock.unlock()
-        guard sock >= 0 else {
-            connectToAudioIPC()
-            return
-        }
-
-        data.withUnsafeBytes { rawBuf in
-            guard let basePtr = rawBuf.baseAddress else { return }
-            var totalSent = 0
-            while totalSent < data.count {
-                let sent = send(sock, basePtr.advanced(by: totalSent), data.count - totalSent, 0)
-                if sent > 0 {
-                    totalSent += sent
-                } else {
-                    closeAudioSocket()
-                    connectToAudioIPC()
-                    break
-                }
-            }
-        }
-    }
-
-    private func closeAudioSocket() {
-        audioSocketLock.lock()
-        defer { audioSocketLock.unlock() }
-        if audioBsdClientSocket >= 0 { close(audioBsdClientSocket); audioBsdClientSocket = -1 }
     }
 
     // MARK: - Darwin Notifications & Mach Memory
