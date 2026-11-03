@@ -265,13 +265,13 @@ public final class AudioEncoder {
                 ) -> OSStatus in
                     guard let inUserData = inUserData else {
                         ioNumberDataPackets.pointee = 0
-                        return noErr
+                        return -1
                     }
                     let abl = inUserData.assumingMemoryBound(to: AudioBufferList.self)
                     let byteSize = abl.pointee.mBuffers.mDataByteSize
                     if byteSize == 0 {
                         ioNumberDataPackets.pointee = 0
-                        return noErr // CoreAudio standard EOF return
+                        return -1 // Signal data consumed — matches working commit 41bf9d1 & disasm @ 0xdf20
                     }
 
                     ioData.pointee.mNumberBuffers = 1
@@ -293,7 +293,7 @@ public final class AudioEncoder {
                     nil
                 )
 
-                if (convStatus == noErr || ioOutputDataPacketSize > 0) && outAudioBufferList.mBuffers.mDataByteSize > 0 {
+                if (convStatus == noErr || convStatus == -1) && ioOutputDataPacketSize > 0 && outAudioBufferList.mBuffers.mDataByteSize > 0 {
                     let aacSize = Int(outAudioBufferList.mBuffers.mDataByteSize)
                     if aacSize > 0 {
                         // Prepend standard 7-byte ADTS Header (matching ASM @ 0xe56c)

@@ -215,7 +215,8 @@ public class SampleHandler: RPBroadcastSampleHandler {
                 self.handleAudioSampleBuffer(sampleBuffer, sampleBufferType: .audioApp)
 
             case .audioMic:
-                self.handleAudioSampleBuffer(sampleBuffer, sampleBufferType: .audioMic)
+                // Ignore microphone audio during screen mirror to prevent format resets and echo (matching commit 41bf9d1)
+                break
 
             @unknown default:
                 break
