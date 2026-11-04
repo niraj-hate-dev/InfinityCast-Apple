@@ -274,6 +274,14 @@ void ScreenMirrorPlugin::StreamWorkerLoop(SOCKET sock) {
       const int err = WSAGetLastError();
       if (err == WSAETIMEDOUT || err == WSAEWOULDBLOCK) {
         // Timed out waiting for next video frame, keep listening!
+        static auto s_last_timeout_log = std::chrono::steady_clock::now();
+        auto now_t = std::chrono::steady_clock::now();
+        if (std::chrono::duration_cast<std::chrono::milliseconds>(now_t - s_last_timeout_log).count() >= 3000) {
+          s_last_timeout_log = now_t;
+          if (first_chunk) {
+            Log("STREAM", "Connected to video tunnel, listening for first H.264 frame from iPhone...", "info");
+          }
+        }
         continue;
       }
       Log("STREAM", "Video socket read error (" + std::to_string(err) + "), attempting reconnection...", "warn");
@@ -592,6 +600,16 @@ void ScreenMirrorPlugin::HandleMethodCall(
       }
     }
 
+    std::string host_str = "172.20.10.1";
+    if (args) {
+      auto host_it = args->find(flutter::EncodableValue("host"));
+      if (host_it != args->end() && std::holds_alternative<std::string>(host_it->second)) {
+        host_str = std::get<std::string>(host_it->second);
+      }
+    }
+    current_device_id_ = device_id;
+    current_host_ip_ = host_str;
+
     SOCKET tunnel_sock = INVALID_SOCKET;
     std::string err_msg;
     bool success = false;
@@ -633,6 +651,7 @@ void ScreenMirrorPlugin::HandleMethodCall(
           if (connect(direct_sock, reinterpret_cast<sockaddr*>(&direct_addr), sizeof(direct_addr)) == 0) {
             tunnel_sock = direct_sock;
             success = true;
+            connected_port = port;
             break;
           } else {
             closesocket(direct_sock);
@@ -642,6 +661,7 @@ void ScreenMirrorPlugin::HandleMethodCall(
     }
 
     if (success) {
+      Log("STREAM", "Connected video tunnel on port " + std::to_string(connected_port) + " (device " + std::to_string(device_id) + ")", "success");
       const BOOL flag = TRUE;
       setsockopt(tunnel_sock, IPPROTO_TCP, TCP_NODELAY, reinterpret_cast<const char*>(&flag), sizeof(flag));
       int rcv_buf = 2 * 1024 * 1024;
@@ -655,13 +675,6 @@ void ScreenMirrorPlugin::HandleMethodCall(
       StartStreamingWorker(tunnel_sock);
 
       // Launch resilient background audio streaming worker (auto-reconnects, never drops on idle)
-      std::string host_str = "172.20.10.1";
-      if (args) {
-        auto host_it = args->find(flutter::EncodableValue("host"));
-        if (host_it != args->end() && std::holds_alternative<std::string>(host_it->second)) {
-          host_str = std::get<std::string>(host_it->second);
-        }
-      }
       StartAudioStreamingWorker(device_id, host_str);
 
       std::lock_guard<std::mutex> lock(sinks_mutex_);

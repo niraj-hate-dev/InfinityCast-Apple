@@ -183,6 +183,9 @@ public class SampleHandler: RPBroadcastSampleHandler {
             switch sampleBufferType {
             case .video:
                 self.videoFrameCount += 1
+                if self.videoFrameCount <= 5 || self.videoFrameCount % 300 == 0 {
+                    NSLog("[SampleHandler] Received video sample #%d", self.videoFrameCount)
+                }
 
                 if videoEncoder == nil {
                     videoEncoder = VideoEncoder(bitrate: targetBitrate, fps: targetFps) { [weak self] (packet, isKeyFrame, _) in
@@ -273,17 +276,6 @@ public class SampleHandler: RPBroadcastSampleHandler {
                 setsockopt(clientFd, SOL_SOCKET, SO_SNDBUF, &sndBuf, socklen_t(MemoryLayout<Int32>.size))
                 var timeout = timeval(tv_sec: 1, tv_usec: 0)
                 setsockopt(clientFd, SOL_SOCKET, SO_SNDTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
-
-                self.headerLock.lock()
-                let cached = self.latestKeyFrameHeader
-                self.headerLock.unlock()
-                if let hdr = cached {
-                    hdr.withUnsafeBytes { rawBuf in
-                        if let base = rawBuf.baseAddress {
-                            _ = send(clientFd, base, hdr.count, 0)
-                        }
-                    }
-                }
 
                 self.directVideoLock.lock()
                 self.directVideoClients.append(clientFd)
@@ -392,11 +384,18 @@ public class SampleHandler: RPBroadcastSampleHandler {
         sendToDirectVideoClients(data)
     }
 
+    private var videoPacketsDispatched: Int = 0
+
     private func sendToDirectVideoClients(_ data: Data) {
         directVideoLock.lock()
         let clients = directVideoClients
         directVideoLock.unlock()
         guard !clients.isEmpty else { return }
+
+        self.videoPacketsDispatched += 1
+        if self.videoPacketsDispatched <= 5 || self.videoPacketsDispatched % 300 == 0 {
+            NSLog("[SampleHandler] Dispatched video frame #%d (%d bytes) to %d direct client(s)", self.videoPacketsDispatched, data.count, clients.count)
+        }
 
         data.withUnsafeBytes { rawBuf in
             guard let basePtr = rawBuf.baseAddress else { return }
@@ -409,10 +408,17 @@ public class SampleHandler: RPBroadcastSampleHandler {
                     if sent > 0 {
                         totalSent += sent
                         retries = 0
-                    } else if (errno == EAGAIN || errno == EWOULDBLOCK) && retries < 20 {
+                    } else if sent < 0 && (errno == EAGAIN || errno == EWOULDBLOCK) {
                         retries += 1
+                        if retries > 50 {
+                            // Send buffer full for >50ms: drop remaining bytes of this frame to avoid lag,
+                            // request immediate IDR keyframe on next cycle, but KEEP the client alive!
+                            self.videoEncoder?.forceKeyFrame()
+                            break
+                        }
                         usleep(1000)
                     } else {
+                        // Fatal socket failure (e.g. EPIPE, ECONNRESET): peer truly disconnected
                         dead.append(fd)
                         self.videoEncoder?.forceKeyFrame()
                         break
@@ -424,6 +430,7 @@ public class SampleHandler: RPBroadcastSampleHandler {
                 directVideoClients.removeAll { dead.contains($0) }
                 directVideoLock.unlock()
                 dead.forEach { close($0) }
+                NSLog("[SampleHandler] Closed %d dead video client socket(s)", dead.count)
             }
         }
     }
