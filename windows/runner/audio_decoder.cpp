@@ -193,6 +193,11 @@ bool AudioDecoder::InitWaveOut(uint32_t sample_rate, uint32_t /*channels*/) {
   std::lock_guard<std::mutex> lock(wave_mutex_);
   CloseWaveOut();
 
+  if (!timer_period_set_) {
+    timeBeginPeriod(1);
+    timer_period_set_ = true;
+  }
+
   current_sample_rate_ = sample_rate;
   current_channels_ = 2;
 
@@ -219,12 +224,18 @@ bool AudioDecoder::InitWaveOut(uint32_t sample_rate, uint32_t /*channels*/) {
     std::memset(&wave_headers_[i], 0, sizeof(WAVEHDR));
   }
   current_wave_buffer_idx_ = 0;
+  was_sound_active_ = false;
 
   Log("AUDIO", "Windows WaveOut audio device initialized: " + std::to_string(sample_rate) + " Hz, 2 channels", "success");
   return true;
 }
 
 void AudioDecoder::CloseWaveOut() {
+  if (timer_period_set_) {
+    timeEndPeriod(1);
+    timer_period_set_ = false;
+  }
+
   if (h_wave_out_) {
     waveOutReset(h_wave_out_);
     for (size_t i = 0; i < kNumWaveBuffers; ++i) {
@@ -236,15 +247,30 @@ void AudioDecoder::CloseWaveOut() {
     waveOutClose(h_wave_out_);
     h_wave_out_ = nullptr;
   }
+  was_sound_active_ = false;
 }
 
 void CALLBACK AudioDecoder::WaveOutProc(HWAVEOUT, UINT, DWORD_PTR, DWORD_PTR, DWORD_PTR) {}
 
-void AudioDecoder::PlayPcm(const int16_t* pcm_data, size_t num_samples) {
+void AudioDecoder::PlayPcm(const int16_t* pcm_data, size_t num_samples, bool is_sound) {
   if (!h_wave_out_ || !pcm_data || num_samples == 0) return;
 
   std::unique_lock<std::mutex> lock(wave_mutex_);
   if (!h_wave_out_) return;
+
+  // Sound onset trigger: When transitioning from silence to active sound (e.g. game gunshot, explosion, speech start),
+  // instantly purge any queued silent buffers in the sound driver so the real sound plays with ZERO queue latency!
+  if (is_sound && !was_sound_active_) {
+    waveOutReset(h_wave_out_);
+    for (size_t i = 0; i < kNumWaveBuffers; ++i) {
+      if (wave_headers_[i].dwFlags & WHDR_PREPARED) {
+        waveOutUnprepareHeader(h_wave_out_, &wave_headers_[i], sizeof(WAVEHDR));
+      }
+      wave_headers_[i].dwFlags = 0;
+    }
+    current_wave_buffer_idx_ = 0;
+  }
+  was_sound_active_ = is_sound;
 
   const size_t bytes_to_write = num_samples * sizeof(int16_t);
 
@@ -261,9 +287,8 @@ void AudioDecoder::PlayPcm(const int16_t* pcm_data, size_t num_samples) {
   }
 
   if (!found) {
-    // Wait until sound card hardware consumes a buffer (up to 30ms in 2ms increments)
-    // Ensures ZERO dropped frames during slight TCP burst arrivals
-    for (int wait = 0; wait < 15; ++wait) {
+    // Ultra-low latency: Wait at most 4ms (2 iterations of 2ms with 1ms timer precision)
+    for (int wait = 0; wait < 2; ++wait) {
       lock.unlock();
       std::this_thread::sleep_for(std::chrono::milliseconds(2));
       lock.lock();
@@ -280,7 +305,10 @@ void AudioDecoder::PlayPcm(const int16_t* pcm_data, size_t num_samples) {
     }
   }
 
-  if (!found) return;
+  if (!found) {
+    // Hardware queue is already saturated (>46ms queued). Drop frame to maintain live edge sync.
+    return;
+  }
 
   WAVEHDR& hdr = wave_headers_[idx];
   if (hdr.dwFlags & WHDR_PREPARED) {
@@ -409,8 +437,6 @@ bool AudioDecoder::DecodeStream(const uint8_t* in_data, size_t in_size) {
       }
 
       if (!pcm.empty()) {
-        PlayPcm(pcm.data(), pcm.size());
-
         // Live Audio Detector - Calculate Peak Amplitude & RMS Energy
         float peak = 0.0f;
         double sum_sq = 0.0;
@@ -427,8 +453,11 @@ bool AudioDecoder::DecodeStream(const uint8_t* in_data, size_t in_size) {
         current_rms_dbfs_ = static_cast<float>(dbfs);
         total_frames_decoded_++;
 
-        const bool sound_detected = (peak > 0.005f); // > -46 dBFS indicates audible speech/music
+        const bool sound_detected = (peak > 0.005f); // > -46 dBFS indicates audible speech/music/game sfx
         is_sound_detected_ = sound_detected;
+
+        // Play PCM samples with low-latency sound-onset trigger
+        PlayPcm(pcm.data(), pcm.size(), sound_detected);
 
         static auto s_last_detector_log = std::chrono::steady_clock::now();
         static bool s_last_state = false;
@@ -463,7 +492,7 @@ bool AudioDecoder::DecodeStream(const uint8_t* in_data, size_t in_size) {
     g_adts_stream_buffer.erase(g_adts_stream_buffer.begin(),
                                g_adts_stream_buffer.begin() + static_cast<ptrdiff_t>(offset));
   }
-  if (g_adts_stream_buffer.size() > 16384) {
+  if (g_adts_stream_buffer.size() > 4096) {
     g_adts_stream_buffer.clear();
   }
 
@@ -476,6 +505,7 @@ void AudioDecoder::Flush() {
   if (codec_ctx_ && g_audio_ffmpeg.flush_buffers) {
     g_audio_ffmpeg.flush_buffers(codec_ctx_);
   }
+  was_sound_active_ = false;
 }
 
 void AudioDecoder::Teardown() {

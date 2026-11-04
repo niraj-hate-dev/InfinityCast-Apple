@@ -47,7 +47,7 @@ class AudioDecoder {
   bool LoadFfmpegSymbols();
   bool InitWaveOut(uint32_t sample_rate, uint32_t channels);
   void CloseWaveOut();
-  void PlayPcm(const int16_t* pcm_data, size_t num_samples);
+  void PlayPcm(const int16_t* pcm_data, size_t num_samples, bool is_sound);
   static void CALLBACK WaveOutProc(HWAVEOUT hwo, UINT uMsg, DWORD_PTR dwInstance, DWORD_PTR dwParam1, DWORD_PTR dwParam2);
 
   // Live Audio Detector Telemetry
@@ -75,12 +75,14 @@ class AudioDecoder {
   uint32_t current_sample_rate_ = 0;
   uint32_t current_channels_ = 0;
 
-  // Low-latency jitter-resilient 4-buffer queue (~92ms hardware capacity, eliminates stutter & breaks)
-  static constexpr size_t kNumWaveBuffers = 4;
+  // Low-latency jitter-resilient 3-buffer queue (~46ms capacity, eliminates game audio lag & stutter)
+  static constexpr size_t kNumWaveBuffers = 3;
   WAVEHDR wave_headers_[kNumWaveBuffers]{};
   std::vector<uint8_t> wave_buffer_data_[kNumWaveBuffers];
   size_t current_wave_buffer_idx_ = 0;
   std::mutex wave_mutex_;
+  bool was_sound_active_ = false;
+  bool timer_period_set_ = false;
 };
 
 }  // namespace applecast
