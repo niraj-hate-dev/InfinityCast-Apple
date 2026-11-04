@@ -1,4 +1,4 @@
-name: Build ApowerMirror Native IPA
+name: Build InfinityCast Native IPA
 
 on:
   push:
@@ -72,24 +72,34 @@ jobs:
           /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" build/Payload/ApowerMirror.app/Info.plist
 
           cd build
-          zip -r ApowerMirror-v1.6.0-Native-Unsigned.ipa Payload
+          zip -r InfinityCast-v1.6.0-Native-Unsigned.ipa Payload
+          cp InfinityCast-v1.6.0-Native-Unsigned.ipa ApowerMirror-v1.6.0-Native-Unsigned.ipa
           echo "=== IPA Generated Successfully ==="
-          ls -lh ApowerMirror-v1.6.0-Native-Unsigned.ipa
+          ls -lh *.ipa
 
-      - name: Upload IPA Artifact
+      - name: Upload InfinityCast IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: InfinityCast-v1.6.0-Native-Unsigned
+          path: build/InfinityCast-v1.6.0-Native-Unsigned.ipa
+          retention-days: 14
+
+      - name: Upload ApowerMirror Legacy Artifact
         uses: actions/upload-artifact@v4
         with:
           name: ApowerMirror-v1.6.0-Native-Unsigned
           path: build/ApowerMirror-v1.6.0-Native-Unsigned.ipa
           retention-days: 14
 
-      - name: Publish ApowerMirror IPA to GitHub Release
+      - name: Publish IPA to GitHub Release
         uses: softprops/action-gh-release@v2
         if: github.ref == 'refs/heads/niraj' || github.ref == 'refs/heads/main'
         continue-on-error: true
         with:
           tag_name: latest
-          name: "AppleCast Latest Release"
-          files: build/ApowerMirror-v1.6.0-Native-Unsigned.ipa
+          name: "InfinityCast Latest Release"
+          files: |
+            build/InfinityCast-v1.6.0-Native-Unsigned.ipa
+            build/ApowerMirror-v1.6.0-Native-Unsigned.ipa
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

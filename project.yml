@@ -20,6 +20,7 @@ targets:
         PRODUCT_NAME: ApowerMirror
         PRODUCT_BUNDLE_IDENTIFIER: com.apowersoft.ApowerMirror
         INFOPLIST_FILE: ApowerMirror/Info.plist
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         SWIFT_VERSION: "5.0"
         TARGETED_DEVICE_FAMILY: "1,2"
         CODE_SIGNING_ALLOWED: NO
@@ -43,6 +44,7 @@ targets:
         PRODUCT_NAME: ApowerMirrorUpload
         PRODUCT_BUNDLE_IDENTIFIER: com.apowersoft.ApowerMirror.ApowerMirrorUpload
         INFOPLIST_FILE: ApowerMirrorUpload/Info.plist
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         SWIFT_VERSION: "5.0"
         TARGETED_DEVICE_FAMILY: "1,2"
         CODE_SIGNING_ALLOWED: NO
