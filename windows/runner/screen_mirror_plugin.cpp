@@ -596,19 +596,21 @@ void ScreenMirrorPlugin::HandleMethodCall(
     std::string err_msg;
     bool success = false;
 
+    uint16_t connected_port = 0;
     if (target_port == 25334) {
       // 1. Try extension direct video port 25334 first
-      success = usbmuxd_client_->ConnectTunnel(device_id, 25334, &tunnel_sock, &err_msg);
-      if (!success) {
+      if (usbmuxd_client_->ConnectTunnel(device_id, 25334, &tunnel_sock, &err_msg)) {
+        success = true;
+        connected_port = 25334;
+      } else if (usbmuxd_client_->ConnectTunnel(device_id, 15334, &tunnel_sock, &err_msg)) {
         // 2. Fall back to alternative video port 15334
-        success = usbmuxd_client_->ConnectTunnel(device_id, 15334, &tunnel_sock, &err_msg);
+        success = true;
+        connected_port = 15334;
       }
-      if (!success) {
-        // 3. Fall back to legacy port 15333
-        success = usbmuxd_client_->ConnectTunnel(device_id, 15333, &tunnel_sock, &err_msg);
-      }
+      // Never fall back to port 15333 for video! Port 15333 is control channel, not video stream.
     } else {
       success = usbmuxd_client_->ConnectTunnel(device_id, target_port, &tunnel_sock, &err_msg);
+      if (success) connected_port = target_port;
     }
 
     if (!success) {

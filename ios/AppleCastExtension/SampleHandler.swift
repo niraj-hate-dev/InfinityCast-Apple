@@ -139,9 +139,6 @@ public class SampleHandler: RPBroadcastSampleHandler {
         startDirectVideoServer(port: Self.kDirectVideoPort)
         startDirectAudioServer(port: Self.kDirectAudioPort)
         startComfortNoiseGenerator()
-
-        // 2. Also connect to Main App Video IPC (8888)
-        connectToMainAppIPC()
     }
 
     public override func broadcastPaused() {
@@ -391,40 +388,8 @@ public class SampleHandler: RPBroadcastSampleHandler {
             latestKeyFrameHeader = data
             headerLock.unlock()
         }
-
-        videoPacketQueueLock.lock()
-        if videoPacketQueue.count >= 12 {
-            if !isKeyFrame {
-                videoPacketQueueLock.unlock()
-                videoEncoder?.forceKeyFrame()
-                return
-            } else {
-                videoPacketQueue.removeAll(where: { !$0.isKeyFrame })
-            }
-        }
-        videoPacketQueue.append(VideoQueueItem(data: data, isKeyFrame: isKeyFrame))
-        videoPacketQueueLock.unlock()
-
-        triggerVideoQueueDrain()
-    }
-
-    private func triggerVideoQueueDrain() {
-        networkQueue.async { [weak self] in
-            guard let self = self, self.isBroadcasting else { return }
-
-            while true {
-                self.videoPacketQueueLock.lock()
-                if self.videoPacketQueue.isEmpty {
-                    self.videoPacketQueueLock.unlock()
-                    break
-                }
-                let item = self.videoPacketQueue.removeFirst()
-                self.videoPacketQueueLock.unlock()
-
-                self.sendToDirectVideoClients(item.data)
-                self.sendVideoDataToMainApp(item.data)
-            }
-        }
+        // Direct zero-latency dispatch straight to connected desktop clients (matching Audio architecture)
+        sendToDirectVideoClients(data)
     }
 
     private func sendToDirectVideoClients(_ data: Data) {
