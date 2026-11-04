@@ -212,12 +212,28 @@ public final class AudioEncoder {
 
     // MARK: - CoreAudio AAC Ingestion & Packet Emission
 
+    public func purgeStaleBuffer() {
+        audioQueue.async { [weak self] in
+            guard let self = self else { return }
+            // If stale silence or accumulated buffer exceeds 1 frame (4096 bytes), trim to newest frame
+            if self.pcmBuffer.count > 4096 {
+                let toRemove = self.pcmBuffer.count - 4096
+                self.pcmBuffer.removeSubrange(0..<toRemove)
+            }
+        }
+    }
+
     private func drainPcmBuffer() {
         guard let converter = self.aacConverter else { return }
 
-        // Bounded buffer protection: keep max ~1 sec of audio (176,400 bytes = 44,100 frames * 4 bytes)
-        if self.pcmBuffer.count > 176_400 {
-            self.pcmBuffer.removeSubrange(0..<(self.pcmBuffer.count - 32768))
+        // Ultra-low latency ring buffer guard:
+        // 1024 frames = 4096 bytes = 23.2ms of 16-bit stereo PCM.
+        // If pcmBuffer accumulates more than 12288 bytes (3 frames = ~69.6ms),
+        // drop older samples to keep strictly within 2 frames (46.4ms) so audio
+        // never drifts or lags behind live screen action!
+        if self.pcmBuffer.count > 12288 {
+            let toRemove = self.pcmBuffer.count - 8192
+            self.pcmBuffer.removeSubrange(0..<toRemove)
         }
 
         // Each AAC packet requires 1024 frames = 4096 bytes
