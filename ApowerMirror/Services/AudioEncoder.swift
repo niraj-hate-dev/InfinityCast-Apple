@@ -348,7 +348,7 @@ public final class AudioEncoder {
             var channelMap: [Int32] = [0, 0] // Map mono input to both L & R stereo channels
             AudioConverterSetProperty(
                 conv,
-                kAudioConverterPropertyChannelMap,
+                kAudioConverterChannelMap,
                 UInt32(MemoryLayout<Int32>.size * 2),
                 &channelMap
             )
