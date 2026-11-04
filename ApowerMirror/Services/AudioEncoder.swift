@@ -124,7 +124,7 @@ public final class AudioEncoder {
 
             guard let pcmConv = self.pcmConverter, self.aacConverter != nil else { return }
 
-            // 3. Discontinuity Detection (Pause / Resume gap > 2.0s)
+            // 3. Discontinuity & Stale Silence Management
             // Natural speech/music pauses (300-800ms) must NEVER reset the encoder priming state!
             let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
             let ptsSeconds = pts.isValid ? pts.seconds : -1.0
@@ -135,6 +135,11 @@ public final class AudioEncoder {
                     if let aac = self.aacConverter { AudioConverterReset(aac) }
                     if let pcm = self.pcmConverter { AudioConverterReset(pcm) }
                     NSLog("[AudioEncoder] Audio discontinuity detected (gap: %.3fs) -> Ring buffer cleared & converters reset", gap)
+                } else if gap > 0.25 {
+                    // Stale silence discard on sound onset after pause:
+                    // Discard any residual silence in the buffer so the new sound (e.g. game gunshot, speech onset)
+                    // is positioned immediately at frame 0, without resetting encoder priming!
+                    self.pcmBuffer.removeAll()
                 }
             }
             if ptsSeconds > 0 {
@@ -229,10 +234,10 @@ public final class AudioEncoder {
     private func drainPcmBuffer() {
         guard let converter = self.aacConverter else { return }
 
-        // Ring buffer overflow protection: Keep max ~185ms (32,768 bytes), strictly 4-byte frame aligned
-        // Prevents multi-second bufferbloat while allowing smooth uninterrupted playback of speech and music
-        if self.pcmBuffer.count > 32768 {
-            let excess = self.pcmBuffer.count - 16384
+        // Ring buffer overflow protection: Keep max 2 frames (~46ms, 8,192 bytes), strictly 4-byte frame aligned
+        // Prevents bufferbloat and latency buildup while ensuring ultra-low latency response in games
+        if self.pcmBuffer.count > 8192 {
+            let excess = self.pcmBuffer.count - 4096
             let alignedToRemove = (excess / 4) * 4
             if alignedToRemove > 0 {
                 self.pcmBuffer.removeSubrange(0..<alignedToRemove)

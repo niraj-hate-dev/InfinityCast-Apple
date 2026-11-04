@@ -93,7 +93,7 @@ public class SampleHandler: RPBroadcastSampleHandler {
         lastAudioReceivedTime = CACurrentMediaTime()
 
         let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .default))
-        timer.schedule(deadline: .now() + 0.1, repeating: 0.1) // 10 times a second
+        timer.schedule(deadline: .now() + 0.5, repeating: 0.5) // Low-overhead heartbeat every 500ms
         timer.setEventHandler { [weak self] in
             guard let self = self, self.isBroadcasting else { return }
 
@@ -104,7 +104,7 @@ public class SampleHandler: RPBroadcastSampleHandler {
             guard hasClients else { return }
 
             let now = CACurrentMediaTime()
-            if now - self.lastAudioReceivedTime >= 0.25 {
+            if now - self.lastAudioReceivedTime >= 0.5 {
                 if self.audioEncoder == nil {
                     self.audioEncoder = AudioEncoder(sampleRate: 44100.0, channels: 2) { [weak self] packet in
                         self?.sendToDirectAudioClients(packet)
