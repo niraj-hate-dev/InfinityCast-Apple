@@ -76,7 +76,13 @@ public class SampleHandler: RPBroadcastSampleHandler {
     private func handleAudioSampleBuffer(_ sampleBuffer: CMSampleBuffer, sampleBufferType: RPSampleBufferType) {
         guard isBroadcasting, CMSampleBufferDataIsReady(sampleBuffer) else { return }
 
-        self.lastAudioReceivedTime = CACurrentMediaTime()
+        let now = CACurrentMediaTime()
+        // If resuming audio after silence or comfort noise (> 150ms gap),
+        // purge old silent samples from encoder buffer so real audio plays with 0 delay!
+        if self.lastAudioReceivedTime > 0 && (now - self.lastAudioReceivedTime) >= 0.15 {
+            self.audioEncoder?.purgeStaleBuffer()
+        }
+        self.lastAudioReceivedTime = now
 
         if self.audioEncoder == nil {
             self.audioEncoder = AudioEncoder(sampleRate: 44100.0, channels: 2) { [weak self] packet in
@@ -344,7 +350,7 @@ public class SampleHandler: RPBroadcastSampleHandler {
                 setsockopt(clientFd, SOL_SOCKET, SO_NOSIGPIPE, &noSigpipe, socklen_t(MemoryLayout<Int32>.size))
                 var noDelay: Int32 = 1
                 setsockopt(clientFd, IPPROTO_TCP, TCP_NODELAY, &noDelay, socklen_t(MemoryLayout<Int32>.size))
-                var sndBuf: Int32 = 512 * 1024
+                var sndBuf: Int32 = 8192 // Low-latency 8KB send buffer (prevents socket bufferbloat)
                 setsockopt(clientFd, SOL_SOCKET, SO_SNDBUF, &sndBuf, socklen_t(MemoryLayout<Int32>.size))
                 var timeout = timeval(tv_sec: 1, tv_usec: 0)
                 setsockopt(clientFd, SOL_SOCKET, SO_SNDTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))

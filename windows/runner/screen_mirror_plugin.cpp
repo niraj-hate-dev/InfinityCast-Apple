@@ -453,7 +453,7 @@ void ScreenMirrorPlugin::AudioStreamWorkerLoop() {
       if (new_sock != INVALID_SOCKET) {
         const BOOL flag = TRUE;
         setsockopt(new_sock, IPPROTO_TCP, TCP_NODELAY, reinterpret_cast<const char*>(&flag), sizeof(flag));
-        int rcv_buf = 32768;
+        int rcv_buf = 8192; // Low-latency 8KB socket receive buffer (prevents Windows bufferbloat)
         setsockopt(new_sock, SOL_SOCKET, SO_RCVBUF, reinterpret_cast<const char*>(&rcv_buf), sizeof(rcv_buf));
 
         // 1000ms receive timeout so recv periodically unblocks to check is_audio_streaming_

@@ -261,9 +261,10 @@ void AudioDecoder::PlayPcm(const int16_t* pcm_data, size_t num_samples) {
   }
 
   if (!found) {
-    for (int wait = 0; wait < 12; ++wait) {
+    // Ultra-low latency: at most a quick 1-2ms spin wait to avoid blocking the audio worker thread
+    for (int wait = 0; wait < 2; ++wait) {
       lock.unlock();
-      std::this_thread::sleep_for(std::chrono::milliseconds(2));
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
       lock.lock();
       if (!h_wave_out_) return;
       for (size_t attempt = 0; attempt < kNumWaveBuffers; ++attempt) {
@@ -278,6 +279,8 @@ void AudioDecoder::PlayPcm(const int16_t* pcm_data, size_t num_samples) {
     }
   }
 
+  // If all wave buffers are still busy, DROP this audio frame!
+  // This prevents the audio worker thread from stalling and prevents network bufferbloat.
   if (!found) return;
 
   WAVEHDR& hdr = wave_headers_[idx];
@@ -314,6 +317,23 @@ bool AudioDecoder::DecodeStream(const uint8_t* in_data, size_t in_size) {
 
   // Append incoming bytes into persistent ADTS framer buffer
   g_adts_stream_buffer.insert(g_adts_stream_buffer.end(), in_data, in_data + in_size);
+
+  // Backlog Protection:
+  // If g_adts_stream_buffer accumulates more than 4096 bytes (10+ frames = > 230ms of audio),
+  // a network burst occurred. Drop older backlogged frames and jump to the most recent frames
+  // to ensure audio playback matches the live 11.2ms video stream!
+  if (g_adts_stream_buffer.size() > 4096) {
+    size_t keep_from = g_adts_stream_buffer.size() - 2048;
+    while (keep_from + 2 < g_adts_stream_buffer.size()) {
+      if (g_adts_stream_buffer[keep_from] == 0xFF && (g_adts_stream_buffer[keep_from + 1] & 0xF0) == 0xF0) {
+        break;
+      }
+      keep_from++;
+    }
+    if (keep_from < g_adts_stream_buffer.size()) {
+      g_adts_stream_buffer.erase(g_adts_stream_buffer.begin(), g_adts_stream_buffer.begin() + static_cast<ptrdiff_t>(keep_from));
+    }
+  }
 
   size_t offset = 0;
   const size_t total = g_adts_stream_buffer.size();
@@ -461,7 +481,7 @@ bool AudioDecoder::DecodeStream(const uint8_t* in_data, size_t in_size) {
     g_adts_stream_buffer.erase(g_adts_stream_buffer.begin(),
                                g_adts_stream_buffer.begin() + static_cast<ptrdiff_t>(offset));
   }
-  if (g_adts_stream_buffer.size() > 65536) {
+  if (g_adts_stream_buffer.size() > 8192) {
     g_adts_stream_buffer.clear();
   }
 
