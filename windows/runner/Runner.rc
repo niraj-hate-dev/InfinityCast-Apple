@@ -89,13 +89,13 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "com.applecast" "\0"
-            VALUE "FileDescription", "applecast" "\0"
+            VALUE "CompanyName", "InfinityCast" "\0"
+            VALUE "FileDescription", "InfinityCast Windows Screen Mirroring Studio" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "applecast" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2026 com.applecast. All rights reserved." "\0"
+            VALUE "InternalName", "InfinityCast" "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2026 InfinityCast. All rights reserved." "\0"
             VALUE "OriginalFilename", "applecast.exe" "\0"
-            VALUE "ProductName", "applecast" "\0"
+            VALUE "ProductName", "InfinityCast" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

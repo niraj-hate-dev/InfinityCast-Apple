@@ -159,10 +159,14 @@ class _HomeScreenState extends State<HomeScreen> {
               color: AppleCastTheme.appleBlue.withValues(alpha: 0.15),
               borderRadius: BorderRadius.circular(8),
             ),
-            child: const Icon(
-              Icons.cast_connected_rounded,
-              color: AppleCastTheme.appleBlue,
-              size: 20,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: Image.asset(
+                'assets/images/brand_logo.png',
+                width: 22,
+                height: 22,
+                fit: BoxFit.cover,
+              ),
             ),
           ),
           const SizedBox(width: 10),
@@ -170,7 +174,7 @@ class _HomeScreenState extends State<HomeScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'AppleCast',
+                'InfinityCast',
                 style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.bold,
@@ -179,7 +183,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
               Text(
-                'Wired USB Mirroring Studio',
+                'Ultra Low-Latency Mirroring Studio',
                 style: TextStyle(fontSize: 11, color: AppleCastTheme.textSecondary),
               ),
             ],

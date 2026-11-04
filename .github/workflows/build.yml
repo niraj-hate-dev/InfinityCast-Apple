@@ -1,4 +1,4 @@
-name: Build AppleCast (Windows Host Client)
+name: Build InfinityCast (Windows Host Client)
 
 on:
   push:
@@ -51,10 +51,21 @@ jobs:
           if (Test-Path "windows/third_party/ffmpeg") {
             Copy-Item "windows/third_party/ffmpeg/*" $buildDir -Force
           }
-          $outputZip = "AppleCast-Windows-x64.zip"
+          if (Test-Path "$buildDir/applecast.exe") {
+            Copy-Item "$buildDir/applecast.exe" "$buildDir/InfinityCast.exe" -Force
+          }
+          $outputZip = "InfinityCast-Windows-x64.zip"
           Compress-Archive -Path "$buildDir/*" -DestinationPath $outputZip -Force
+          Copy-Item $outputZip "AppleCast-Windows-x64.zip" -Force
 
-      - name: Upload Windows Artifact
+      - name: Upload InfinityCast Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: InfinityCast-Windows-x64
+          path: InfinityCast-Windows-x64.zip
+          retention-days: 14
+
+      - name: Upload AppleCast Legacy Artifact
         uses: actions/upload-artifact@v4
         with:
           name: AppleCast-Windows-x64
@@ -67,7 +78,9 @@ jobs:
         continue-on-error: true
         with:
           tag_name: latest
-          name: "AppleCast Latest Release"
-          files: AppleCast-Windows-x64.zip
+          name: "InfinityCast Latest Release"
+          files: |
+            InfinityCast-Windows-x64.zip
+            AppleCast-Windows-x64.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

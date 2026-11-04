@@ -10,9 +10,9 @@ import 'package:applecast/ui/widgets/telemetry_hud.dart';
 
 void main() {
   testWidgets('AppleCast app initialization smoke test', (WidgetTester tester) async {
-    await tester.pumpWidget(const AppleCastApp());
-    expect(find.text('AppleCast'), findsOneWidget);
-    expect(find.text('Wired USB Mirroring Studio'), findsOneWidget);
+    await tester.pumpWidget(const InfinityCastApp());
+    expect(find.text('InfinityCast'), findsOneWidget);
+    expect(find.text('Ultra Low-Latency Mirroring Studio'), findsOneWidget);
   });
 
   testWidgets('DeviceCard displays device information and trust badge', (WidgetTester tester) async {

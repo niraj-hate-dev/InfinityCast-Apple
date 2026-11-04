@@ -4,16 +4,16 @@ import 'ui/screens/home_screen.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  runApp(const AppleCastApp());
+  runApp(const InfinityCastApp());
 }
 
-class AppleCastApp extends StatelessWidget {
-  const AppleCastApp({super.key});
+class InfinityCastApp extends StatelessWidget {
+  const InfinityCastApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'AppleCast',
+      title: 'InfinityCast',
       debugShowCheckedModeBanner: false,
       theme: AppleCastTheme.darkTheme,
       home: const HomeScreen(),

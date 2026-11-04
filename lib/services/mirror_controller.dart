@@ -80,7 +80,7 @@ class MirrorController extends ChangeNotifier {
     );
     notifyListeners();
 
-    addLog('SYSTEM', 'AppleCast host initialized. Listening for usbmuxd events...', level: LogLevel.info);
+    addLog('SYSTEM', 'InfinityCast host initialized. Listening for usbmuxd events...', level: LogLevel.info);
     addLog('USBMUXD', 'Connecting to daemon on 127.0.0.1:27015 (USB Multiplexer)...', level: LogLevel.info);
 
     _subscribeChannels();
