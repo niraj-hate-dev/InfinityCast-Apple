@@ -826,6 +826,35 @@ void ScreenMirrorPlugin::HandleMethodCall(
       mode_str = video_decoder_->GetDecoderModeString();
     }
     result->Success(flutter::EncodableValue(mode_str));
+  } else if (method_name == "minimizeWindow") {
+    HWND hwnd = GetActiveWindow();
+    if (!hwnd) hwnd = GetForegroundWindow();
+    if (hwnd) {
+      HWND root = GetAncestor(hwnd, GA_ROOT);
+      ShowWindow(root ? root : hwnd, SW_MINIMIZE);
+    }
+    result->Success(flutter::EncodableValue(true));
+  } else if (method_name == "maximizeWindow") {
+    HWND hwnd = GetActiveWindow();
+    if (!hwnd) hwnd = GetForegroundWindow();
+    if (hwnd) {
+      HWND root = GetAncestor(hwnd, GA_ROOT);
+      HWND target = root ? root : hwnd;
+      if (IsZoomed(target)) {
+        ShowWindow(target, SW_RESTORE);
+      } else {
+        ShowWindow(target, SW_MAXIMIZE);
+      }
+    }
+    result->Success(flutter::EncodableValue(true));
+  } else if (method_name == "closeWindow") {
+    HWND hwnd = GetActiveWindow();
+    if (!hwnd) hwnd = GetForegroundWindow();
+    if (hwnd) {
+      HWND root = GetAncestor(hwnd, GA_ROOT);
+      PostMessage(root ? root : hwnd, WM_CLOSE, 0, 0);
+    }
+    result->Success(flutter::EncodableValue(true));
   } else {
     result->NotImplemented();
   }

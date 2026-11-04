@@ -17,6 +17,8 @@ class MirrorController extends ChangeNotifier {
   StreamSubscription<StreamMetrics>? _metricsSub;
   StreamSubscription<Map<String, dynamic>>? _statusSub;
   Timer? _disconnectResetTimer;
+  Timer? _autoConnectTimer;
+  bool _isAutoConnecting = false;
 
   final List<DebugLogEntry> _logs = [];
   static const int _maxLogs = 500;
@@ -61,6 +63,13 @@ class MirrorController extends ChangeNotifier {
     addLog('DECODER', 'Switched rendering engine to: ${validMode.toUpperCase()}', level: LogLevel.info);
   }
 
+  /// Sets auto-connect preference.
+  void setAutoConnectEnabled(bool enabled) {
+    _state = _state.copyWith(autoConnectEnabled: enabled);
+    addLog('AUTOCONNECT', enabled ? 'Automatic mirroring connection enabled.' : 'Automatic mirroring connection paused.', level: LogLevel.info);
+    notifyListeners();
+  }
+
   void toggleConsoleVisibility() {
     final nextVisible = !_state.isConsoleVisible;
     _state = _state.copyWith(isConsoleVisible: nextVisible);
@@ -84,6 +93,7 @@ class MirrorController extends ChangeNotifier {
     addLog('USBMUXD', 'Connecting to daemon on 127.0.0.1:27015 (USB Multiplexer)...', level: LogLevel.info);
 
     _subscribeChannels();
+    _startAutoConnectLoop();
     await _channelService.startDeviceDiscovery();
   }
 
@@ -503,8 +513,38 @@ class MirrorController extends ChangeNotifier {
   }
 
 
+
+  void _startAutoConnectLoop() {
+    _autoConnectTimer?.cancel();
+    _autoConnectTimer = Timer.periodic(const Duration(milliseconds: 1500), (_) async {
+      if (!_state.autoConnectEnabled) return;
+      if (_state.status == MirrorConnectionStatus.mirroring) return;
+      if (_isAutoConnecting) return;
+
+      final targetDevice = _state.selectedDevice;
+      if (targetDevice == null) return;
+
+      _isAutoConnecting = true;
+      try {
+        final probeResult = await _channelService.probeDevice(deviceId: targetDevice.deviceId);
+        if (probeResult['connected'] == true && probeResult['isCaptured'] == true) {
+          if (_state.status != MirrorConnectionStatus.mirroring) {
+            addLog('AUTOCONNECT', 'Companion screen broadcast active on ${targetDevice.deviceName}! Auto-initiating mirror...', level: LogLevel.success);
+            await startMirroring(device: targetDevice);
+          }
+        }
+      } catch (_) {
+        // Ignored during passive background polling
+      } finally {
+        _isAutoConnecting = false;
+      }
+    });
+  }
+
+
   @override
   void dispose() {
+    _autoConnectTimer?.cancel();
     _disconnectResetTimer?.cancel();
     _deviceSub?.cancel();
     _metricsSub?.cancel();

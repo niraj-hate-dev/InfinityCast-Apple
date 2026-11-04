@@ -6,14 +6,29 @@ class AppleCastTheme {
   AppleCastTheme._();
 
   // Color Palette
-  static const Color darkBackground = Color(0xFF0F1117);
-  static const Color darkSurface = Color(0xFF181B22);
-  static const Color darkSurfaceElevated = Color(0xFF222631);
-  static const Color darkBorder = Color(0xFF2C3240);
+  static const Color darkBackground = Color(0xFF070B16);
+  static const Color darkSurface = Color(0xFF0B1426);
+  static const Color darkSurfaceElevated = Color(0xFF0F1B33);
+  static const Color darkBorder = Color(0xFF162544);
 
-  static const Color appleBlue = Color(0xFF0A84FF);
-  static const Color appleGreen = Color(0xFF30D158);
-  static const Color appleYellow = Color(0xFFFFD60A);
+  // InfinityCast Deep Dark Blue / Navy Theme
+  static const Color navyBackground = Color(0xFF070B16);
+  static const Color sidebarBackground = Color(0xFF050811);
+  static const Color sidebarBorder = Color(0xFF10192C);
+  static const Color cardBackground = Color(0xFF0B1426);
+  static const Color cardBorder = Color(0xFF162544);
+  static const Color activeNavBackground = Color(0xFF13203C);
+  static const Color iconBlue = Color(0xFF3B82F6);
+  static const Color shieldGreen = Color(0xFF10B981);
+  static const Color moonYellow = Color(0xFFFBBF24);
+  static const Color sparkleGray = Color(0xFFCBD5E1);
+
+
+
+
+  static const Color appleBlue = Color(0xFF3B82F6);
+  static const Color appleGreen = Color(0xFF10B981);
+  static const Color appleYellow = Color(0xFFFBBF24);
   static const Color appleOrange = Color(0xFFFF9F0A);
   static const Color appleRed = Color(0xFFFF453A);
   static const Color applePurple = Color(0xFFBF5AF2);

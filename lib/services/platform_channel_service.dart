@@ -120,6 +120,36 @@ class PlatformChannelService {
     }
   }
 
+  /// Minimizes the native Windows desktop window.
+  Future<bool> minimizeWindow() async {
+    try {
+      final bool? success = await _controlChannel.invokeMethod<bool>('minimizeWindow');
+      return success ?? true;
+    } on PlatformException {
+      return false;
+    }
+  }
+
+  /// Toggles between maximized and restored window states.
+  Future<bool> maximizeWindow() async {
+    try {
+      final bool? success = await _controlChannel.invokeMethod<bool>('maximizeWindow');
+      return success ?? true;
+    } on PlatformException {
+      return false;
+    }
+  }
+
+  /// Closes the native Windows desktop application.
+  Future<bool> closeWindow() async {
+    try {
+      final bool? success = await _controlChannel.invokeMethod<bool>('closeWindow');
+      return success ?? true;
+    } on PlatformException {
+      return false;
+    }
+  }
+
   /// iOS Companion Specific: Triggers RPSystemBroadcastPickerView presentation
   Future<bool> launchBroadcastPicker() async {
     try {

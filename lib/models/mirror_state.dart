@@ -24,6 +24,7 @@ class MirrorState {
   final bool isHudVisible;
   final bool isConsoleVisible;
   final String decoderMode;
+  final bool autoConnectEnabled;
   final List<DebugLogEntry> logs;
 
   const MirrorState({
@@ -38,6 +39,7 @@ class MirrorState {
     this.isHudVisible = true,
     this.isConsoleVisible = false,
     this.decoderMode = 'auto',
+    this.autoConnectEnabled = true,
     this.logs = const [],
   });
 
@@ -60,6 +62,7 @@ class MirrorState {
     bool? isHudVisible,
     bool? isConsoleVisible,
     String? decoderMode,
+    bool? autoConnectEnabled,
     List<DebugLogEntry>? logs,
   }) {
     return MirrorState(
@@ -74,6 +77,7 @@ class MirrorState {
       isHudVisible: isHudVisible ?? this.isHudVisible,
       isConsoleVisible: isConsoleVisible ?? this.isConsoleVisible,
       decoderMode: decoderMode ?? this.decoderMode,
+      autoConnectEnabled: autoConnectEnabled ?? this.autoConnectEnabled,
       logs: logs ?? this.logs,
     );
   }

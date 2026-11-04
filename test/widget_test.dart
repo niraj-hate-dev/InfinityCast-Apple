@@ -12,7 +12,8 @@ void main() {
   testWidgets('AppleCast app initialization smoke test', (WidgetTester tester) async {
     await tester.pumpWidget(const InfinityCastApp());
     expect(find.text('InfinityCast'), findsOneWidget);
-    expect(find.text('Ultra Low-Latency Mirroring Studio'), findsOneWidget);
+    expect(find.text('Mirror Mode'), findsOneWidget);
+    expect(find.text('Connect your iOS device via USB'), findsOneWidget);
   });
 
   testWidgets('DeviceCard displays device information and trust badge', (WidgetTester tester) async {
