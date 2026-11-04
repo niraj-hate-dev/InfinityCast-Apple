@@ -52,6 +52,15 @@ class MirrorController extends ChangeNotifier {
   }
 
   /// Toggles visibility of the floating developer debug console terminal.
+  Future<void> setDecoderMode(String mode) async {
+    final validMode = (mode == 'cpu' || mode == 'gpu') ? mode : 'auto';
+    _state = _state.copyWith(decoderMode: validMode);
+    notifyListeners();
+
+    await _channelService.setDecoderMode(validMode);
+    addLog('DECODER', 'Switched rendering engine to: ${validMode.toUpperCase()}', level: LogLevel.info);
+  }
+
   void toggleConsoleVisibility() {
     final nextVisible = !_state.isConsoleVisible;
     _state = _state.copyWith(isConsoleVisible: nextVisible);

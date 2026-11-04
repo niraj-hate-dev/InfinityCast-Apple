@@ -14,6 +14,7 @@ class AppleCastTheme {
   static const Color appleBlue = Color(0xFF0A84FF);
   static const Color appleGreen = Color(0xFF30D158);
   static const Color appleYellow = Color(0xFFFFD60A);
+  static const Color appleOrange = Color(0xFFFF9F0A);
   static const Color appleRed = Color(0xFFFF453A);
   static const Color applePurple = Color(0xFFBF5AF2);
 

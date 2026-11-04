@@ -47,6 +47,16 @@ class VideoDecoder {
   // Releases all Direct3D 11 and FFmpeg resources cleanly.
   void Teardown();
 
+  enum class DecoderMode {
+    kAuto = 0,
+    kCpu = 1,
+    kGpu = 2,
+  };
+
+  void SetDecoderMode(DecoderMode mode);
+  DecoderMode GetDecoderMode() const { return decoder_mode_; }
+  std::string GetDecoderModeString() const;
+
   size_t width() const { return width_; }
   size_t height() const { return height_; }
   bool is_hw_accelerated() const { return is_hw_accelerated_; }
@@ -62,6 +72,7 @@ class VideoDecoder {
   size_t height_ = 1080;
   int current_pix_fmt_ = -1;
   bool is_hw_accelerated_ = false;
+  DecoderMode decoder_mode_ = DecoderMode::kAuto;
 
   // Direct3D 11 Core Components
   Microsoft::WRL::ComPtr<ID3D11Device> d3d11_device_;

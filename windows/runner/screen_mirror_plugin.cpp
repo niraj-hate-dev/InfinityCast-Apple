@@ -801,6 +801,31 @@ void ScreenMirrorPlugin::HandleMethodCall(
     }
   } else if (method_name == "requestPairTrust") {
     result->Success(flutter::EncodableValue(true));
+  } else if (method_name == "setDecoderMode") {
+    const auto* args = std::get_if<flutter::EncodableMap>(method_call.arguments());
+    std::string mode_str = "auto";
+    if (args) {
+      auto it = args->find(flutter::EncodableValue("mode"));
+      if (it != args->end() && std::holds_alternative<std::string>(it->second)) {
+        mode_str = std::get<std::string>(it->second);
+      }
+    }
+    if (video_decoder_) {
+      if (mode_str == "cpu") {
+        video_decoder_->SetDecoderMode(VideoDecoder::DecoderMode::kCpu);
+      } else if (mode_str == "gpu") {
+        video_decoder_->SetDecoderMode(VideoDecoder::DecoderMode::kGpu);
+      } else {
+        video_decoder_->SetDecoderMode(VideoDecoder::DecoderMode::kAuto);
+      }
+    }
+    result->Success(flutter::EncodableValue(true));
+  } else if (method_name == "getDecoderMode") {
+    std::string mode_str = "auto";
+    if (video_decoder_) {
+      mode_str = video_decoder_->GetDecoderModeString();
+    }
+    result->Success(flutter::EncodableValue(mode_str));
   } else {
     result->NotImplemented();
   }

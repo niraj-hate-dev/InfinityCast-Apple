@@ -258,18 +258,6 @@ void AudioDecoder::PlayPcm(const int16_t* pcm_data, size_t num_samples, bool is_
   std::unique_lock<std::mutex> lock(wave_mutex_);
   if (!h_wave_out_) return;
 
-  // Sound onset trigger: When transitioning from silence to active sound (e.g. game gunshot, explosion, speech start),
-  // instantly purge any queued silent buffers in the sound driver so the real sound plays with ZERO queue latency!
-  if (is_sound && !was_sound_active_) {
-    waveOutReset(h_wave_out_);
-    for (size_t i = 0; i < kNumWaveBuffers; ++i) {
-      if (wave_headers_[i].dwFlags & WHDR_PREPARED) {
-        waveOutUnprepareHeader(h_wave_out_, &wave_headers_[i], sizeof(WAVEHDR));
-      }
-      wave_headers_[i].dwFlags = 0;
-    }
-    current_wave_buffer_idx_ = 0;
-  }
   was_sound_active_ = is_sound;
 
   const size_t bytes_to_write = num_samples * sizeof(int16_t);
@@ -287,10 +275,10 @@ void AudioDecoder::PlayPcm(const int16_t* pcm_data, size_t num_samples, bool is_
   }
 
   if (!found) {
-    // Ultra-low latency: Wait at most 4ms (2 iterations of 2ms with 1ms timer precision)
-    for (int wait = 0; wait < 2; ++wait) {
+    // Jitter buffer wait: Wait at most 12ms (3 iterations of 4ms with 1ms timer precision)
+    for (int wait = 0; wait < 3; ++wait) {
       lock.unlock();
-      std::this_thread::sleep_for(std::chrono::milliseconds(2));
+      std::this_thread::sleep_for(std::chrono::milliseconds(4));
       lock.lock();
       if (!h_wave_out_) return;
       for (size_t attempt = 0; attempt < kNumWaveBuffers; ++attempt) {
@@ -306,7 +294,7 @@ void AudioDecoder::PlayPcm(const int16_t* pcm_data, size_t num_samples, bool is_
   }
 
   if (!found) {
-    // Hardware queue is already saturated (>46ms queued). Drop frame to maintain live edge sync.
+    // Hardware queue is deeply saturated (>100ms queued). Drop frame to maintain live edge sync.
     return;
   }
 

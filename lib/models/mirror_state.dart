@@ -23,6 +23,7 @@ class MirrorState {
   final bool isFullscreen;
   final bool isHudVisible;
   final bool isConsoleVisible;
+  final String decoderMode;
   final List<DebugLogEntry> logs;
 
   const MirrorState({
@@ -36,6 +37,7 @@ class MirrorState {
     this.isFullscreen = false,
     this.isHudVisible = true,
     this.isConsoleVisible = false,
+    this.decoderMode = 'auto',
     this.logs = const [],
   });
 
@@ -57,6 +59,7 @@ class MirrorState {
     bool? isFullscreen,
     bool? isHudVisible,
     bool? isConsoleVisible,
+    String? decoderMode,
     List<DebugLogEntry>? logs,
   }) {
     return MirrorState(
@@ -70,6 +73,7 @@ class MirrorState {
       isFullscreen: isFullscreen ?? this.isFullscreen,
       isHudVisible: isHudVisible ?? this.isHudVisible,
       isConsoleVisible: isConsoleVisible ?? this.isConsoleVisible,
+      decoderMode: decoderMode ?? this.decoderMode,
       logs: logs ?? this.logs,
     );
   }

@@ -347,6 +347,15 @@ bool VideoDecoder::InitializeCodec() {
     return false;
   }
 
+  if (av_codec_ctx_ && g_ffmpeg.free_context) {
+    g_ffmpeg.free_context(&av_codec_ctx_);
+    av_codec_ctx_ = nullptr;
+  }
+  if (av_hw_device_ctx_ && g_ffmpeg.buffer_unref) {
+    g_ffmpeg.buffer_unref(&av_hw_device_ctx_);
+    av_hw_device_ctx_ = nullptr;
+  }
+
   av_codec_ctx_ = g_ffmpeg.alloc_context3(av_codec_);
   if (!av_codec_ctx_) {
     Log("DECODER", "avcodec_alloc_context3 failed", "error");
@@ -364,16 +373,28 @@ bool VideoDecoder::InitializeCodec() {
     g_ffmpeg.opt_set_int(av_codec_ctx_, "flags2", 1 /* FAST */, 0);
   }
 
-  // 2. Hardware Acceleration Initialization (D3D11VA GPU with seamless CPU fallback)
-  if (g_ffmpeg.hwdevice_ctx_create) {
+  // 2. Hardware Acceleration Initialization based on selected DecoderMode (Auto / CPU / GPU)
+  const bool try_gpu = (decoder_mode_ == DecoderMode::kGpu || decoder_mode_ == DecoderMode::kAuto);
+  if (try_gpu && g_ffmpeg.hwdevice_ctx_create) {
     const int ret = g_ffmpeg.hwdevice_ctx_create(&av_hw_device_ctx_, kAvHwDeviceTypeD3d11va, nullptr, nullptr, 0);
     if (ret >= 0) {
       is_hw_accelerated_ = true;
-      Log("DECODER", "D3D11VA GPU hardware acceleration enabled.", "info");
+      if (decoder_mode_ == DecoderMode::kGpu) {
+        Log("DECODER", "GPU Mode active: Direct3D 11 Video Acceleration (D3D11VA) enabled.", "success");
+      } else {
+        Log("DECODER", "Auto Mode active: GPU hardware acceleration detected and enabled.", "success");
+      }
     } else {
       is_hw_accelerated_ = false;
-      Log("DECODER", "D3D11VA not active, using ultra-fast multi-core CPU decoding.", "info");
+      if (decoder_mode_ == DecoderMode::kGpu) {
+        Log("DECODER", "GPU Mode: D3D11VA unavailable on adapter, falling back to multi-core CPU decoding.", "warning");
+      } else {
+        Log("DECODER", "Auto Mode active: Using high-performance multi-core CPU decoding.", "info");
+      }
     }
+  } else {
+    is_hw_accelerated_ = false;
+    Log("DECODER", "CPU Mode active: Multi-core CPU slice decoding enabled (GPU decoding bypassed).", "info");
   }
 
   const int open_res = g_ffmpeg.open2(av_codec_ctx_, av_codec_, nullptr);
@@ -708,6 +729,25 @@ void VideoDecoder::Teardown() {
   d3d11_device_.Reset();
   shared_handle_ = nullptr;
   rgba_buffer_.clear();
+}
+
+void VideoDecoder::SetDecoderMode(DecoderMode mode) {
+  std::lock_guard<std::mutex> lock(decode_mutex_);
+  if (decoder_mode_ == mode) return;
+  decoder_mode_ = mode;
+  Log("DECODER", "Decoder mode switched to: " + GetDecoderModeString(), "info");
+  if (is_initialized_) {
+    InitializeCodec();
+  }
+}
+
+std::string VideoDecoder::GetDecoderModeString() const {
+  switch (decoder_mode_) {
+    case DecoderMode::kCpu: return "cpu";
+    case DecoderMode::kGpu: return "gpu";
+    case DecoderMode::kAuto:
+    default: return "auto";
+  }
 }
 
 }  // namespace applecast

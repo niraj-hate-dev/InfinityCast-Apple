@@ -395,7 +395,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     },
                   ),
           ),
-          _buildSidebarFooter(),
+          _buildSidebarFooter(state),
         ],
       ),
     );
@@ -443,24 +443,44 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildSidebarFooter() {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: const BoxDecoration(
-        color: AppleCastTheme.darkSurfaceElevated,
-        border: Border(top: BorderSide(color: AppleCastTheme.darkBorder)),
-      ),
-      child: const Row(
-        children: [
-          Icon(Icons.bolt_rounded, size: 16, color: AppleCastTheme.appleGreen),
-          SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              'High-Performance CPU / Direct3D Engine Active',
-              style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: AppleCastTheme.textSecondary),
+  Widget _buildSidebarFooter(MirrorState state) {
+    final modeLabel = state.decoderMode == 'cpu'
+        ? 'CPU Software Mode (Zero GPU load)'
+        : (state.decoderMode == 'gpu' ? 'GPU Hardware Mode (D3D11VA)' : 'Auto Mode (Smart Detection)');
+    return InkWell(
+      onTap: () => _showSettingsModal(context),
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: const BoxDecoration(
+          color: AppleCastTheme.darkSurfaceElevated,
+          border: Border(top: BorderSide(color: AppleCastTheme.darkBorder)),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              state.decoderMode == 'cpu' ? Icons.memory_rounded : Icons.bolt_rounded,
+              size: 16,
+              color: state.decoderMode == 'cpu' ? AppleCastTheme.appleOrange : AppleCastTheme.appleGreen,
             ),
-          ),
-        ],
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    modeLabel,
+                    style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: AppleCastTheme.textPrimary),
+                  ),
+                  const Text(
+                    'Tap to switch CPU / GPU engine',
+                    style: TextStyle(fontSize: 10, color: AppleCastTheme.textSecondary),
+                  ),
+                ],
+              ),
+            ),
+            const Icon(Icons.tune_rounded, size: 16, color: AppleCastTheme.textSecondary),
+          ],
+        ),
       ),
     );
   }
@@ -472,24 +492,139 @@ class _HomeScreenState extends State<HomeScreen> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
-      builder: (ctx) => Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Hardware & Pipeline Configuration',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppleCastTheme.textPrimary),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            final currentMode = _controller.state.decoderMode;
+            return Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        'Decoder & Rendering Engine',
+                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppleCastTheme.textPrimary),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.close_rounded, size: 20, color: AppleCastTheme.textSecondary),
+                        onPressed: () => Navigator.pop(ctx),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Select the video decoding engine that best fits your computer:',
+                    style: TextStyle(fontSize: 12, color: AppleCastTheme.textSecondary),
+                  ),
+                  const SizedBox(height: 14),
+                  _buildDecoderModeTile(
+                    title: 'Auto (Recommended)',
+                    subtitle: 'Automatically detects whether GPU or CPU performs best on your PC.',
+                    mode: 'auto',
+                    currentMode: currentMode,
+                    icon: Icons.auto_awesome_rounded,
+                    onSelect: (m) {
+                      _controller.setDecoderMode(m);
+                      setModalState(() {});
+                    },
+                  ),
+                  _buildDecoderModeTile(
+                    title: 'CPU (Multi-Core Software)',
+                    subtitle: 'Best if you do not have a strong GPU. 0% GPU load, runs smoothly on CPU cores.',
+                    mode: 'cpu',
+                    currentMode: currentMode,
+                    icon: Icons.memory_rounded,
+                    onSelect: (m) {
+                      _controller.setDecoderMode(m);
+                      setModalState(() {});
+                    },
+                  ),
+                  _buildDecoderModeTile(
+                    title: 'GPU (Direct3D 11 Acceleration)',
+                    subtitle: 'Uses dedicated GPU hardware video engine (D3D11VA).',
+                    mode: 'gpu',
+                    currentMode: currentMode,
+                    icon: Icons.bolt_rounded,
+                    onSelect: (m) {
+                      _controller.setDecoderMode(m);
+                      setModalState(() {});
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                  const Divider(color: AppleCastTheme.darkBorder),
+                  const SizedBox(height: 8),
+                  _buildSettingOption('Tunnel Port', '${AppleCastConstants.defaultDeviceStreamingPort} (TCP Loopback)'),
+                  _buildSettingOption('Framerate Target', '60 FPS Real-Time (Zero B-Frames)'),
+                  const SizedBox(height: 8),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildDecoderModeTile({
+    required String title,
+    required String subtitle,
+    required String mode,
+    required String currentMode,
+    required IconData icon,
+    required ValueChanged<String> onSelect,
+  }) {
+    final isSelected = (mode == currentMode);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Material(
+        color: isSelected
+            ? AppleCastTheme.appleBlue.withValues(alpha: 0.15)
+            : AppleCastTheme.darkBackground.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(10),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(10),
+          onTap: () => onSelect(mode),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            child: Row(
+              children: [
+                Icon(
+                  icon,
+                  size: 20,
+                  color: isSelected ? AppleCastTheme.appleBlue : AppleCastTheme.textSecondary,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: isSelected ? AppleCastTheme.appleBlue : AppleCastTheme.textPrimary,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        subtitle,
+                        style: const TextStyle(fontSize: 11, color: AppleCastTheme.textSecondary),
+                      ),
+                    ],
+                  ),
+                ),
+                if (isSelected)
+                  const Icon(Icons.check_circle_rounded, size: 20, color: AppleCastTheme.appleBlue)
+                else
+                  const Icon(Icons.radio_button_unchecked_rounded, size: 20, color: AppleCastTheme.textMuted),
+              ],
             ),
-            const SizedBox(height: 16),
-            _buildSettingOption('Hardware Decoder', 'FFmpeg / Direct3D 11 Video Acceleration (D3D11VA)'),
-            _buildSettingOption('Tunnel Port', '${AppleCastConstants.defaultDeviceStreamingPort} (TCP Loopback)'),
-            _buildSettingOption('Framerate Target', '60 FPS Real-Time (Zero B-Frames)'),
-            _buildSettingOption('Compositor Texture', 'flutter::GpuSurfaceTexture (IDXGIResource)'),
-            _buildSettingOption('Daemon Port', '${AppleCastConstants.usbmuxdPort} (Localhost Multiplexer)'),
-            const SizedBox(height: 16),
-          ],
+          ),
         ),
       ),
     );

@@ -75,8 +75,8 @@ class AudioDecoder {
   uint32_t current_sample_rate_ = 0;
   uint32_t current_channels_ = 0;
 
-  // Low-latency jitter-resilient 3-buffer queue (~46ms capacity, eliminates game audio lag & stutter)
-  static constexpr size_t kNumWaveBuffers = 3;
+  // Low-latency jitter-resilient buffer queue (~138ms capacity, steady-state latency ~35ms)
+  static constexpr size_t kNumWaveBuffers = 6;
   WAVEHDR wave_headers_[kNumWaveBuffers]{};
   std::vector<uint8_t> wave_buffer_data_[kNumWaveBuffers];
   size_t current_wave_buffer_idx_ = 0;

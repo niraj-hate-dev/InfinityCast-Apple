@@ -459,9 +459,12 @@ public class SampleHandler: RPBroadcastSampleHandler {
                     if sent > 0 {
                         totalSent += sent
                         retries = 0
-                    } else if (errno == EAGAIN || errno == EWOULDBLOCK) && retries < 10 {
+                    } else if (errno == EAGAIN || errno == EWOULDBLOCK) && retries < 50 {
                         retries += 1
                         usleep(1000)
+                    } else if errno == EAGAIN || errno == EWOULDBLOCK {
+                        // Transient buffer pressure: drop remainder of packet but KEEP socket alive!
+                        break
                     } else {
                         dead.append(fd)
                         break

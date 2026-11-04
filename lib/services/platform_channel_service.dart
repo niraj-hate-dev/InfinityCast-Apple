@@ -98,6 +98,28 @@ class PlatformChannelService {
     }
   }
 
+  /// Configures rendering/decoding engine: "auto", "cpu", or "gpu".
+  Future<bool> setDecoderMode(String mode) async {
+    try {
+      final bool? success = await _controlChannel.invokeMethod<bool>('setDecoderMode', {
+        'mode': mode,
+      });
+      return success ?? true;
+    } on PlatformException {
+      return false;
+    }
+  }
+
+  /// Gets the currently active decoding engine: "auto", "cpu", or "gpu".
+  Future<String> getDecoderMode() async {
+    try {
+      final String? mode = await _controlChannel.invokeMethod<String>('getDecoderMode');
+      return mode ?? 'auto';
+    } on PlatformException {
+      return 'auto';
+    }
+  }
+
   /// iOS Companion Specific: Triggers RPSystemBroadcastPickerView presentation
   Future<bool> launchBroadcastPicker() async {
     try {
