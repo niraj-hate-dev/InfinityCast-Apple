@@ -25,6 +25,26 @@ public final class ScreenRecorderManager {
     // MARK: - Singleton
     public static let shared = ScreenRecorderManager()
 
+    // MARK: - Configuration Helpers
+    public func updateConfiguration(bitrate: Int32, shortSide: Int32, fps: Int32 = 60) {
+        videoEncoder?.updateConfiguration(bitrate: bitrate, targetShortSide: shortSide, fps: fps)
+    }
+
+    private func readEncoderSettings() -> (bitrate: Int32, shortSide: Int32, fps: Int32) {
+        var bitrate: Int32 = 4_000_000
+        var shortSide: Int32 = 720
+        var fps: Int32 = 60
+
+        let defaults = UserDefaults(suiteName: "group.apowersoft.mirror") ?? UserDefaults.standard
+        let b = defaults.integer(forKey: "kEncoderBitrate")
+        let s = defaults.integer(forKey: "kEncoderShortSide")
+        let f = defaults.integer(forKey: "kEncoderFps")
+        if b > 0 { bitrate = Int32(b) }
+        if s > 0 { shortSide = Int32(s) }
+        if f > 0 { fps = Int32(f) }
+        return (bitrate, shortSide, fps)
+    }
+
     // MARK: - Properties
     public weak var delegate: ScreenRecorderManagerDelegate?
     private let recorder = RPScreenRecorder.shared()
@@ -61,8 +81,9 @@ public final class ScreenRecorderManager {
             return
         }
 
-        // Initialize hardware H.264 VideoEncoder (60 FPS, 4 Mbps)
-        videoEncoder = VideoEncoder(bitrate: 4_000_000, fps: 60) { (packet, isKeyFrame, isEndFrame) in
+        // Initialize hardware H.264 VideoEncoder with active quality settings
+        let settings = readEncoderSettings()
+        videoEncoder = VideoEncoder(bitrate: settings.bitrate, fps: settings.fps, targetShortSide: settings.shortSide) { (packet, isKeyFrame, isEndFrame) in
             // Stream encoded H.264 NALUs directly to desktop receiver on port 25334
             WXCastiOSSender.shared.sendVideoData(packet)
         }

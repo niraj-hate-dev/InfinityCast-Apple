@@ -20,6 +20,8 @@ public class SampleHandler: RPBroadcastSampleHandler {
     private static let kDirectAudioPort: UInt16 = 25335
     private static let kStopNotification = "com.apowermirror.broadcast.StopBroadcast"
     private static let kForceKeyframeNotification = "com.apowermirror.forceKeyframe"
+    private static let kUpdateSettingsNotification = "com.apowermirror.updateEncoderSettings"
+    private static let kAppGroupId = "group.apowersoft.mirror"
 
     // MARK: - Encoders & State
     private var videoEncoder: VideoEncoder?
@@ -66,6 +68,7 @@ public class SampleHandler: RPBroadcastSampleHandler {
     private let networkQueue = DispatchQueue(label: "com.apowermirror.upload.network", qos: .userInteractive)
     private var targetFps: Int32 = 60
     private var targetBitrate: Int32 = 4_000_000
+    private var targetShortSide: Int32 = 720
 
     public override init() {
         super.init()
@@ -131,9 +134,16 @@ public class SampleHandler: RPBroadcastSampleHandler {
 
         NSLog("[SampleHandler] ReplayKit broadcast started -> Launching direct servers & IPC")
 
+        // Load persisted encoder preferences from App Group / Wormhole
+        let settings = readEncoderSettings()
+        targetBitrate = settings.bitrate
+        targetShortSide = settings.shortSide
+        targetFps = settings.fps
+
         notifyMainApp(event: "BroadcastStarted")
         setupDarwinStopReceiver()
         setupDarwinKeyframeReceiver()
+        setupDarwinSettingsReceiver()
 
         // 1. Start Direct Extension Servers (25334 Video, 25335 Audio) - immune to Main App background suspension!
         startDirectVideoServer(port: Self.kDirectVideoPort)
@@ -167,6 +177,7 @@ public class SampleHandler: RPBroadcastSampleHandler {
         audioEncoder = nil
 
         removeDarwinKeyframeReceiver()
+        removeDarwinSettingsReceiver()
         closeSocket()
         stopComfortNoiseGenerator()
         stopDirectServers()
@@ -188,7 +199,11 @@ public class SampleHandler: RPBroadcastSampleHandler {
                 }
 
                 if videoEncoder == nil {
-                    videoEncoder = VideoEncoder(bitrate: targetBitrate, fps: targetFps) { [weak self] (packet, isKeyFrame, _) in
+                    let settings = readEncoderSettings()
+                    targetBitrate = settings.bitrate
+                    targetShortSide = settings.shortSide
+                    targetFps = settings.fps
+                    videoEncoder = VideoEncoder(bitrate: targetBitrate, fps: targetFps, targetShortSide: targetShortSide) { [weak self] (packet, isKeyFrame, _) in
                         self?.enqueueVideoFrame(packet, isKeyFrame: isKeyFrame)
                     }
                     if pendingKeyframeRequest {
@@ -643,6 +658,64 @@ public class SampleHandler: RPBroadcastSampleHandler {
         let center = CFNotificationCenterGetDarwinNotifyCenter()
         let observer = UnsafeRawPointer(Unmanaged.passUnretained(self).toOpaque())
         CFNotificationCenterRemoveObserver(center, observer, CFNotificationName(SampleHandler.kForceKeyframeNotification as CFString), nil)
+    }
+
+    private func readEncoderSettings() -> (bitrate: Int32, shortSide: Int32, fps: Int32) {
+        var bitrate: Int32 = 4_000_000
+        var shortSide: Int32 = 720
+        var fps: Int32 = 60
+
+        // 1. Try App Group UserDefaults
+        if let sharedDefaults = UserDefaults(suiteName: Self.kAppGroupId) {
+            let b = sharedDefaults.integer(forKey: "kEncoderBitrate")
+            let s = sharedDefaults.integer(forKey: "kEncoderShortSide")
+            let f = sharedDefaults.integer(forKey: "kEncoderFps")
+            if b > 0 { bitrate = Int32(b) }
+            if s > 0 { shortSide = Int32(s) }
+            if f > 0 { fps = Int32(f) }
+        }
+
+        // 2. Try App Group Shared File (Wormhole archive)
+        if let containerURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: Self.kAppGroupId) {
+            let fileURL = containerURL.appendingPathComponent("wormhole").appendingPathComponent("encoderSettings.archive")
+            if let data = try? Data(contentsOf: fileURL),
+               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                if let b = json["bitrate"] as? Int, b > 0 { bitrate = Int32(b) }
+                if let s = json["shortSide"] as? Int, s > 0 { shortSide = Int32(s) }
+                if let f = json["fps"] as? Int, f > 0 { fps = Int32(f) }
+            }
+        }
+
+        NSLog("[SampleHandler] Active encoder settings -> Bitrate: %d, ShortSide: %dp, FPS: %d", bitrate, shortSide, fps)
+        return (bitrate, shortSide, fps)
+    }
+
+    private func setupDarwinSettingsReceiver() {
+        let center = CFNotificationCenterGetDarwinNotifyCenter()
+        let observer = UnsafeRawPointer(Unmanaged.passUnretained(self).toOpaque())
+        CFNotificationCenterAddObserver(
+            center,
+            observer,
+            { _, observer, _, _, _ in
+                guard let observer = observer else { return }
+                let handler = Unmanaged<SampleHandler>.fromOpaque(observer).takeUnretainedValue()
+                let settings = handler.readEncoderSettings()
+                handler.targetBitrate = settings.bitrate
+                handler.targetShortSide = settings.shortSide
+                handler.targetFps = settings.fps
+                NSLog("[SampleHandler] Received Darwin settings notification -> Rebuilding encoder: %dp @ %d bps", settings.shortSide, settings.bitrate)
+                handler.videoEncoder?.updateConfiguration(bitrate: settings.bitrate, targetShortSide: settings.shortSide, fps: settings.fps)
+            },
+            SampleHandler.kUpdateSettingsNotification as CFString,
+            nil,
+            .deliverImmediately
+        )
+    }
+
+    private func removeDarwinSettingsReceiver() {
+        let center = CFNotificationCenterGetDarwinNotifyCenter()
+        let observer = UnsafeRawPointer(Unmanaged.passUnretained(self).toOpaque())
+        CFNotificationCenterRemoveObserver(center, observer, CFNotificationName(SampleHandler.kUpdateSettingsNotification as CFString), nil)
     }
 
     private func getMemoryFootprintMB() -> Double {

@@ -2,12 +2,9 @@
 //  VideoEncoder.swift
 //  ApowerMirrorUpload / AppleCast
 //
-//  Reconstructed 1:1 from ApowerMirror WXCastiOSSender:
-//  - -[WXCastSenderVideoEncoder createSessionRotation:]
-//  - -[WXCastSenderVideoEncoder _encodeH264SampleBuffer:param:]
-//  - -[WXCastSenderVideoEncoder gotSpsPps:pps:]
-//  - -[WXCastSenderVideoEncoder gotEncodedData:]
-//  - -[WXCastSenderServer sendH264Data:type:]
+//  Hardware VideoToolbox H.264 Video Encoder
+//  Supports dynamic resolution presets: 240p, 360p, 480p, 544p, 720p, 1080p, 2K, 4K
+//  Supports dynamic bitrate configuration: 1 Mbps to 20 Mbps (Max)
 //
 
 import Foundation
@@ -24,7 +21,7 @@ public final class VideoEncoder {
     // MARK: - Configuration
     private var bitrate: Int32
     private var fps: Int32
-    private var maxDimension: Int32 = 1600
+    private var targetShortSide: Int32
     private var currentWidth: Int32 = 0
     private var currentHeight: Int32 = 0
     private var lastRawWidth: Int32 = 0
@@ -46,13 +43,73 @@ public final class VideoEncoder {
     // Maximum sub-packet size before slicing (10 KB / 0x2800 from ApowerMirror decompiled ASM)
     private let kMaxSliceChunkSize = 10240
 
+    // MARK: - Helpers for Presets
+
+    public static func resolutionToShortSide(_ res: String) -> Int32 {
+        let clean = res.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if clean.contains("240") { return 240 }
+        if clean.contains("360") { return 360 }
+        if clean.contains("480") { return 480 }
+        if clean.contains("544") { return 544 }
+        if clean.contains("720") { return 720 }
+        if clean.contains("1080") { return 1080 }
+        if clean.contains("2k") || clean.contains("1440") { return 1440 }
+        if clean.contains("4k") || clean.contains("2160") { return 2160 }
+        return 720
+    }
+
+    public static func bitrateStringToBps(_ bitStr: String) -> Int32 {
+        let clean = bitStr.lowercased()
+        if clean.contains("20") || clean.contains("max") { return 20_000_000 }
+        if clean.contains("16") { return 16_000_000 }
+        if clean.contains("12") { return 12_000_000 }
+        if clean.contains("8") { return 8_000_000 }
+        if clean.contains("6") { return 6_000_000 }
+        if clean.contains("4") { return 4_000_000 }
+        if clean.contains("2") { return 2_000_000 }
+        if clean.contains("1") { return 1_000_000 }
+        return 4_000_000
+    }
+
     // MARK: - Initialization
 
-    public init(bitrate: Int32 = 4_000_000, fps: Int32 = 60, packetHandler: @escaping EncodedPacketHandler) {
+    public init(
+        bitrate: Int32 = 4_000_000,
+        fps: Int32 = 60,
+        targetShortSide: Int32 = 720,
+        maxDimension: Int32 = 1600,
+        packetHandler: @escaping EncodedPacketHandler
+    ) {
         self.bitrate = bitrate
         self.fps = fps
+        if targetShortSide > 0 {
+            self.targetShortSide = targetShortSide
+        } else if maxDimension > 0 {
+            self.targetShortSide = (maxDimension <= 1440) ? maxDimension : Int32(Float(maxDimension) * 9.0 / 19.5)
+        } else {
+            self.targetShortSide = 720
+        }
         self.packetHandler = packetHandler
         registerCrossProcessKeyframeObserver()
+    }
+
+    public func updateConfiguration(bitrate: Int32, targetShortSide: Int32, fps: Int32 = 60) {
+        encoderQueue.async { [weak self] in
+            guard let self = self else { return }
+            if self.bitrate != bitrate || self.targetShortSide != targetShortSide || self.fps != fps {
+                NSLog("[VideoEncoder] Updating Configuration -> Bitrate: %d, ShortSide: %d, FPS: %d", bitrate, targetShortSide, fps)
+                self.bitrate = bitrate
+                self.targetShortSide = targetShortSide
+                self.fps = fps
+                self.compressionSession = nil
+                self.forceNextKeyframe = true
+            }
+        }
+    }
+
+    public func updateConfiguration(bitrate: Int32, maxDimension: Int32, fps: Int32 = 60) {
+        let shortSide = (maxDimension <= 1440) ? maxDimension : Int32(Float(maxDimension) * 9.0 / 19.5)
+        updateConfiguration(bitrate: bitrate, targetShortSide: shortSide, fps: fps)
     }
 
     private func registerCrossProcessKeyframeObserver() {
@@ -140,7 +197,6 @@ public final class VideoEncoder {
     private func rebuildCompressionSession(sourceWidth: Int32, sourceHeight: Int32, orientation: CGImagePropertyOrientation) {
         invalidate()
 
-        // 1. Swap width/height if orientation is landscape (matches ASM @ 0x12d68 - 0x12dc0)
         var targetW = sourceWidth
         var targetH = sourceHeight
 
@@ -151,24 +207,29 @@ public final class VideoEncoder {
             swap(&targetW, &targetH)
         }
 
-        // 2. Downscale Retina resolution to clamp within 50MB Jetsam limit
-        if targetW > maxDimension || targetH > maxDimension {
+        let currentShort = min(targetW, targetH)
+        let currentLong = max(targetW, targetH)
+
+        // Scale resolution according to targetShortSide (240p, 360p, 480p, 544p, 720p, 1080p, 2K, 4K)
+        if targetShortSide > 0 && currentShort > targetShortSide {
+            let scale = Float(targetShortSide) / Float(currentShort)
+            let scaledLong = Int32(Float(currentLong) * scale)
             if targetW >= targetH {
-                targetH = Int32((Float(targetH) / Float(targetW)) * Float(maxDimension))
-                targetW = maxDimension
+                targetW = scaledLong
+                targetH = targetShortSide
             } else {
-                targetW = Int32((Float(targetW) / Float(targetH)) * Float(maxDimension))
-                targetH = maxDimension
+                targetW = targetShortSide
+                targetH = scaledLong
             }
         }
 
-        // 3. Macroblock 16-pixel alignment: (w + 15) & ~15 (decompiled ASM @ 0x13d14 - 0x13d30)
+        // Macroblock 16-pixel alignment: (w + 15) & ~15 (decompiled ASM @ 0x13d14 - 0x13d30)
         currentWidth = (targetW + 15) & ~15
         currentHeight = (targetH + 15) & ~15
 
-        NSLog("[VideoEncoder] Initializing VTCompressionSession: %dx%d (Orientation: %d)", currentWidth, currentHeight, orientation.rawValue)
+        NSLog("[VideoEncoder] Initializing VTCompressionSession: %dx%d (Orientation: %d, Bitrate: %d)", currentWidth, currentHeight, orientation.rawValue, bitrate)
 
-        // 4. Create VideoToolbox Compression Session
+        // Create VideoToolbox Compression Session
         var newSession: VTCompressionSession?
         let callback: VTCompressionOutputCallback = { outputCallbackRefCon, _, status, infoFlags, sampleBuffer in
             guard status == noErr, let buffer = sampleBuffer, let refCon = outputCallbackRefCon else { return }
@@ -196,7 +257,7 @@ public final class VideoEncoder {
             return
         }
 
-        // 5. Apply Hardened Low-Latency Properties
+        // Apply Hardened Low-Latency Properties
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_RealTime, value: kCFBooleanTrue)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ProfileLevel, value: kVTProfileLevel_H264_Main_AutoLevel)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_H264EntropyMode, value: kVTH264EntropyMode_CABAC)
@@ -218,7 +279,7 @@ public final class VideoEncoder {
         self.compressionSession = session
         self.forceNextKeyframe = true
 
-        // 6. Notify Desktop Receiver of Geometry Change
+        // Notify Desktop Receiver of Geometry Change
         let rotationVal: Int32 = isLandscape ? 90 : 0
         dimensionHandler?(currentWidth, currentHeight, rotationVal)
     }
@@ -226,7 +287,6 @@ public final class VideoEncoder {
     // MARK: - Output Sample Handling & H.264 NAL Parsing
 
     private func handleEncodedSampleBuffer(_ sampleBuffer: CMSampleBuffer) {
-        // 1. In CoreMedia, kCMSampleAttachmentKey_NotSync is omitted (nil) for sync keyframes.
         var isKeyFrame = true
         if let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false) as? [[CFString: Any]],
            let firstAttachment = attachments.first {
@@ -234,7 +294,6 @@ public final class VideoEncoder {
             isKeyFrame = !notSync
         }
 
-        // 2. Extract AVCC length-prefixed NALUs and convert to Annex-B [00 00 00 01]
         guard let dataBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else { return }
 
         var totalLength = 0
@@ -247,79 +306,93 @@ public final class VideoEncoder {
             dataPointerOut: &dataPointer
         )
 
-        guard blockStatus == noErr, let rawData = dataPointer else { return }
+        guard blockStatus == noErr, let ptr = dataPointer, totalLength > 0 else { return }
 
-        var naluData = Data()
-        var bufferOffset = 0
-        let avccHeaderLength = 4
+        // Extract SPS & PPS on IDR keyframe
+        if isKeyFrame, let formatDesc = CMSampleBufferGetFormatDescription(sampleBuffer) {
+            extractSpsPps(from: formatDesc)
+        }
 
-        while bufferOffset < totalLength - avccHeaderLength {
+        var offset = 0
+        var fullFrameData = Data()
+
+        // Prepend Annex-B SPS & PPS before IDR slice
+        if isKeyFrame, let sps = spsHeader, let pps = ppsHeader {
+            fullFrameData.append(annexBStartCode)
+            fullFrameData.append(sps)
+            fullFrameData.append(annexBStartCode)
+            fullFrameData.append(pps)
+        }
+
+        // Iterate AVCC length-prefixed NALUs (4-byte big-endian prefix)
+        while offset < totalLength - 4 {
             var naluLength: UInt32 = 0
-            memcpy(&naluLength, rawData + bufferOffset, avccHeaderLength)
+            memcpy(&naluLength, ptr.advanced(by: offset), 4)
             naluLength = CFSwapInt32BigToHost(naluLength)
+            offset += 4
 
-            bufferOffset += avccHeaderLength
-
-            guard naluLength > 0, bufferOffset + Int(naluLength) <= totalLength else { break }
-
-            // Inspect NAL unit header type (5 = IDR Keyframe slice)
-            let nalHeaderByte = UInt8(bitPattern: rawData[bufferOffset])
-            let nalType = nalHeaderByte & 0x1F
-            if nalType == 5 {
-                isKeyFrame = true
-            }
-
-            naluData.append(annexBStartCode)
-            naluData.append(Data(bytes: rawData + bufferOffset, count: Int(naluLength)))
-
-            bufferOffset += Int(naluLength)
-        }
-
-        // 3. On keyframe (or if SPS/PPS have never been extracted), prepend SPS & PPS with Annex-B start codes
-        var frameData = Data()
-        if isKeyFrame || spsHeader == nil || ppsHeader == nil {
-            if let formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer) {
-                var spsPointer: UnsafePointer<UInt8>?
-                var spsSize = 0
-                let spsStatus = CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
-                    formatDescription,
-                    parameterSetIndex: 0,
-                    parameterSetPointerOut: &spsPointer,
-                    parameterSetSizeOut: &spsSize,
-                    parameterSetCountOut: nil,
-                    nalUnitHeaderLengthOut: nil
-                )
-
-                var ppsPointer: UnsafePointer<UInt8>?
-                var ppsSize = 0
-                let ppsStatus = CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
-                    formatDescription,
-                    parameterSetIndex: 1,
-                    parameterSetPointerOut: &ppsPointer,
-                    parameterSetSizeOut: &ppsSize,
-                    parameterSetCountOut: nil,
-                    nalUnitHeaderLengthOut: nil
-                )
-
-                if spsStatus == noErr, ppsStatus == noErr, let sps = spsPointer, let pps = ppsPointer {
-                    spsHeader = Data(bytes: sps, count: spsSize)
-                    ppsHeader = Data(bytes: pps, count: ppsSize)
-                }
-            }
-
-            if let sps = spsHeader, let pps = ppsHeader {
-                frameData.append(annexBStartCode)
-                frameData.append(sps)
-                frameData.append(annexBStartCode)
-                frameData.append(pps)
+            if naluLength > 0 && offset + Int(naluLength) <= totalLength {
+                fullFrameData.append(annexBStartCode)
+                fullFrameData.append(Data(bytes: ptr.advanced(by: offset), count: Int(naluLength)))
+                offset += Int(naluLength)
+            } else {
+                break
             }
         }
 
-        frameData.append(naluData)
+        guard !fullFrameData.isEmpty else { return }
 
-        // 4. Dispatch complete unfragmented Annex-B frame
-        if !frameData.isEmpty {
-            packetHandler(frameData, isKeyFrame, true)
+        // Slice into sub-packets (kMaxSliceChunkSize = 10240 bytes)
+        let totalBytes = fullFrameData.count
+        var sentBytes = 0
+
+        while sentBytes < totalBytes {
+            let chunkSize = min(kMaxSliceChunkSize, totalBytes - sentBytes)
+            let isEndFrame = (sentBytes + chunkSize == totalBytes)
+            let chunk = fullFrameData.subdata(in: sentBytes..<(sentBytes + chunkSize))
+            packetHandler(chunk, isKeyFrame, isEndFrame)
+            sentBytes += chunkSize
+        }
+    }
+
+    private func extractSpsPps(from formatDesc: CMFormatDescription) {
+        var spsCount = 0
+        CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
+            formatDesc,
+            parameterSetIndex: 0,
+            parameterSetPointerOut: nil,
+            parameterSetSizeOut: nil,
+            parameterSetCountOut: &spsCount,
+            nalUnitHeaderLengthOut: nil
+        )
+
+        var spsPtr: UnsafePointer<UInt8>?
+        var spsSize = 0
+        let spsStatus = CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
+            formatDesc,
+            parameterSetIndex: 0,
+            parameterSetPointerOut: &spsPtr,
+            parameterSetSizeOut: &spsSize,
+            parameterSetCountOut: nil,
+            nalUnitHeaderLengthOut: nil
+        )
+
+        var ppsPtr: UnsafePointer<UInt8>?
+        var ppsSize = 0
+        let ppsStatus = CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
+            formatDesc,
+            parameterSetIndex: 1,
+            parameterSetPointerOut: &ppsPtr,
+            parameterSetSizeOut: &ppsSize,
+            parameterSetCountOut: nil,
+            nalUnitHeaderLengthOut: nil
+        )
+
+        if spsStatus == noErr, let ptr = spsPtr, spsSize > 0 {
+            spsHeader = Data(bytes: ptr, count: spsSize)
+        }
+        if ppsStatus == noErr, let ptr = ppsPtr, ppsSize > 0 {
+            ppsHeader = Data(bytes: ptr, count: ppsSize)
         }
     }
 
@@ -331,9 +404,9 @@ public final class VideoEncoder {
     }
 
     deinit {
+        invalidate()
         let center = CFNotificationCenterGetDarwinNotifyCenter()
         let observer = UnsafeRawPointer(Unmanaged.passUnretained(self).toOpaque())
         CFNotificationCenterRemoveObserver(center, observer, CFNotificationName(Self.forceKeyframeNotificationName), nil)
-        invalidate()
     }
 }

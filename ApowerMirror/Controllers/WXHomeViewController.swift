@@ -35,6 +35,13 @@ open class WXHomeViewController: UIViewController, ScreenRecorderManagerDelegate
 
     private var systemBroadcastButton: UIButton?
 
+    // Quality & Bitrate Controls
+    private var qualityCard: UIView?
+    private var resValueLabel: UILabel?
+    private var bitrateValueLabel: UILabel?
+    private var currentResolution: String = "720p"
+    private var currentBitrate: String = "4 Mbps"
+
     // State Tracking
     private var durationTimer: Timer?
     private var recordingSeconds = 0
@@ -55,6 +62,19 @@ open class WXHomeViewController: UIViewController, ScreenRecorderManagerDelegate
 
         // Prepare broadcast picker view in hierarchy
         BroadcastPickerManager.shared.preparePickerView(in: view)
+
+        // Load saved stream quality preferences
+        if let savedRes = (UserDefaults(suiteName: "group.apowersoft.mirror")?.string(forKey: "kEncoderResolution")) ?? UserDefaults.standard.string(forKey: "kEncoderResolution") {
+            currentResolution = savedRes
+        }
+        if let savedBit = (UserDefaults(suiteName: "group.apowersoft.mirror")?.string(forKey: "kEncoderBitrateString")) ?? UserDefaults.standard.string(forKey: "kEncoderBitrateString") {
+            currentBitrate = savedBit
+        }
+        updateQualityLabels()
+
+        let qualityBtn = UIBarButtonItem(title: "⚙️ Quality", style: .plain, target: self, action: #selector(handleQualityNavAction))
+        qualityBtn.tintColor = .white
+        navigationItem.rightBarButtonItem = qualityBtn
     }
 
     open override func viewWillAppear(_ animated: Bool) {
@@ -218,6 +238,11 @@ open class WXHomeViewController: UIViewController, ScreenRecorderManagerDelegate
         self.connectionTitleLabel = connCard.titleLbl
         self.connectionDetailLabel = connCard.detailLbl
 
+        // Diagnostic Card 3: Stream Quality & Bitrate Card
+        let qCard = createQualityCard()
+        view.addSubview(qCard)
+        self.qualityCard = qCard
+
         // Constraints
         NSLayoutConstraint.activate([
             topBg.topAnchor.constraint(equalTo: view.topAnchor),
@@ -271,7 +296,12 @@ open class WXHomeViewController: UIViewController, ScreenRecorderManagerDelegate
             connCard.card.topAnchor.constraint(equalTo: rkCard.card.bottomAnchor, constant: 12),
             connCard.card.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
             connCard.card.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
-            connCard.card.heightAnchor.constraint(equalToConstant: 78)
+            connCard.card.heightAnchor.constraint(equalToConstant: 78),
+
+            qCard.topAnchor.constraint(equalTo: connCard.card.bottomAnchor, constant: 12),
+            qCard.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
+            qCard.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
+            qCard.heightAnchor.constraint(equalToConstant: 98)
         ])
     }
 
@@ -327,6 +357,275 @@ open class WXHomeViewController: UIViewController, ScreenRecorderManagerDelegate
         ])
 
         return (card, dot, tLbl, dLbl)
+    }
+
+    // MARK: - Stream Quality & Bitrate Card
+
+    private func createQualityCard() -> UIView {
+        let card = UIView()
+        card.translatesAutoresizingMaskIntoConstraints = false
+        card.backgroundColor = .white
+        card.layer.cornerRadius = 12
+        card.layer.shadowColor = UIColor.black.cgColor
+        card.layer.shadowOffset = CGSize(width: 0, height: 2)
+        card.layer.shadowOpacity = 0.06
+        card.layer.shadowRadius = 6
+
+        let headerIcon = UIImageView(image: UIImage(systemName: "slider.horizontal.3"))
+        headerIcon.tintColor = UIColor(red: 0.15, green: 0.50, blue: 0.98, alpha: 1.0)
+        headerIcon.translatesAutoresizingMaskIntoConstraints = false
+        card.addSubview(headerIcon)
+
+        let titleLbl = UILabel()
+        titleLbl.translatesAutoresizingMaskIntoConstraints = false
+        titleLbl.text = "STREAM QUALITY & BITRATE"
+        titleLbl.font = UIFont.systemFont(ofSize: 11, weight: .bold)
+        titleLbl.textColor = UIColor(white: 0.45, alpha: 1.0)
+        card.addSubview(titleLbl)
+
+        let stack = UIStackView()
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        stack.axis = .horizontal
+        stack.distribution = .fillEqually
+        stack.spacing = 10
+        card.addSubview(stack)
+
+        // 1. Resolution Pill Button
+        let resContainer = UIButton(type: .custom)
+        resContainer.translatesAutoresizingMaskIntoConstraints = false
+        resContainer.backgroundColor = UIColor(red: 0.93, green: 0.96, blue: 1.0, alpha: 1.0)
+        resContainer.layer.cornerRadius = 10
+        resContainer.layer.borderColor = UIColor(red: 0.80, green: 0.88, blue: 0.99, alpha: 1.0).cgColor
+        resContainer.layer.borderWidth = 1.0
+        resContainer.addTarget(self, action: #selector(showResolutionPicker), for: .touchUpInside)
+
+        let resSubLbl = UILabel()
+        resSubLbl.translatesAutoresizingMaskIntoConstraints = false
+        resSubLbl.text = "RESOLUTION"
+        resSubLbl.font = UIFont.systemFont(ofSize: 9, weight: .bold)
+        resSubLbl.textColor = UIColor(red: 0.15, green: 0.45, blue: 0.90, alpha: 1.0)
+        resSubLbl.isUserInteractionEnabled = false
+        resContainer.addSubview(resSubLbl)
+
+        let resValLbl = UILabel()
+        resValLbl.translatesAutoresizingMaskIntoConstraints = false
+        resValLbl.text = "\(currentResolution) ▾"
+        resValLbl.font = UIFont.systemFont(ofSize: 15, weight: .heavy)
+        resValLbl.textColor = UIColor(red: 0.10, green: 0.35, blue: 0.85, alpha: 1.0)
+        resValLbl.isUserInteractionEnabled = false
+        resContainer.addSubview(resValLbl)
+        self.resValueLabel = resValLbl
+
+        NSLayoutConstraint.activate([
+            resSubLbl.topAnchor.constraint(equalTo: resContainer.topAnchor, constant: 8),
+            resSubLbl.leadingAnchor.constraint(equalTo: resContainer.leadingAnchor, constant: 12),
+
+            resValLbl.topAnchor.constraint(equalTo: resSubLbl.bottomAnchor, constant: 2),
+            resValLbl.leadingAnchor.constraint(equalTo: resContainer.leadingAnchor, constant: 12),
+            resValLbl.trailingAnchor.constraint(equalTo: resContainer.trailingAnchor, constant: -12),
+            resValLbl.bottomAnchor.constraint(equalTo: resContainer.bottomAnchor, constant: -8)
+        ])
+        stack.addArrangedSubview(resContainer)
+
+        // 2. Bitrate Pill Button
+        let bitContainer = UIButton(type: .custom)
+        bitContainer.translatesAutoresizingMaskIntoConstraints = false
+        bitContainer.backgroundColor = UIColor(red: 0.94, green: 0.98, blue: 0.95, alpha: 1.0)
+        bitContainer.layer.cornerRadius = 10
+        bitContainer.layer.borderColor = UIColor(red: 0.82, green: 0.94, blue: 0.86, alpha: 1.0).cgColor
+        bitContainer.layer.borderWidth = 1.0
+        bitContainer.addTarget(self, action: #selector(showBitratePicker), for: .touchUpInside)
+
+        let bitSubLbl = UILabel()
+        bitSubLbl.translatesAutoresizingMaskIntoConstraints = false
+        bitSubLbl.text = "BITRATE"
+        bitSubLbl.font = UIFont.systemFont(ofSize: 9, weight: .bold)
+        bitSubLbl.textColor = UIColor(red: 0.12, green: 0.60, blue: 0.32, alpha: 1.0)
+        bitSubLbl.isUserInteractionEnabled = false
+        bitContainer.addSubview(bitSubLbl)
+
+        let bitValLbl = UILabel()
+        bitValLbl.translatesAutoresizingMaskIntoConstraints = false
+        bitValLbl.text = "\(currentBitrate) ▾"
+        bitValLbl.font = UIFont.systemFont(ofSize: 15, weight: .heavy)
+        bitValLbl.textColor = UIColor(red: 0.08, green: 0.50, blue: 0.25, alpha: 1.0)
+        bitValLbl.isUserInteractionEnabled = false
+        bitContainer.addSubview(bitValLbl)
+        self.bitrateValueLabel = bitValLbl
+
+        NSLayoutConstraint.activate([
+            bitSubLbl.topAnchor.constraint(equalTo: bitContainer.topAnchor, constant: 8),
+            bitSubLbl.leadingAnchor.constraint(equalTo: bitContainer.leadingAnchor, constant: 12),
+
+            bitValLbl.topAnchor.constraint(equalTo: bitSubLbl.bottomAnchor, constant: 2),
+            bitValLbl.leadingAnchor.constraint(equalTo: bitContainer.leadingAnchor, constant: 12),
+            bitValLbl.trailingAnchor.constraint(equalTo: bitContainer.trailingAnchor, constant: -12),
+            bitValLbl.bottomAnchor.constraint(equalTo: bitContainer.bottomAnchor, constant: -8)
+        ])
+        stack.addArrangedSubview(bitContainer)
+
+        NSLayoutConstraint.activate([
+            headerIcon.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 14),
+            headerIcon.topAnchor.constraint(equalTo: card.topAnchor, constant: 12),
+            headerIcon.widthAnchor.constraint(equalToConstant: 14),
+            headerIcon.heightAnchor.constraint(equalToConstant: 14),
+
+            titleLbl.leadingAnchor.constraint(equalTo: headerIcon.trailingAnchor, constant: 6),
+            titleLbl.centerYAnchor.constraint(equalTo: headerIcon.centerYAnchor),
+
+            stack.topAnchor.constraint(equalTo: titleLbl.bottomAnchor, constant: 8),
+            stack.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 12),
+            stack.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -12),
+            stack.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -10)
+        ])
+
+        return card
+    }
+
+    private func updateQualityLabels() {
+        resValueLabel?.text = "\(currentResolution) ▾"
+        bitrateValueLabel?.text = "\(currentBitrate) ▾"
+    }
+
+    @objc public func handleQualityNavAction() {
+        let alert = UIAlertController(
+            title: "⚙️ Stream Quality Settings",
+            message: "Active: \(currentResolution) @ \(currentBitrate)\nWindows receiver will dynamically auto-detect any changes.",
+            preferredStyle: .actionSheet
+        )
+        alert.addAction(UIAlertAction(title: "Change Resolution (\(currentResolution))", style: .default, handler: { [weak self] _ in
+            self?.showResolutionPicker()
+        }))
+        alert.addAction(UIAlertAction(title: "Change Bitrate (\(currentBitrate))", style: .default, handler: { [weak self] _ in
+            self?.showBitratePicker()
+        }))
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel, handler: nil))
+
+        if let popover = alert.popoverPresentationController {
+            popover.barButtonItem = navigationItem.rightBarButtonItem
+        }
+        present(alert, animated: true, completion: nil)
+    }
+
+    @objc public func showResolutionPicker() {
+        let alert = UIAlertController(
+            title: "📐 Select Resolution",
+            message: "Windows receiver automatically adapts window size and aspect ratio:",
+            preferredStyle: .actionSheet
+        )
+
+        let presets = [
+            ("240p", "240p • Fastest (Ultra Low Bandwidth)"),
+            ("360p", "360p • Low Bandwidth Saver"),
+            ("480p", "480p • Standard Definition (SD)"),
+            ("544p", "544p • Enhanced SD (544p)"),
+            ("720p", "720p • High Definition (Recommended)"),
+            ("1080p", "1080p • Full HD (Crisp Gaming)"),
+            ("2K", "2K • 1440p Quad HD"),
+            ("4K", "4K • 2160p Ultra HD / Native Maximum")
+        ]
+
+        for (resKey, label) in presets {
+            let isCurrent = (resKey.lowercased() == currentResolution.lowercased())
+            let checkmark = isCurrent ? "  ✓" : ""
+            alert.addAction(UIAlertAction(title: "\(label)\(checkmark)", style: .default, handler: { [weak self] _ in
+                guard let self = self else { return }
+                self.saveAndBroadcastSettings(resolution: resKey, bitrateStr: self.currentBitrate)
+            }))
+        }
+
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel, handler: nil))
+
+        if let popover = alert.popoverPresentationController {
+            popover.sourceView = qualityCard ?? view
+            popover.sourceRect = qualityCard?.bounds ?? view.bounds
+        }
+        present(alert, animated: true, completion: nil)
+    }
+
+    @objc public func showBitratePicker() {
+        let alert = UIAlertController(
+            title: "⚡ Select Bitrate",
+            message: "Windows receiver automatically measures and displays real-time Mbps:",
+            preferredStyle: .actionSheet
+        )
+
+        let presets = [
+            ("1 Mbps", "1 Mbps • Minimum / Ultra Bandwidth Saver"),
+            ("2 Mbps", "2 Mbps • Low Bitrate"),
+            ("4 Mbps", "4 Mbps • Balanced (Recommended Default)"),
+            ("6 Mbps", "6 Mbps • High Quality"),
+            ("8 Mbps", "8 Mbps • Very High Quality (Fast Wi-Fi / USB)"),
+            ("12 Mbps", "12 Mbps • Gaming Quality"),
+            ("16 Mbps", "16 Mbps • Pro Gaming Quality"),
+            ("20 Mbps", "20 Mbps • Maximum Limit (Ultra Low Compression)")
+        ]
+
+        for (bitKey, label) in presets {
+            let isCurrent = (bitKey == currentBitrate)
+            let checkmark = isCurrent ? "  ✓" : ""
+            alert.addAction(UIAlertAction(title: "\(label)\(checkmark)", style: .default, handler: { [weak self] _ in
+                guard let self = self else { return }
+                self.saveAndBroadcastSettings(resolution: self.currentResolution, bitrateStr: bitKey)
+            }))
+        }
+
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel, handler: nil))
+
+        if let popover = alert.popoverPresentationController {
+            popover.sourceView = qualityCard ?? view
+            popover.sourceRect = qualityCard?.bounds ?? view.bounds
+        }
+        present(alert, animated: true, completion: nil)
+    }
+
+    private func saveAndBroadcastSettings(resolution: String, bitrateStr: String) {
+        currentResolution = resolution
+        currentBitrate = bitrateStr
+        updateQualityLabels()
+
+        let shortSide = VideoEncoder.resolutionToShortSide(resolution)
+        let bps = VideoEncoder.bitrateStringToBps(bitrateStr)
+
+        NSLog("[WXHomeViewController] User selected quality: %@ (%d shortSide) @ %@ (%d bps)", resolution, shortSide, bitrateStr, bps)
+
+        // 1. Persist to standard UserDefaults
+        UserDefaults.standard.set(resolution, forKey: "kEncoderResolution")
+        UserDefaults.standard.set(bitrateStr, forKey: "kEncoderBitrateString")
+        UserDefaults.standard.set(Int(shortSide), forKey: "kEncoderShortSide")
+        UserDefaults.standard.set(Int(bps), forKey: "kEncoderBitrate")
+
+        // 2. Persist to App Group UserDefaults
+        if let sharedDefaults = UserDefaults(suiteName: "group.apowersoft.mirror") {
+            sharedDefaults.set(resolution, forKey: "kEncoderResolution")
+            sharedDefaults.set(bitrateStr, forKey: "kEncoderBitrateString")
+            sharedDefaults.set(Int(shortSide), forKey: "kEncoderShortSide")
+            sharedDefaults.set(Int(bps), forKey: "kEncoderBitrate")
+            sharedDefaults.synchronize()
+        }
+
+        // 3. Persist to MMWormhole archive file
+        MMWormholeManager.shared.writeMessageObject([
+            "resolution": resolution,
+            "bitrateString": bitrateStr,
+            "shortSide": Int(shortSide),
+            "bitrate": Int(bps),
+            "fps": 60
+        ], identifier: "encoderSettings")
+
+        // 4. Update in-app ScreenRecorderManager if active
+        ScreenRecorderManager.shared.updateConfiguration(bitrate: bps, shortSide: shortSide, fps: 60)
+
+        // 5. Post Darwin notification to Broadcast Extension
+        CFNotificationCenterPostNotification(
+            CFNotificationCenterGetDarwinNotifyCenter(),
+            CFNotificationName("com.apowermirror.updateEncoderSettings" as CFString),
+            nil,
+            nil,
+            true
+        )
+
+        hintLabel?.text = "Stream Quality: \(resolution) • \(bitrateStr)"
     }
 
     // MARK: - Direct Screen Recording Actions
