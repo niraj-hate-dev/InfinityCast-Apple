@@ -135,11 +135,6 @@ public final class AudioEncoder {
                     if let aac = self.aacConverter { AudioConverterReset(aac) }
                     if let pcm = self.pcmConverter { AudioConverterReset(pcm) }
                     NSLog("[AudioEncoder] Audio discontinuity detected (gap: %.3fs) -> Ring buffer cleared & converters reset", gap)
-                } else if gap > 0.25 {
-                    // Stale silence discard on sound onset after pause:
-                    // Discard any residual silence in the buffer so the new sound (e.g. game gunshot, speech onset)
-                    // is positioned immediately at frame 0, without resetting encoder priming!
-                    self.pcmBuffer.removeAll()
                 }
             }
             if ptsSeconds > 0 {
