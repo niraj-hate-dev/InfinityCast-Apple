@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../core/theme.dart';
+import '../../services/platform_channel_service.dart';
 
 enum SidebarItem {
   mirrorMode,
@@ -48,11 +49,15 @@ class _SidebarNavigationState extends State<SidebarNavigation> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Top Brand Header
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
-            child: Row(
-              children: [
+          // Top Brand Header (Draggable)
+          GestureDetector(
+            behavior: HitTestBehavior.translucent,
+            onPanStart: (_) => PlatformChannelService().startDragging(),
+            onDoubleTap: () => PlatformChannelService().maximizeWindow(),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
+              child: Row(
+                children: [
                 InkWell(
                   onTap: widget.onToggleSidebar,
                   borderRadius: BorderRadius.circular(6),
@@ -100,6 +105,7 @@ class _SidebarNavigationState extends State<SidebarNavigation> {
               ],
             ),
           ),
+        ),
 
           // Primary Navigation Links
           _buildNavItem(

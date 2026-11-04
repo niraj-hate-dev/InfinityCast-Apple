@@ -24,8 +24,20 @@ class TopStatusBar extends StatelessWidget {
       height: 48,
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.end,
         children: [
+          // Native Draggable Window Caption Area
+          Expanded(
+            child: GestureDetector(
+              behavior: HitTestBehavior.translucent,
+              onPanStart: (_) => _channelService.startDragging(),
+              onDoubleTap: () => _channelService.maximizeWindow(),
+              child: const SizedBox(
+                height: 48,
+                width: double.infinity,
+              ),
+            ),
+          ),
+
           // Connection Status Indicator
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),

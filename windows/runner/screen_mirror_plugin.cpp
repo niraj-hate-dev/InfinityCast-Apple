@@ -855,6 +855,16 @@ void ScreenMirrorPlugin::HandleMethodCall(
       PostMessage(root ? root : hwnd, WM_CLOSE, 0, 0);
     }
     result->Success(flutter::EncodableValue(true));
+  } else if (method_name == "startDragging") {
+    HWND hwnd = GetActiveWindow();
+    if (!hwnd) hwnd = GetForegroundWindow();
+    if (hwnd) {
+      HWND root = GetAncestor(hwnd, GA_ROOT);
+      HWND target = root ? root : hwnd;
+      ReleaseCapture();
+      SendMessage(target, WM_NCLBUTTONDOWN, HTCAPTION, 0);
+    }
+    result->Success(flutter::EncodableValue(true));
   } else {
     result->NotImplemented();
   }

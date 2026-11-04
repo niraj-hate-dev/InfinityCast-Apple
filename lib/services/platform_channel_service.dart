@@ -150,6 +150,16 @@ class PlatformChannelService {
     }
   }
 
+  /// Initiates native Windows window dragging when dragging on custom titlebar.
+  Future<bool> startDragging() async {
+    try {
+      final bool? success = await _controlChannel.invokeMethod<bool>('startDragging');
+      return success ?? true;
+    } on PlatformException {
+      return false;
+    }
+  }
+
   /// iOS Companion Specific: Triggers RPSystemBroadcastPickerView presentation
   Future<bool> launchBroadcastPicker() async {
     try {
