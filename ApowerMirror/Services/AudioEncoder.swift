@@ -124,12 +124,13 @@ public final class AudioEncoder {
 
             guard let pcmConv = self.pcmConverter, self.aacConverter != nil else { return }
 
-            // 3. Discontinuity Detection (Pause / Resume gap > 250ms)
+            // 3. Discontinuity Detection (Pause / Resume gap > 2.0s)
+            // Natural speech/music pauses (300-800ms) must NEVER reset the encoder priming state!
             let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
             let ptsSeconds = pts.isValid ? pts.seconds : -1.0
             if ptsSeconds > 0 && self.lastBufferPts > 0 {
                 let gap = ptsSeconds - self.lastBufferPts
-                if gap > 0.25 || gap < -0.1 {
+                if gap > 2.0 || gap < -1.0 {
                     self.pcmBuffer.removeAll()
                     if let aac = self.aacConverter { AudioConverterReset(aac) }
                     if let pcm = self.pcmConverter { AudioConverterReset(pcm) }
@@ -215,10 +216,12 @@ public final class AudioEncoder {
     public func purgeStaleBuffer() {
         audioQueue.async { [weak self] in
             guard let self = self else { return }
-            // If stale silence or accumulated buffer exceeds 1 frame (4096 bytes), trim to newest frame
-            if self.pcmBuffer.count > 4096 {
-                let toRemove = self.pcmBuffer.count - 4096
-                self.pcmBuffer.removeSubrange(0..<toRemove)
+            if self.pcmBuffer.count > 8192 {
+                let excess = self.pcmBuffer.count - 4096
+                let alignedToRemove = (excess / 4) * 4
+                if alignedToRemove > 0 {
+                    self.pcmBuffer.removeSubrange(0..<alignedToRemove)
+                }
             }
         }
     }
@@ -226,14 +229,14 @@ public final class AudioEncoder {
     private func drainPcmBuffer() {
         guard let converter = self.aacConverter else { return }
 
-        // Ultra-low latency ring buffer guard:
-        // 1024 frames = 4096 bytes = 23.2ms of 16-bit stereo PCM.
-        // If pcmBuffer accumulates more than 12288 bytes (3 frames = ~69.6ms),
-        // drop older samples to keep strictly within 2 frames (46.4ms) so audio
-        // never drifts or lags behind live screen action!
-        if self.pcmBuffer.count > 12288 {
-            let toRemove = self.pcmBuffer.count - 8192
-            self.pcmBuffer.removeSubrange(0..<toRemove)
+        // Ring buffer overflow protection: Keep max ~185ms (32,768 bytes), strictly 4-byte frame aligned
+        // Prevents multi-second bufferbloat while allowing smooth uninterrupted playback of speech and music
+        if self.pcmBuffer.count > 32768 {
+            let excess = self.pcmBuffer.count - 16384
+            let alignedToRemove = (excess / 4) * 4
+            if alignedToRemove > 0 {
+                self.pcmBuffer.removeSubrange(0..<alignedToRemove)
+            }
         }
 
         // Each AAC packet requires 1024 frames = 4096 bytes
