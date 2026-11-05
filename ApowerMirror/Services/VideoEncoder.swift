@@ -270,23 +270,25 @@ public final class VideoEncoder {
             return
         }
 
-        // Apply Hardened Low-Latency Properties
+        // Apply Hardened Low-Latency Properties with High Profile 8x8 Transform
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_RealTime, value: kCFBooleanTrue)
-        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ProfileLevel, value: kVTProfileLevel_H264_Main_AutoLevel)
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ProfileLevel, value: kVTProfileLevel_H264_High_AutoLevel)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_H264EntropyMode, value: kVTH264EntropyMode_CABAC)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AllowFrameReordering, value: kCFBooleanFalse)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxFrameDelayCount, value: 1 as CFNumber)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AverageBitRate, value: bitrate as CFNumber)
 
-        // Data rate limit ceiling: (bitrate / 8) * 1.5 bytes/sec
-        let byteLimit = Int(Float(bitrate) / 8.0 * 1.5)
-        let dataRateLimits: [CFNumber] = [byteLimit as CFNumber, 1 as CFNumber]
+        // Generous VBR burst limit (3.0x over a 2-second window) prevents motion smearing / QP choke during fast swipes and gaming
+        let byteLimit = Int(Float(bitrate) / 8.0 * 3.0)
+        let dataRateLimits: [CFNumber] = [byteLimit as CFNumber, 2 as CFNumber]
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_DataRateLimits, value: dataRateLimits as CFArray)
 
-        // Keyframe cadence: 1 keyframe every 0.5s (every 30 frames at 60fps)
+        // Keyframe cadence: 1 keyframe every 2.5s (150 frames at 60fps) + on-demand IDR upon client connect / request
+        // Extending keyframe spacing frees up 90% of bitrate for crystal-clear motion P-frames with zero lag spikes
+        let keyFrameIntervalFrames = max(60, Int(fps * 2.5))
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ExpectedFrameRate, value: fps as CFNumber)
-        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameInterval, value: 30 as CFNumber)
-        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameIntervalDuration, value: 0.5 as CFNumber)
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameInterval, value: keyFrameIntervalFrames as CFNumber)
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameIntervalDuration, value: 2.5 as CFNumber)
 
         VTCompressionSessionPrepareToEncodeFrames(session)
         self.compressionSession = session

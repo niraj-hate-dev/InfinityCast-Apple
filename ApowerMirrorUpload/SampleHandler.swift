@@ -291,7 +291,7 @@ public class SampleHandler: RPBroadcastSampleHandler {
                 setsockopt(clientFd, SOL_SOCKET, SO_NOSIGPIPE, &noSigpipe, socklen_t(MemoryLayout<Int32>.size))
                 var noDelay: Int32 = 1
                 setsockopt(clientFd, IPPROTO_TCP, TCP_NODELAY, &noDelay, socklen_t(MemoryLayout<Int32>.size))
-                var sndBuf: Int32 = 2 * 1024 * 1024
+                var sndBuf: Int32 = 4 * 1024 * 1024 // 4 MB socket send buffer for zero-drop motion bursts
                 setsockopt(clientFd, SOL_SOCKET, SO_SNDBUF, &sndBuf, socklen_t(MemoryLayout<Int32>.size))
                 var timeout = timeval(tv_sec: 1, tv_usec: 0)
                 setsockopt(clientFd, SOL_SOCKET, SO_SNDTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
@@ -498,13 +498,13 @@ public class SampleHandler: RPBroadcastSampleHandler {
                         retries = 0
                     } else if sent < 0 && (errno == EAGAIN || errno == EWOULDBLOCK) {
                         retries += 1
-                        if retries > 50 {
-                            // Send buffer full for >50ms: drop remaining bytes of this frame to avoid lag,
-                            // request immediate IDR keyframe on next cycle, but KEEP the client alive!
+                        if retries > 30 {
+                            // Buffer saturated for >30ms: force immediate clean IDR keyframe on next frame to prevent tearing
                             self.videoEncoder?.forceKeyFrame()
                             break
                         }
-                        usleep(1000)
+                        var pfd = pollfd(fd: fd, events: Int16(POLLOUT), revents: 0)
+                        poll(&pfd, 1, 1) // Wait at most 1ms for socket buffer to drain immediately
                     } else {
                         // Fatal socket failure (e.g. EPIPE, ECONNRESET): peer truly disconnected
                         dead.append(fd)
