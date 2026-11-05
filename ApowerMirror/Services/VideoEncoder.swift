@@ -102,7 +102,7 @@ public final class VideoEncoder {
                 self.bitrate = bitrate
                 self.targetShortSide = targetShortSide
                 self.fps = fps
-                self.compressionSession = nil
+                self.invalidate()
                 self.forceNextKeyframe = true
             }
         }

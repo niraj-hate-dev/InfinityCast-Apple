@@ -69,6 +69,7 @@ public class SampleHandler: RPBroadcastSampleHandler {
     private var targetFps: Int32 = 60
     private var targetBitrate: Int32 = 4_000_000
     private var targetShortSide: Int32 = 720
+    private var settingsNotifyToken: Int32 = -1
 
     public override init() {
         super.init()
@@ -134,16 +135,18 @@ public class SampleHandler: RPBroadcastSampleHandler {
 
         NSLog("[SampleHandler] ReplayKit broadcast started -> Launching direct servers & IPC")
 
-        // Load persisted encoder preferences from App Group / Wormhole
-        let settings = readEncoderSettings()
-        targetBitrate = settings.bitrate
-        targetShortSide = settings.shortSide
-        targetFps = settings.fps
-
-        notifyMainApp(event: "BroadcastStarted")
+        // Setup Darwin receivers first so kernel notify state is read immediately
         setupDarwinStopReceiver()
         setupDarwinKeyframeReceiver()
         setupDarwinSettingsReceiver()
+
+        // Fallback to persisted encoder preferences from App Group / Wormhole if notify state empty
+        let settings = readEncoderSettings()
+        if targetShortSide <= 0 { targetShortSide = settings.shortSide }
+        if targetBitrate <= 0 { targetBitrate = settings.bitrate }
+        if targetFps <= 0 { targetFps = settings.fps }
+
+        notifyMainApp(event: "BroadcastStarted")
 
         // 1. Start Direct Extension Servers (25334 Video, 25335 Audio) - immune to Main App background suspension!
         startDirectVideoServer(port: Self.kDirectVideoPort)
@@ -737,6 +740,41 @@ public class SampleHandler: RPBroadcastSampleHandler {
     }
 
     private func setupDarwinSettingsReceiver() {
+        // 1. Kernel-level notify_register_dispatch (Carries 64-bit state across sandboxes)
+        var token: Int32 = 0
+        let regStatus = notify_register_dispatch(
+            "com.apowermirror.encoderSettings",
+            &token,
+            DispatchQueue.main
+        ) { [weak self] activeToken in
+            guard let self = self else { return }
+            var state: UInt64 = 0
+            if notify_get_state(activeToken, &state) == NOTIFY_STATUS_OK && state != 0 {
+                let shortSide = Int32(bitPattern: UInt32((state >> 32) & 0xFFFFFFFF))
+                let bitrate = Int32(bitPattern: UInt32(state & 0xFFFFFFFF))
+                if shortSide > 0 && bitrate > 0 {
+                    NSLog("[SampleHandler] Received Darwin encoderSettings -> %dp @ %d bps", shortSide, bitrate)
+                    self.targetShortSide = shortSide
+                    self.targetBitrate = bitrate
+                    self.videoEncoder?.updateConfiguration(bitrate: bitrate, targetShortSide: shortSide, fps: self.targetFps)
+                }
+            }
+        }
+        if regStatus == NOTIFY_STATUS_OK {
+            self.settingsNotifyToken = token
+            var state: UInt64 = 0
+            if notify_get_state(token, &state) == NOTIFY_STATUS_OK && state != 0 {
+                let shortSide = Int32(bitPattern: UInt32((state >> 32) & 0xFFFFFFFF))
+                let bitrate = Int32(bitPattern: UInt32(state & 0xFFFFFFFF))
+                if shortSide > 0 && bitrate > 0 {
+                    NSLog("[SampleHandler] Initialized from Darwin notify state -> %dp @ %d bps", shortSide, bitrate)
+                    self.targetShortSide = shortSide
+                    self.targetBitrate = bitrate
+                }
+            }
+        }
+
+        // 2. Fallback Darwin Notification Observer
         let center = CFNotificationCenterGetDarwinNotifyCenter()
         let observer = UnsafeRawPointer(Unmanaged.passUnretained(self).toOpaque())
         CFNotificationCenterAddObserver(
@@ -745,6 +783,17 @@ public class SampleHandler: RPBroadcastSampleHandler {
             { _, observer, _, _, _ in
                 guard let observer = observer else { return }
                 let handler = Unmanaged<SampleHandler>.fromOpaque(observer).takeUnretainedValue()
+                var state: UInt64 = 0
+                if handler.settingsNotifyToken >= 0 && notify_get_state(handler.settingsNotifyToken, &state) == NOTIFY_STATUS_OK && state != 0 {
+                    let shortSide = Int32(bitPattern: UInt32((state >> 32) & 0xFFFFFFFF))
+                    let bitrate = Int32(bitPattern: UInt32(state & 0xFFFFFFFF))
+                    if shortSide > 0 && bitrate > 0 {
+                        handler.targetShortSide = shortSide
+                        handler.targetBitrate = bitrate
+                        handler.videoEncoder?.updateConfiguration(bitrate: bitrate, targetShortSide: shortSide, fps: handler.targetFps)
+                        return
+                    }
+                }
                 let settings = handler.readEncoderSettings()
                 handler.targetBitrate = settings.bitrate
                 handler.targetShortSide = settings.shortSide
@@ -759,6 +808,10 @@ public class SampleHandler: RPBroadcastSampleHandler {
     }
 
     private func removeDarwinSettingsReceiver() {
+        if settingsNotifyToken >= 0 {
+            notify_cancel(settingsNotifyToken)
+            settingsNotifyToken = -1
+        }
         let center = CFNotificationCenterGetDarwinNotifyCenter()
         let observer = UnsafeRawPointer(Unmanaged.passUnretained(self).toOpaque())
         CFNotificationCenterRemoveObserver(center, observer, CFNotificationName(SampleHandler.kUpdateSettingsNotification as CFString), nil)

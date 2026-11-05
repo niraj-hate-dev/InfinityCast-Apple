@@ -40,6 +40,8 @@ open class WXHomeViewController: UIViewController, ScreenRecorderManagerDelegate
     private var qualityCard: UIView?
     private var resValueLabel: UILabel?
     private var bitrateValueLabel: UILabel?
+    private var applyButton: UIButton?
+    private var saveStatusLabel: UILabel?
     private var currentResolution: String = "720p"
     private var currentBitrate: String = "4 Mbps"
 
@@ -465,6 +467,29 @@ open class WXHomeViewController: UIViewController, ScreenRecorderManagerDelegate
         ])
         stack.addArrangedSubview(bitContainer)
 
+        // 3. Save & Apply Button
+        let applyBtn = UIButton(type: .system)
+        applyBtn.translatesAutoresizingMaskIntoConstraints = false
+        applyBtn.backgroundColor = UIColor(red: 0.12, green: 0.48, blue: 0.95, alpha: 1.0)
+        applyBtn.setTitleColor(.white, for: .normal)
+        applyBtn.titleLabel?.font = UIFont.systemFont(ofSize: 14, weight: .bold)
+        applyBtn.setTitle("⚡ Save & Apply to Windows", for: .normal)
+        applyBtn.layer.cornerRadius = 10
+        applyBtn.layer.masksToBounds = true
+        applyBtn.addTarget(self, action: #selector(handleApplySaveButtonTapped), for: .touchUpInside)
+        card.addSubview(applyBtn)
+        self.applyButton = applyBtn
+
+        // 4. Status Hint Label
+        let statusLbl = UILabel()
+        statusLbl.translatesAutoresizingMaskIntoConstraints = false
+        statusLbl.text = "Tap to save & instantly reconfigure Windows stream"
+        statusLbl.font = UIFont.systemFont(ofSize: 10, weight: .medium)
+        statusLbl.textColor = UIColor(white: 0.50, alpha: 1.0)
+        statusLbl.textAlignment = .center
+        card.addSubview(statusLbl)
+        self.saveStatusLabel = statusLbl
+
         NSLayoutConstraint.activate([
             headerIcon.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 14),
             headerIcon.topAnchor.constraint(equalTo: card.topAnchor, constant: 12),
@@ -477,7 +502,16 @@ open class WXHomeViewController: UIViewController, ScreenRecorderManagerDelegate
             stack.topAnchor.constraint(equalTo: titleLbl.bottomAnchor, constant: 8),
             stack.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 12),
             stack.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -12),
-            stack.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -10)
+
+            applyBtn.topAnchor.constraint(equalTo: stack.bottomAnchor, constant: 10),
+            applyBtn.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 12),
+            applyBtn.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -12),
+            applyBtn.heightAnchor.constraint(equalToConstant: 42),
+
+            statusLbl.topAnchor.constraint(equalTo: applyBtn.bottomAnchor, constant: 6),
+            statusLbl.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 12),
+            statusLbl.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -12),
+            statusLbl.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -10)
         ])
 
         return card
@@ -486,6 +520,29 @@ open class WXHomeViewController: UIViewController, ScreenRecorderManagerDelegate
     private func updateQualityLabels() {
         resValueLabel?.text = "\(currentResolution) ▾"
         bitrateValueLabel?.text = "\(currentBitrate) ▾"
+        applyButton?.setTitle("⚡ Save & Apply (\(currentResolution) • \(currentBitrate))", for: .normal)
+    }
+
+    @objc public func handleApplySaveButtonTapped() {
+        let generator = UIImpactFeedbackGenerator(style: .medium)
+        generator.prepare()
+        generator.impactOccurred()
+
+        saveAndBroadcastSettings(resolution: currentResolution, bitrateStr: currentBitrate)
+
+        // Visual confirmation
+        applyButton?.backgroundColor = UIColor(red: 0.10, green: 0.65, blue: 0.35, alpha: 1.0)
+        applyButton?.setTitle("✓ Saved & Applied to Windows!", for: .normal)
+        saveStatusLabel?.text = "✓ Reconfigured to \(currentResolution) @ \(currentBitrate) - Windows Live!"
+        saveStatusLabel?.textColor = UIColor(red: 0.08, green: 0.60, blue: 0.28, alpha: 1.0)
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+            guard let self = self else { return }
+            self.applyButton?.backgroundColor = UIColor(red: 0.12, green: 0.48, blue: 0.95, alpha: 1.0)
+            self.updateQualityLabels()
+            self.saveStatusLabel?.text = "Tap to save & instantly reconfigure Windows stream"
+            self.saveStatusLabel?.textColor = UIColor(white: 0.50, alpha: 1.0)
+        }
     }
 
     @objc public func handleQualityNavAction() {
@@ -596,7 +653,7 @@ open class WXHomeViewController: UIViewController, ScreenRecorderManagerDelegate
         UserDefaults.standard.set(Int(shortSide), forKey: "kEncoderShortSide")
         UserDefaults.standard.set(Int(bps), forKey: "kEncoderBitrate")
 
-        // 2. Persist to App Group UserDefaults
+        // 2. Persist to App Group UserDefaults (best-effort)
         if let sharedDefaults = UserDefaults(suiteName: "group.apowersoft.mirror") {
             sharedDefaults.set(resolution, forKey: "kEncoderResolution")
             sharedDefaults.set(bitrateStr, forKey: "kEncoderBitrateString")
@@ -617,7 +674,17 @@ open class WXHomeViewController: UIViewController, ScreenRecorderManagerDelegate
         // 4. Update in-app ScreenRecorderManager if active
         ScreenRecorderManager.shared.updateConfiguration(bitrate: bps, shortSide: shortSide, fps: 60)
 
-        // 5. Post Darwin notification to Broadcast Extension
+        // 5. Darwin notify_set_state & notify_post (Kernel-level IPC: 100% reliable across sandboxes)
+        var token: Int32 = 0
+        let regStatus = notify_register_check("com.apowermirror.encoderSettings", &token)
+        if regStatus == NOTIFY_STATUS_OK {
+            let combinedState = (UInt64(UInt32(bitPattern: shortSide)) << 32) | UInt64(UInt32(bitPattern: bps))
+            notify_set_state(token, combinedState)
+            notify_post("com.apowermirror.encoderSettings")
+            NSLog("[WXHomeViewController] Dispatched Darwin notification with state 0x%llx (shortSide: %d, bps: %d)", combinedState, shortSide, bps)
+        }
+
+        // 6. Post Darwin notifications to Broadcast Extension
         CFNotificationCenterPostNotification(
             CFNotificationCenterGetDarwinNotifyCenter(),
             CFNotificationName("com.apowermirror.updateEncoderSettings" as CFString),
@@ -625,13 +692,24 @@ open class WXHomeViewController: UIViewController, ScreenRecorderManagerDelegate
             nil,
             true
         )
+        CFNotificationCenterPostNotification(
+            CFNotificationCenterGetDarwinNotifyCenter(),
+            CFNotificationName("com.apowermirror.forceKeyframe" as CFString),
+            nil,
+            nil,
+            true
+        )
 
-        // 6. Direct TCP dispatch to Broadcast Extension port 25334 (reliable cross-process synchronization)
+        // 7. Direct TCP dispatch with SO_LINGER to Broadcast Extension port 25334
         DispatchQueue.global(qos: .utility).async {
             let sock = socket(AF_INET, SOCK_STREAM, 0)
             guard sock >= 0 else { return }
-            var timeout = timeval(tv_sec: 0, tv_usec: 200_000)
+            var timeout = timeval(tv_sec: 1, tv_usec: 0)
             setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
+            setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
+            var lingerOpt = linger(l_onoff: 1, l_linger: 2)
+            setsockopt(sock, SOL_SOCKET, SO_LINGER, &lingerOpt, socklen_t(MemoryLayout<linger>.size))
+
             var addr = sockaddr_in()
             addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
             addr.sin_family = sa_family_t(AF_INET)
@@ -647,6 +725,9 @@ open class WXHomeViewController: UIViewController, ScreenRecorderManagerDelegate
                 msg.withCString { ptr in
                     send(sock, ptr, strlen(ptr), 0)
                 }
+                shutdown(sock, SHUT_WR)
+                var dummy = [UInt8](repeating: 0, count: 32)
+                _ = recv(sock, &dummy, dummy.count, 0)
             }
             close(sock)
         }
@@ -732,6 +813,7 @@ open class WXHomeViewController: UIViewController, ScreenRecorderManagerDelegate
                     vc.lastErrorMessage = nil
                     SilentAudioKeepAlive.shared.start()
                     vc.updateStatusCards()
+                    vc.saveAndBroadcastSettings(resolution: vc.currentResolution, bitrateStr: vc.currentBitrate)
                 }
             },
             "com.apowermirror.broadcast.BroadcastStarted" as CFString,
