@@ -184,7 +184,7 @@ public final class VideoEncoder {
                         var scaledBuffer: CVPixelBuffer?
                         let poolStatus = CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault, pool, &scaledBuffer)
                         if poolStatus == kCVReturnSuccess, let dest = scaledBuffer {
-                            let transferStatus = VTPixelTransferSessionTransferImage(transfer, from: pixelBuffer, to: dest)
+                            let transferStatus = VTPixelTransferSessionTransferImage(transfer, pixelBuffer, dest)
                             if transferStatus == noErr {
                                 frameToEncode = dest
                             }
@@ -250,7 +250,7 @@ public final class VideoEncoder {
         // Hardware pixel transfer session & pool for hardware-accelerated resolution scaling
         if pixelTransferSession == nil {
             var transfer: VTPixelTransferSession?
-            if VTPixelTransferSessionCreate(allocator: kCFAllocatorDefault, pixelTransferSessionOut: &transfer) == noErr {
+            if VTPixelTransferSessionCreate(kCFAllocatorDefault, &transfer) == noErr {
                 pixelTransferSession = transfer
                 if let transfer = transfer {
                     // Default hardware scaling mode is applied
