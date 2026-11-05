@@ -683,7 +683,8 @@ open class WXHomeViewController: UIViewController, ScreenRecorderManagerDelegate
 
         // 6. Update UI status indicators
         hintLabel?.text = "Broadcasting: \(resolution) @ \(bitrateStr) • Tap STOP to end"
-        if isRecording {
+        let isCapturing = ScreenRecorderManager.shared.isCapturing || UIScreen.main.isCaptured
+        if isCapturing {
             let mins = recordingSeconds / 60
             let secs = recordingSeconds % 60
             let timeStr = String(format: "%02d:%02d", mins, secs)

@@ -311,7 +311,7 @@ public class SampleHandler: RPBroadcastSampleHandler {
 
     // MARK: - Incoming Control Socket Listener (Port 25334)
 
-    private func broadcastStreamMetrics() {
+    func broadcastStreamMetrics() {
         let presetTag: String
         switch targetShortSide {
         case 240: presetTag = "240p"
