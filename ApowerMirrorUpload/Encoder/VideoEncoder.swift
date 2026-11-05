@@ -32,7 +32,6 @@ public final class VideoEncoder {
     // MARK: - State
         private var compressionSession: VTCompressionSession?
     private var pixelTransferSession: VTPixelTransferSession?
-    private var scaledBufferPool: CVPixelBufferPool?
     private let packetHandler: EncodedPacketHandler
     private var dimensionHandler: DimensionChangeHandler?
     private let encoderQueue = DispatchQueue(label: "com.apowermirror.encoder.queue", qos: .userInteractive)
@@ -181,7 +180,7 @@ public final class VideoEncoder {
                 let pWidth = Int32(CVPixelBufferGetWidth(pixelBuffer))
                 let pHeight = Int32(CVPixelBufferGetHeight(pixelBuffer))
                 if pWidth != self.currentWidth || pHeight != self.currentHeight {
-                    if let pool = self.scaledBufferPool, let transfer = self.pixelTransferSession {
+                    if let pool = VTCompressionSessionGetPixelBufferPool(session), let transfer = self.pixelTransferSession {
                         var scaledBuffer: CVPixelBuffer?
                         let poolStatus = CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault, pool, &scaledBuffer)
                         if poolStatus == kCVReturnSuccess, let dest = scaledBuffer {
@@ -258,18 +257,6 @@ public final class VideoEncoder {
                 }
             }
         }
-
-        scaledBufferPool = nil
-        let poolAttrs: [CFString: Any] = [
-            kCVPixelBufferPoolMinimumBufferCountKey: 3
-        ]
-        let bufferAttrs: [CFString: Any] = [
-            kCVPixelBufferPixelFormatTypeKey: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
-            kCVPixelBufferWidthKey: Int(currentWidth),
-            kCVPixelBufferHeightKey: Int(currentHeight),
-            kCVPixelBufferIOSurfacePropertiesKey: [:] as [String: Any]
-        ]
-        CVPixelBufferPoolCreate(kCFAllocatorDefault, poolAttrs as CFDictionary, bufferAttrs as CFDictionary, &scaledBufferPool)
 
         // Create VideoToolbox Compression Session
         var newSession: VTCompressionSession?
@@ -443,7 +430,6 @@ public final class VideoEncoder {
             VTCompressionSessionInvalidate(session)
             compressionSession = nil
         }
-        scaledBufferPool = nil
         if let transfer = pixelTransferSession {
             VTPixelTransferSessionInvalidate(transfer)
             pixelTransferSession = nil

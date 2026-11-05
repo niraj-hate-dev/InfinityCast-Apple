@@ -11,6 +11,7 @@
 
 import UIKit
 import ReplayKit
+import Darwin
 
 @objc(WXHomeViewController)
 open class WXHomeViewController: UIViewController, ScreenRecorderManagerDelegate, WXCastiOSSenderDelegate, BroadcastPickerManagerDelegate {
