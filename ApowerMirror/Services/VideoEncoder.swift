@@ -224,6 +224,14 @@ public final class VideoEncoder {
             }
         }
 
+        // Clamp maximum dimension to 3840 (H.264 level limit safety for 4K / 2K)
+        if max(targetW, targetH) > 3840 {
+            let maxDim = max(targetW, targetH)
+            let clampScale = Float(3840) / Float(maxDim)
+            targetW = Int32(Float(targetW) * clampScale)
+            targetH = Int32(Float(targetH) * clampScale)
+        }
+
         // Macroblock 16-pixel alignment: (w + 15) & ~15 (decompiled ASM @ 0x13d14 - 0x13d30)
         currentWidth = (targetW + 15) & ~15
         currentHeight = (targetH + 15) & ~15

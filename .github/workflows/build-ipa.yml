@@ -92,13 +92,27 @@ jobs:
           path: build/ApowerMirror-v1.6.0-Native-Unsigned.ipa
           retention-days: 14
 
-      - name: Publish IPA to GitHub Release
+      - name: Publish IPA to GitHub Release (Versioned)
+        uses: softprops/action-gh-release@v2
+        if: github.ref == 'refs/heads/niraj' || github.ref == 'refs/heads/main'
+        continue-on-error: true
+        with:
+          tag_name: "v1.6.1-build.${{ github.run_number }}"
+          name: "InfinityCast v1.6.1 (Build ${{ github.run_number }})"
+          make_latest: true
+          files: |
+            build/InfinityCast-v1.6.0-Native-Unsigned.ipa
+            build/ApowerMirror-v1.6.0-Native-Unsigned.ipa
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update Latest Release Tag
         uses: softprops/action-gh-release@v2
         if: github.ref == 'refs/heads/niraj' || github.ref == 'refs/heads/main'
         continue-on-error: true
         with:
           tag_name: latest
-          name: "InfinityCast Latest Release"
+          name: "InfinityCast Latest Release (Build ${{ github.run_number }})"
           files: |
             build/InfinityCast-v1.6.0-Native-Unsigned.ipa
             build/ApowerMirror-v1.6.0-Native-Unsigned.ipa

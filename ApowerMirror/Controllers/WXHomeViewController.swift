@@ -678,43 +678,17 @@ open class WXHomeViewController: UIViewController, ScreenRecorderManagerDelegate
         let center = CFNotificationCenterGetDarwinNotifyCenter()
         CFNotificationCenterPostNotification(center, CFNotificationName("com.apowermirror.setRes.\(shortSide)" as CFString), nil, nil, true)
         CFNotificationCenterPostNotification(center, CFNotificationName("com.apowermirror.setBitrate.\(bps)" as CFString), nil, nil, true)
-        CFNotificationCenterPostNotification(center, CFNotificationName("com.apowermirror.updateEncoderSettings" as CFString), nil, nil, true)
         CFNotificationCenterPostNotification(center, CFNotificationName("com.apowermirror.forceKeyframe" as CFString), nil, nil, true)
         NSLog("[WXHomeViewController] Dispatched Darwin presets: %dp @ %d bps", shortSide, bps)
 
-        // 7. Direct TCP dispatch with SO_LINGER to Broadcast Extension port 25334
-        DispatchQueue.global(qos: .utility).async {
-            let sock = socket(AF_INET, SOCK_STREAM, 0)
-            guard sock >= 0 else { return }
-            var timeout = timeval(tv_sec: 1, tv_usec: 0)
-            setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
-            setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
-            var lingerOpt = linger(l_onoff: 1, l_linger: 2)
-            setsockopt(sock, SOL_SOCKET, SO_LINGER, &lingerOpt, socklen_t(MemoryLayout<linger>.size))
-
-            var addr = sockaddr_in()
-            addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
-            addr.sin_family = sa_family_t(AF_INET)
-            addr.sin_port = UInt16(25334).bigEndian
-            inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr)
-            let conn = withUnsafePointer(to: &addr) {
-                $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-                    connect(sock, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
-                }
-            }
-            if conn >= 0 {
-                let msg = "{\"cmd\":\"SET_CONFIG\",\"bitrate\":\(bps),\"shortSide\":\(shortSide),\"fps\":60}\n"
-                msg.withCString { ptr in
-                    send(sock, ptr, strlen(ptr), 0)
-                }
-                shutdown(sock, SHUT_WR)
-                var dummy = [UInt8](repeating: 0, count: 32)
-                _ = recv(sock, &dummy, dummy.count, 0)
-            }
-            close(sock)
+        // 6. Update UI status indicators
+        hintLabel?.text = "Broadcasting: \(resolution) @ \(bitrateStr) • Tap STOP to end"
+        if isRecording {
+            let mins = recordingSeconds / 60
+            let secs = recordingSeconds % 60
+            let timeStr = String(format: "%02d:%02d", mins, secs)
+            replayKitDetailLabel?.text = "Live 60 FPS Stream Active • \(currentResolution) • \(currentBitrate) • Duration: \(timeStr)"
         }
-
-        hintLabel?.text = "Stream Quality: \(resolution) • \(bitrateStr)"
     }
 
     // MARK: - Direct Screen Recording Actions
@@ -843,8 +817,8 @@ open class WXHomeViewController: UIViewController, ScreenRecorderManagerDelegate
 
             replayKitDotView?.backgroundColor = UIColor(red: 0.10, green: 0.75, blue: 0.35, alpha: 1.0)
             replayKitTitleLabel?.text = "ReplayKit: Screen Recording ACTIVE"
-            replayKitDetailLabel?.text = "Screen recording successfully! Full phone mirroring active."
-            hintLabel?.text = "Broadcasting live • Tap STOP to end"
+            replayKitDetailLabel?.text = "Live 60 FPS Stream Active • \(currentResolution) • \(currentBitrate)"
+            hintLabel?.text = "Broadcasting live: \(currentResolution) @ \(currentBitrate) • Tap STOP to end"
 
             startDurationTimer()
         } else if let err = lastErrorMessage {
@@ -890,7 +864,7 @@ open class WXHomeViewController: UIViewController, ScreenRecorderManagerDelegate
             let mins = self.recordingSeconds / 60
             let secs = self.recordingSeconds % 60
             let timeStr = String(format: "%02d:%02d", mins, secs)
-            self.replayKitDetailLabel?.text = "Live 60 FPS Stream Active • Duration: \(timeStr)"
+            self.replayKitDetailLabel?.text = "Live 60 FPS Stream Active • \(self.currentResolution) • \(self.currentBitrate) • Duration: \(timeStr)"
         }
     }
 

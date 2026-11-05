@@ -67,7 +67,7 @@ public class SampleHandler: RPBroadcastSampleHandler {
 
     private let networkQueue = DispatchQueue(label: "com.apowermirror.upload.network", qos: .userInteractive)
     private var targetFps: Int32 = 60
-    private var targetBitrate: Int32 = 4_000_000
+    private var targetBitrate: Int32 = 8_000_000
     private var targetShortSide: Int32 = 720
 
     public override init() {
@@ -201,10 +201,12 @@ public class SampleHandler: RPBroadcastSampleHandler {
                 }
 
                 if videoEncoder == nil {
-                    let settings = readEncoderSettings()
-                    targetBitrate = settings.bitrate
-                    targetShortSide = settings.shortSide
-                    targetFps = settings.fps
+                    if targetShortSide <= 0 || targetBitrate <= 0 {
+                        let settings = readEncoderSettings()
+                        if targetShortSide <= 0 { targetShortSide = settings.shortSide }
+                        if targetBitrate <= 0 { targetBitrate = settings.bitrate }
+                        if targetFps <= 0 { targetFps = settings.fps }
+                    }
                     videoEncoder = VideoEncoder(bitrate: targetBitrate, fps: targetFps, targetShortSide: targetShortSide) { [weak self] (packet, isKeyFrame, _) in
                         self?.enqueueVideoFrame(packet, isKeyFrame: isKeyFrame)
                     }
@@ -301,12 +303,33 @@ public class SampleHandler: RPBroadcastSampleHandler {
                 self.pendingKeyframeRequest = true
                 self.videoEncoder?.forceKeyFrame()
                 NSLog("[SampleHandler] Desktop connected directly to Extension Video port %d", port)
+                self.broadcastStreamMetrics()
                 self.listenForClientCommands(clientFd: clientFd)
             }
         }
     }
 
     // MARK: - Incoming Control Socket Listener (Port 25334)
+
+    private func broadcastStreamMetrics() {
+        let presetTag: String
+        switch targetShortSide {
+        case 240: presetTag = "240p"
+        case 360: presetTag = "360p"
+        case 480: presetTag = "480p"
+        case 544: presetTag = "544p"
+        case 720: presetTag = "720p"
+        case 1080: presetTag = "1080p"
+        case 1440: presetTag = "2K"
+        case 2160: presetTag = "4K"
+        default: presetTag = "\(targetShortSide)p"
+        }
+
+        let mbps = Double(targetBitrate) / 1_000_000.0
+        let jsonStr = "{\"event\":\"STREAM_METRICS\",\"preset\":\"\(presetTag)\",\"bitrateMbps\":\(mbps),\"shortSide\":\(targetShortSide),\"bitrateBps\":\(targetBitrate),\"fps\":\(targetFps)}\n"
+        guard let data = jsonStr.data(using: .utf8) else { return }
+        sendToDirectVideoClients(data)
+    }
 
     private func listenForClientCommands(clientFd: Int32) {
         DispatchQueue.global(qos: .utility).async { [weak self] in
@@ -345,7 +368,9 @@ public class SampleHandler: RPBroadcastSampleHandler {
                 targetShortSide = newShortSide
                 targetFps = newFps
                 videoEncoder?.updateConfiguration(bitrate: newBitrate, targetShortSide: newShortSide, fps: newFps)
+                broadcastStreamMetrics()
             } else if cmd == "FORCE_KEYFRAME" || cmd == "PING" {
+                broadcastStreamMetrics()
                 videoEncoder?.forceKeyFrame()
             }
         }
@@ -750,6 +775,7 @@ public class SampleHandler: RPBroadcastSampleHandler {
                 NSLog("[SampleHandler] Received Darwin SET_RES -> %dp", res)
                 handler.targetShortSide = res
                 handler.videoEncoder?.updateConfiguration(bitrate: handler.targetBitrate, targetShortSide: res, fps: handler.targetFps)
+                handler.broadcastStreamMetrics()
             }
         }
 
@@ -761,6 +787,7 @@ public class SampleHandler: RPBroadcastSampleHandler {
                 NSLog("[SampleHandler] Received Darwin SET_BITRATE -> %d bps", bit)
                 handler.targetBitrate = bit
                 handler.videoEncoder?.updateConfiguration(bitrate: bit, targetShortSide: handler.targetShortSide, fps: handler.targetFps)
+                handler.broadcastStreamMetrics()
             }
         }
 
@@ -783,24 +810,6 @@ public class SampleHandler: RPBroadcastSampleHandler {
         for n in bitNames {
             CFNotificationCenterAddObserver(center, observer, bitCallback, n as CFString, nil, .deliverImmediately)
         }
-
-        // Fallback default observer
-        CFNotificationCenterAddObserver(
-            center,
-            observer,
-            { _, observer, _, _, _ in
-                guard let observer = observer else { return }
-                let handler = Unmanaged<SampleHandler>.fromOpaque(observer).takeUnretainedValue()
-                let settings = handler.readEncoderSettings()
-                handler.targetBitrate = settings.bitrate
-                handler.targetShortSide = settings.shortSide
-                handler.targetFps = settings.fps
-                handler.videoEncoder?.updateConfiguration(bitrate: settings.bitrate, targetShortSide: settings.shortSide, fps: settings.fps)
-            },
-            SampleHandler.kUpdateSettingsNotification as CFString,
-            nil,
-            .deliverImmediately
-        )
     }
 
     private func removeDarwinSettingsReceiver() {
@@ -814,8 +823,7 @@ public class SampleHandler: RPBroadcastSampleHandler {
             "com.apowermirror.setBitrate.1000000", "com.apowermirror.setBitrate.2000000",
             "com.apowermirror.setBitrate.4000000", "com.apowermirror.setBitrate.6000000",
             "com.apowermirror.setBitrate.8000000", "com.apowermirror.setBitrate.12000000",
-            "com.apowermirror.setBitrate.16000000", "com.apowermirror.setBitrate.20000000",
-            SampleHandler.kUpdateSettingsNotification
+            "com.apowermirror.setBitrate.16000000", "com.apowermirror.setBitrate.20000000"
         ]
         for n in allNames {
             CFNotificationCenterRemoveObserver(center, observer, CFNotificationName(n as CFString), nil)
