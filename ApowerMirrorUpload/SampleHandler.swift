@@ -299,6 +299,52 @@ public class SampleHandler: RPBroadcastSampleHandler {
                 self.pendingKeyframeRequest = true
                 self.videoEncoder?.forceKeyFrame()
                 NSLog("[SampleHandler] Desktop connected directly to Extension Video port %d", port)
+                self.listenForClientCommands(clientFd: clientFd)
+            }
+        }
+    }
+
+    // MARK: - Incoming Control Socket Listener (Port 25334)
+
+    private func listenForClientCommands(clientFd: Int32) {
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            var buffer = [UInt8](repeating: 0, count: 1024)
+            while let self = self, self.isBroadcasting {
+                let bytesRead = recv(clientFd, &buffer, buffer.count - 1, 0)
+                guard bytesRead > 0 else { break }
+                buffer[bytesRead] = 0
+                if let str = String(bytes: buffer[0..<bytesRead], encoding: .utf8) {
+                    self.handleIncomingControlMessage(str)
+                }
+            }
+        }
+    }
+
+    private func handleIncomingControlMessage(_ text: String) {
+        let lines = text.split(separator: "\n")
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty,
+                  let data = trimmed.data(using: .utf8),
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let cmd = json["cmd"] as? String else { continue }
+
+            if cmd == "SET_CONFIG" {
+                var newBitrate = targetBitrate
+                var newShortSide = targetShortSide
+                var newFps = targetFps
+
+                if let b = json["bitrate"] as? Int, b > 0 { newBitrate = Int32(b) }
+                if let s = json["shortSide"] as? Int, s > 0 { newShortSide = Int32(s) }
+                if let f = json["fps"] as? Int, f > 0 { newFps = Int32(f) }
+
+                NSLog("[SampleHandler] Received SET_CONFIG via TCP -> %dp @ %d bps, %d fps", newShortSide, newBitrate, newFps)
+                targetBitrate = newBitrate
+                targetShortSide = newShortSide
+                targetFps = newFps
+                videoEncoder?.updateConfiguration(bitrate: newBitrate, targetShortSide: newShortSide, fps: newFps)
+            } else if cmd == "FORCE_KEYFRAME" || cmd == "PING" {
+                videoEncoder?.forceKeyFrame()
             }
         }
     }

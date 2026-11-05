@@ -29,7 +29,9 @@ public final class VideoEncoder {
     private var currentOrientation: CGImagePropertyOrientation = .up
 
     // MARK: - State
-    private var compressionSession: VTCompressionSession?
+        private var compressionSession: VTCompressionSession?
+    private var pixelTransferSession: VTPixelTransferSession?
+    private var scaledBufferPool: CVPixelBufferPool?
     private let packetHandler: EncodedPacketHandler
     private var dimensionHandler: DimensionChangeHandler?
     private let encoderQueue = DispatchQueue(label: "com.apowermirror.encoder.queue", qos: .userInteractive)
@@ -174,10 +176,26 @@ public final class VideoEncoder {
                     NSLog("[VideoEncoder] Forcing IDR keyframe insertion on next frame")
                 }
 
+                var frameToEncode = pixelBuffer
+                let pWidth = Int32(CVPixelBufferGetWidth(pixelBuffer))
+                let pHeight = Int32(CVPixelBufferGetHeight(pixelBuffer))
+                if pWidth != self.currentWidth || pHeight != self.currentHeight {
+                    if let pool = self.scaledBufferPool, let transfer = self.pixelTransferSession {
+                        var scaledBuffer: CVPixelBuffer?
+                        let poolStatus = CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault, pool, &scaledBuffer)
+                        if poolStatus == kCVReturnSuccess, let dest = scaledBuffer {
+                            let transferStatus = VTPixelTransferSessionTransferImage(transfer, from: pixelBuffer, to: dest)
+                            if transferStatus == noErr {
+                                frameToEncode = dest
+                            }
+                        }
+                    }
+                }
+
                 var flags: VTEncodeInfoFlags = []
                 let status = VTCompressionSessionEncodeFrame(
                     session,
-                    imageBuffer: pixelBuffer,
+                    imageBuffer: frameToEncode,
                     presentationTimeStamp: pts,
                     duration: duration,
                     frameProperties: frameProperties,
@@ -211,7 +229,7 @@ public final class VideoEncoder {
         let currentLong = max(targetW, targetH)
 
         // Scale resolution according to targetShortSide (240p, 360p, 480p, 544p, 720p, 1080p, 2K, 4K)
-        if targetShortSide > 0 && currentShort > targetShortSide {
+        if targetShortSide > 0 && currentShort != targetShortSide {
             let scale = Float(targetShortSide) / Float(currentShort)
             let scaledLong = Int32(Float(currentLong) * scale)
             if targetW >= targetH {
@@ -227,7 +245,30 @@ public final class VideoEncoder {
         currentWidth = (targetW + 15) & ~15
         currentHeight = (targetH + 15) & ~15
 
-        NSLog("[VideoEncoder] Initializing VTCompressionSession: %dx%d (Orientation: %d, Bitrate: %d)", currentWidth, currentHeight, orientation.rawValue, bitrate)
+                NSLog("[VideoEncoder] Initializing VTCompressionSession: %dx%d (Orientation: %d, Bitrate: %d)", currentWidth, currentHeight, orientation.rawValue, bitrate)
+
+        // Hardware pixel transfer session & pool for hardware-accelerated resolution scaling
+        if pixelTransferSession == nil {
+            var transfer: VTPixelTransferSession?
+            if VTPixelTransferSessionCreate(allocator: kCFAllocatorDefault, pixelTransferSessionOut: &transfer) == noErr {
+                pixelTransferSession = transfer
+                if let transfer = transfer {
+                    VTSessionSetProperty(transfer, key: kVTPixelTransferPropertyKey_ScalingMode, value: kVTScalingMode_Letterbox as CFTypeRef)
+                }
+            }
+        }
+
+        scaledBufferPool = nil
+        let poolAttrs: [CFString: Any] = [
+            kCVPixelBufferPoolMinimumBufferCountKey: 3
+        ]
+        let bufferAttrs: [CFString: Any] = [
+            kCVPixelBufferPixelFormatTypeKey: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
+            kCVPixelBufferWidthKey: Int(currentWidth),
+            kCVPixelBufferHeightKey: Int(currentHeight),
+            kCVPixelBufferIOSurfacePropertiesKey: [:] as [String: Any]
+        ]
+        CVPixelBufferPoolCreate(kCFAllocatorDefault, poolAttrs as CFDictionary, bufferAttrs as CFDictionary, &scaledBufferPool)
 
         // Create VideoToolbox Compression Session
         var newSession: VTCompressionSession?
@@ -400,6 +441,11 @@ public final class VideoEncoder {
         if let session = compressionSession {
             VTCompressionSessionInvalidate(session)
             compressionSession = nil
+        }
+        scaledBufferPool = nil
+        if let transfer = pixelTransferSession {
+            VTPixelTransferSessionInvalidate(transfer)
+            pixelTransferSession = nil
         }
     }
 

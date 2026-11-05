@@ -625,6 +625,31 @@ open class WXHomeViewController: UIViewController, ScreenRecorderManagerDelegate
             true
         )
 
+        // 6. Direct TCP dispatch to Broadcast Extension port 25334 (reliable cross-process synchronization)
+        DispatchQueue.global(qos: .utility).async {
+            let sock = socket(AF_INET, SOCK_STREAM, 0)
+            guard sock >= 0 else { return }
+            var timeout = timeval(tv_sec: 0, tv_usec: 200_000)
+            setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
+            var addr = sockaddr_in()
+            addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+            addr.sin_family = sa_family_t(AF_INET)
+            addr.sin_port = UInt16(25334).bigEndian
+            inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr)
+            let conn = withUnsafePointer(to: &addr) {
+                $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                    connect(sock, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+                }
+            }
+            if conn >= 0 {
+                let msg = "{\"cmd\":\"SET_CONFIG\",\"bitrate\":\(bps),\"shortSide\":\(shortSide),\"fps\":60}\n"
+                msg.withCString { ptr in
+                    send(sock, ptr, strlen(ptr), 0)
+                }
+            }
+            close(sock)
+        }
+
         hintLabel?.text = "Stream Quality: \(resolution) • \(bitrateStr)"
     }
 
