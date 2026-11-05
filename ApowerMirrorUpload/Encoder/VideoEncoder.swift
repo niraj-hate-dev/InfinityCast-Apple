@@ -229,9 +229,9 @@ public final class VideoEncoder {
             targetH = Int32(Float(targetH) * clampScale)
         }
 
-        // Macroblock 16-pixel alignment: (w + 15) & ~15 (decompiled ASM @ 0x13d14 - 0x13d30)
-        currentWidth = (targetW + 15) & ~15
-        currentHeight = (targetH + 15) & ~15
+        // Macroblock 16-pixel alignment: strictly divisible by 16
+        currentWidth = (targetW / 16) * 16
+        currentHeight = (targetH / 16) * 16
 
         NSLog("[VideoEncoder] Initializing VTCompressionSession: %dx%d (Orientation: %d, Bitrate: %d)", currentWidth, currentHeight, orientation.rawValue, bitrate)
 
@@ -273,11 +273,16 @@ public final class VideoEncoder {
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_H264EntropyMode, value: kVTH264EntropyMode_CABAC)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AllowFrameReordering, value: kCFBooleanFalse)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxFrameDelayCount, value: 1 as CFNumber)
-        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AverageBitRate, value: bitrate as CFNumber)
-        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_Quality, value: 0.75 as CFNumber)
 
-        // Permissive 1-second burst cap (1.5x bitrate) allows crisp motion spikes without QP clamping
-        let byteLimit = Int(Float(bitrate) / 8.0 * 1.5)
+        // Enforce true 12-16 Mbps bitrate without quality-override throttling
+        if #available(iOS 16.0, *) {
+            VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ConstantBitRate, value: bitrate as CFNumber)
+        } else {
+            VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AverageBitRate, value: bitrate as CFNumber)
+        }
+
+        // Permissive 1-second burst cap (2.0x bitrate) guarantees full bitrate allocation during fast motion
+        let byteLimit = Int(Float(bitrate) / 8.0 * 2.0)
         let dataRateLimits: [CFNumber] = [byteLimit as CFNumber, 1.0 as CFNumber]
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_DataRateLimits, value: dataRateLimits as CFArray)
 
@@ -306,26 +311,15 @@ public final class VideoEncoder {
             isKeyFrame = !notSync
         }
 
-        guard let dataBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else { return }
-
-        var totalLength = 0
-        var dataPointer: UnsafeMutablePointer<Int8>?
-        let blockStatus = CMBlockBufferGetDataPointer(
-            dataBuffer,
-            atOffset: 0,
-            lengthAtOffsetOut: nil,
-            totalLengthOut: &totalLength,
-            dataPointerOut: &dataPointer
-        )
-
-        guard blockStatus == noErr, let ptr = dataPointer, totalLength > 0 else { return }
-
         // Extract SPS & PPS on IDR keyframe
         if isKeyFrame, let formatDesc = CMSampleBufferGetFormatDescription(sampleBuffer) {
             extractSpsPps(from: formatDesc)
         }
 
-        var offset = 0
+        guard let dataBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else { return }
+        let totalLength = CMBlockBufferGetDataLength(dataBuffer)
+        guard totalLength > 4 else { return }
+
         var fullFrameData = Data()
 
         // Prepend Annex-B SPS & PPS before IDR slice
@@ -336,28 +330,28 @@ public final class VideoEncoder {
             fullFrameData.append(pps)
         }
 
-        // Iterate AVCC length-prefixed NALUs (4-byte big-endian prefix)
-        while offset <= totalLength - 4 {
-            var naluLength: UInt32 = 0
-            memcpy(&naluLength, ptr.advanced(by: offset), 4)
-            naluLength = CFSwapInt32BigToHost(naluLength)
-            offset += 4
+        // Iterate AVCC length-prefixed NALUs using safe non-contiguous block copy
+        var offset = 0
+        while offset + 4 <= totalLength {
+            var naluLengthBE: UInt32 = 0
+            let status = CMBlockBufferCopyDataBytes(dataBuffer, atOffset: offset, dataLength: 4, destination: &naluLengthBE)
+            guard status == kCMBlockBufferNoErr else { break }
 
-            if naluLength > 0 && offset + Int(naluLength) <= totalLength {
-                fullFrameData.append(annexBStartCode)
-                fullFrameData.append(Data(bytes: ptr.advanced(by: offset), count: Int(naluLength)))
-                offset += Int(naluLength)
-            } else {
-                break
+            let naluLength = Int(CFSwapInt32BigToHost(naluLengthBE))
+            offset += 4
+            guard naluLength > 0, offset + naluLength <= totalLength else { break }
+
+            fullFrameData.append(annexBStartCode)
+            let prevCount = fullFrameData.count
+            fullFrameData.count += naluLength
+            fullFrameData.withUnsafeMutableBytes { rawBuf in
+                guard let base = rawBuf.baseAddress else { return }
+                _ = CMBlockBufferCopyDataBytes(dataBuffer, atOffset: offset, dataLength: naluLength, destination: base.advanced(by: prevCount))
             }
+            offset += naluLength
         }
 
         guard !fullFrameData.isEmpty else { return }
-
-        // Append H.264 Access Unit Delimiter (AUD NALU type 9: 00 00 00 01 09 F0)
-        // Forces FFmpeg's av_parser_parse2 to flush and emit the frame immediately without waiting for the next frame
-        let audNALU: [UInt8] = [0x00, 0x00, 0x00, 0x01, 0x09, 0xF0]
-        fullFrameData.append(contentsOf: audNALU)
 
         // Dispatch complete Annex-B NAL unit frame directly (no sub-packet slicing in TCP)
         packetHandler(fullFrameData, isKeyFrame, true)

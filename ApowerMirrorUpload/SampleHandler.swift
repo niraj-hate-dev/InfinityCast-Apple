@@ -469,8 +469,13 @@ public class SampleHandler: RPBroadcastSampleHandler {
             latestKeyFrameHeader = data
             headerLock.unlock()
         }
+        // Prepend 4-byte little-endian length prefix for 100% deterministic framing over TCP
+        var frameLen = UInt32(data.count).littleEndian
+        var framedData = Data(bytes: &frameLen, count: 4)
+        framedData.append(data)
+
         // Direct zero-latency dispatch straight to connected desktop clients (matching Audio architecture)
-        sendToDirectVideoClients(data)
+        sendToDirectVideoClients(framedData)
     }
 
     private var videoPacketsDispatched: Int = 0
@@ -491,27 +496,21 @@ public class SampleHandler: RPBroadcastSampleHandler {
             var dead: [Int32] = []
             for fd in clients {
                 var totalSent = 0
-                var retries = 0
                 while totalSent < data.count {
                     let sent = send(fd, basePtr.advanced(by: totalSent), data.count - totalSent, 0)
                     if sent > 0 {
                         totalSent += sent
-                        retries = 0
-                    } else if sent < 0 && (errno == EAGAIN || errno == EWOULDBLOCK) {
-                        retries += 1
-                        if retries > 50 {
-                            // Socket buffer genuinely stalled for >250ms -> disconnect to prevent stream corruption
-                            NSLog("[SampleHandler] Video client socket %d stalled (>250ms), disconnecting", fd)
+                    } else if sent < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) {
+                        var pfd = pollfd(fd: fd, events: Int16(POLLOUT), revents: 0)
+                        let pr = poll(&pfd, 1, 5) // Wait up to 5ms for socket buffer to drain
+                        if pr < 0 && errno != EINTR {
                             dead.append(fd)
-                            self.videoEncoder?.forceKeyFrame()
                             break
                         }
-                        var pfd = pollfd(fd: fd, events: Int16(POLLOUT), revents: 0)
-                        poll(&pfd, 1, 5) // Wait up to 5ms for socket buffer to drain
+                        continue
                     } else {
                         // Fatal socket failure (e.g. EPIPE, ECONNRESET): peer disconnected
                         dead.append(fd)
-                        self.videoEncoder?.forceKeyFrame()
                         break
                     }
                 }
@@ -521,6 +520,7 @@ public class SampleHandler: RPBroadcastSampleHandler {
                 directVideoClients.removeAll { dead.contains($0) }
                 directVideoLock.unlock()
                 dead.forEach { close($0) }
+                self.videoEncoder?.forceKeyFrame()
                 NSLog("[SampleHandler] Closed %d dead video client socket(s)", dead.count)
             }
         }
