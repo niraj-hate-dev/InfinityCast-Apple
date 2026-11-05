@@ -321,7 +321,7 @@ public class SampleHandler: RPBroadcastSampleHandler {
     }
 
     private func handleIncomingControlMessage(_ text: String) {
-        let lines = text.split(separator: "\n")
+        let lines = text.components(separatedBy: "\n")
         for line in lines {
             let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty,

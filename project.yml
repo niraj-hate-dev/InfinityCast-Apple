@@ -20,7 +20,6 @@ targets:
         PRODUCT_NAME: ApowerMirror
         PRODUCT_BUNDLE_IDENTIFIER: com.apowersoft.ApowerMirror
         INFOPLIST_FILE: ApowerMirror/Info.plist
-        CODE_SIGN_ENTITLEMENTS: ApowerMirror/ApowerMirror.entitlements
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         SWIFT_VERSION: "5.0"
         TARGETED_DEVICE_FAMILY: "1,2"
@@ -45,7 +44,6 @@ targets:
         PRODUCT_NAME: ApowerMirrorUpload
         PRODUCT_BUNDLE_IDENTIFIER: com.apowersoft.ApowerMirror.ApowerMirrorUpload
         INFOPLIST_FILE: ApowerMirrorUpload/Info.plist
-        CODE_SIGN_ENTITLEMENTS: ApowerMirrorUpload/ApowerMirrorUpload.entitlements
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         SWIFT_VERSION: "5.0"
         TARGETED_DEVICE_FAMILY: "1,2"

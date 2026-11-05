@@ -10,6 +10,7 @@
 import Foundation
 import VideoToolbox
 import CoreMedia
+import CoreVideo
 import ImageIO
 
 public final class VideoEncoder {
@@ -253,7 +254,7 @@ public final class VideoEncoder {
             if VTPixelTransferSessionCreate(allocator: kCFAllocatorDefault, pixelTransferSessionOut: &transfer) == noErr {
                 pixelTransferSession = transfer
                 if let transfer = transfer {
-                    VTSessionSetProperty(transfer, key: kVTPixelTransferPropertyKey_ScalingMode, value: kVTScalingMode_Letterbox as CFTypeRef)
+                    // Default hardware scaling mode is applied
                 }
             }
         }
