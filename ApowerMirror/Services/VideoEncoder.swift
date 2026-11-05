@@ -274,13 +274,18 @@ public final class VideoEncoder {
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AllowFrameReordering, value: kCFBooleanFalse)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxFrameDelayCount, value: 1 as CFNumber)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AverageBitRate, value: bitrate as CFNumber)
-        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_Quality, value: 0.85 as CFNumber)
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_Quality, value: 0.75 as CFNumber)
 
-        // Keyframe cadence: 1 keyframe every 1.0s (60 frames at 60fps) for instant recovery from any glitch
-        let keyFrameIntervalFrames = max(30, fps)
+        // Permissive 1-second burst cap (1.5x bitrate) allows crisp motion spikes without QP clamping
+        let byteLimit = Int(Float(bitrate) / 8.0 * 1.5)
+        let dataRateLimits: [CFNumber] = [byteLimit as CFNumber, 1.0 as CFNumber]
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_DataRateLimits, value: dataRateLimits as CFArray)
+
+        // Keyframe cadence: 1 keyframe every 3.0s (180 frames at 60fps) to eliminate IDR bitrate starvation of P-frames
+        let keyFrameIntervalFrames = max(90, Int(fps) * 3)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ExpectedFrameRate, value: fps as CFNumber)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameInterval, value: keyFrameIntervalFrames as CFNumber)
-        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameIntervalDuration, value: 1.0 as CFNumber)
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameIntervalDuration, value: 3.0 as CFNumber)
 
         VTCompressionSessionPrepareToEncodeFrames(session)
         self.compressionSession = session
@@ -332,7 +337,7 @@ public final class VideoEncoder {
         }
 
         // Iterate AVCC length-prefixed NALUs (4-byte big-endian prefix)
-        while offset < totalLength - 4 {
+        while offset <= totalLength - 4 {
             var naluLength: UInt32 = 0
             memcpy(&naluLength, ptr.advanced(by: offset), 4)
             naluLength = CFSwapInt32BigToHost(naluLength)
@@ -348,6 +353,11 @@ public final class VideoEncoder {
         }
 
         guard !fullFrameData.isEmpty else { return }
+
+        // Append H.264 Access Unit Delimiter (AUD NALU type 9: 00 00 00 01 09 F0)
+        // Forces FFmpeg's av_parser_parse2 to flush and emit the frame immediately without waiting for the next frame
+        let audNALU: [UInt8] = [0x00, 0x00, 0x00, 0x01, 0x09, 0xF0]
+        fullFrameData.append(contentsOf: audNALU)
 
         // Dispatch complete Annex-B NAL unit frame directly (no sub-packet slicing in TCP)
         packetHandler(fullFrameData, isKeyFrame, true)
