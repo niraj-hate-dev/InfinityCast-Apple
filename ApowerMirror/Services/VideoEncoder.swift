@@ -30,8 +30,7 @@ public final class VideoEncoder {
     private var currentOrientation: CGImagePropertyOrientation = .up
 
     // MARK: - State
-        private var compressionSession: VTCompressionSession?
-    private var pixelTransferSession: VTPixelTransferSession?
+    private var compressionSession: VTCompressionSession?
     private let packetHandler: EncodedPacketHandler
     private var dimensionHandler: DimensionChangeHandler?
     private let encoderQueue = DispatchQueue(label: "com.apowermirror.encoder.queue", qos: .userInteractive)
@@ -176,26 +175,10 @@ public final class VideoEncoder {
                     NSLog("[VideoEncoder] Forcing IDR keyframe insertion on next frame")
                 }
 
-                var frameToEncode = pixelBuffer
-                let pWidth = Int32(CVPixelBufferGetWidth(pixelBuffer))
-                let pHeight = Int32(CVPixelBufferGetHeight(pixelBuffer))
-                if pWidth != self.currentWidth || pHeight != self.currentHeight {
-                    if let pool = VTCompressionSessionGetPixelBufferPool(session), let transfer = self.pixelTransferSession {
-                        var scaledBuffer: CVPixelBuffer?
-                        let poolStatus = CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault, pool, &scaledBuffer)
-                        if poolStatus == kCVReturnSuccess, let dest = scaledBuffer {
-                            let transferStatus = VTPixelTransferSessionTransferImage(transfer, pixelBuffer, dest)
-                            if transferStatus == noErr {
-                                frameToEncode = dest
-                            }
-                        }
-                    }
-                }
-
                 var flags: VTEncodeInfoFlags = []
                 let status = VTCompressionSessionEncodeFrame(
                     session,
-                    imageBuffer: frameToEncode,
+                    imageBuffer: pixelBuffer,
                     presentationTimeStamp: pts,
                     duration: duration,
                     frameProperties: frameProperties,
@@ -245,20 +228,8 @@ public final class VideoEncoder {
         currentWidth = (targetW + 15) & ~15
         currentHeight = (targetH + 15) & ~15
 
-                NSLog("[VideoEncoder] Initializing VTCompressionSession: %dx%d (Orientation: %d, Bitrate: %d)", currentWidth, currentHeight, orientation.rawValue, bitrate)
+        NSLog("[VideoEncoder] Initializing VTCompressionSession: %dx%d (Orientation: %d, Bitrate: %d)", currentWidth, currentHeight, orientation.rawValue, bitrate)
 
-        // Hardware pixel transfer session & pool for hardware-accelerated resolution scaling
-        if pixelTransferSession == nil {
-            var transfer: VTPixelTransferSession?
-            if VTPixelTransferSessionCreate(kCFAllocatorDefault, &transfer) == noErr {
-                pixelTransferSession = transfer
-                if let transfer = transfer {
-                    // Default hardware scaling mode is applied
-                }
-            }
-        }
-
-        // Create VideoToolbox Compression Session
         var newSession: VTCompressionSession?
         let callback: VTCompressionOutputCallback = { outputCallbackRefCon, _, status, infoFlags, sampleBuffer in
             guard status == noErr, let buffer = sampleBuffer, let refCon = outputCallbackRefCon else { return }
@@ -268,13 +239,18 @@ public final class VideoEncoder {
             }
         }
 
+        let sourceAttrs: [CFString: Any] = [
+            kCVPixelBufferPixelFormatTypeKey: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
+            kCVPixelBufferIOSurfacePropertiesKey: [:] as [String: Any]
+        ]
+
         let createStatus = VTCompressionSessionCreate(
             allocator: kCFAllocatorDefault,
             width: currentWidth,
             height: currentHeight,
             codecType: kCMVideoCodecType_H264,
             encoderSpecification: nil,
-            imageBufferAttributes: nil,
+            imageBufferAttributes: sourceAttrs as CFDictionary,
             compressedDataAllocator: nil,
             outputCallback: callback,
             refcon: Unmanaged.passUnretained(self).toOpaque(),
@@ -430,10 +406,7 @@ public final class VideoEncoder {
             VTCompressionSessionInvalidate(session)
             compressionSession = nil
         }
-        if let transfer = pixelTransferSession {
-            VTPixelTransferSessionInvalidate(transfer)
-            pixelTransferSession = nil
-        }
+        
     }
 
     deinit {

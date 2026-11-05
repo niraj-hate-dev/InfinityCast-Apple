@@ -46,10 +46,11 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             AD_HOC_CODE_SIGNING_ALLOWED=YES 2>&1 | tee xcodebuild.log || {
-              echo "=== BUILD LOG FAILURE TAIL ==="
-              tail -n 250 xcodebuild.log
-              echo "=== GREP ERRORS ==="
-              grep -in "error:" xcodebuild.log || true
+              echo "### Compilation Error in xcodebuild" >> $GITHUB_STEP_SUMMARY
+              echo '```' >> $GITHUB_STEP_SUMMARY
+              grep -in "error:" xcodebuild.log | head -n 40 >> $GITHUB_STEP_SUMMARY || true
+              tail -n 80 xcodebuild.log >> $GITHUB_STEP_SUMMARY
+              echo '```' >> $GITHUB_STEP_SUMMARY
               exit 1
             }
 
