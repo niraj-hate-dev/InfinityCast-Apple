@@ -68,7 +68,12 @@ open class WXHomeViewController: UIViewController, ScreenRecorderManagerDelegate
 
         // Load saved stream quality preferences
         if let savedRes = (UserDefaults(suiteName: "group.apowersoft.mirror")?.string(forKey: "kEncoderResolution")) ?? UserDefaults.standard.string(forKey: "kEncoderResolution") {
-            currentResolution = savedRes
+            let valid = ["544p", "720p", "1080p", "2k", "4k"]
+            if valid.contains(where: { $0.caseInsensitiveCompare(savedRes) == .orderedSame }) {
+                currentResolution = savedRes
+            } else {
+                currentResolution = "720p"
+            }
         }
         if let savedBit = (UserDefaults(suiteName: "group.apowersoft.mirror")?.string(forKey: "kEncoderBitrateString")) ?? UserDefaults.standard.string(forKey: "kEncoderBitrateString") {
             currentBitrate = savedBit
@@ -573,10 +578,7 @@ open class WXHomeViewController: UIViewController, ScreenRecorderManagerDelegate
         )
 
         let presets = [
-            ("240p", "240p • Fastest (Ultra Low Bandwidth)"),
-            ("360p", "360p • Low Bandwidth Saver"),
-            ("480p", "480p • Standard Definition (SD)"),
-            ("544p", "544p • Enhanced SD (544p)"),
+            ("544p", "544p • Standard Definition (544p)"),
             ("720p", "720p • High Definition (Recommended)"),
             ("1080p", "1080p • Full HD (Crisp Gaming)"),
             ("2K", "2K • 1440p Quad HD"),
