@@ -69,7 +69,6 @@ public class SampleHandler: RPBroadcastSampleHandler {
     private var targetFps: Int32 = 60
     private var targetBitrate: Int32 = 4_000_000
     private var targetShortSide: Int32 = 720
-    private var settingsNotifyToken: Int32 = -1
 
     public override init() {
         super.init()
@@ -740,65 +739,62 @@ public class SampleHandler: RPBroadcastSampleHandler {
     }
 
     private func setupDarwinSettingsReceiver() {
-        // 1. Kernel-level notify_register_dispatch (Carries 64-bit state across sandboxes)
-        var token: Int32 = 0
-        let regStatus = notify_register_dispatch(
-            "com.apowermirror.encoderSettings",
-            &token,
-            DispatchQueue.main
-        ) { [weak self] activeToken in
-            guard let self = self else { return }
-            var state: UInt64 = 0
-            if notify_get_state(activeToken, &state) == NOTIFY_STATUS_OK && state != 0 {
-                let shortSide = Int32(bitPattern: UInt32((state >> 32) & 0xFFFFFFFF))
-                let bitrate = Int32(bitPattern: UInt32(state & 0xFFFFFFFF))
-                if shortSide > 0 && bitrate > 0 {
-                    NSLog("[SampleHandler] Received Darwin encoderSettings -> %dp @ %d bps", shortSide, bitrate)
-                    self.targetShortSide = shortSide
-                    self.targetBitrate = bitrate
-                    self.videoEncoder?.updateConfiguration(bitrate: bitrate, targetShortSide: shortSide, fps: self.targetFps)
-                }
-            }
-        }
-        if regStatus == NOTIFY_STATUS_OK {
-            self.settingsNotifyToken = token
-            var state: UInt64 = 0
-            if notify_get_state(token, &state) == NOTIFY_STATUS_OK && state != 0 {
-                let shortSide = Int32(bitPattern: UInt32((state >> 32) & 0xFFFFFFFF))
-                let bitrate = Int32(bitPattern: UInt32(state & 0xFFFFFFFF))
-                if shortSide > 0 && bitrate > 0 {
-                    NSLog("[SampleHandler] Initialized from Darwin notify state -> %dp @ %d bps", shortSide, bitrate)
-                    self.targetShortSide = shortSide
-                    self.targetBitrate = bitrate
-                }
+        let center = CFNotificationCenterGetDarwinNotifyCenter()
+        let observer = UnsafeRawPointer(Unmanaged.passUnretained(self).toOpaque())
+
+        let resCallback: CFNotificationCallback = { _, observer, name, _, _ in
+            guard let observer = observer, let cfName = name else { return }
+            let handler = Unmanaged<SampleHandler>.fromOpaque(observer).takeUnretainedValue()
+            let nameStr = (cfName.rawValue as String)
+            if let resStr = nameStr.components(separatedBy: ".").last, let res = Int32(resStr) {
+                NSLog("[SampleHandler] Received Darwin SET_RES -> %dp", res)
+                handler.targetShortSide = res
+                handler.videoEncoder?.updateConfiguration(bitrate: handler.targetBitrate, targetShortSide: res, fps: handler.targetFps)
             }
         }
 
-        // 2. Fallback Darwin Notification Observer
-        let center = CFNotificationCenterGetDarwinNotifyCenter()
-        let observer = UnsafeRawPointer(Unmanaged.passUnretained(self).toOpaque())
+        let bitCallback: CFNotificationCallback = { _, observer, name, _, _ in
+            guard let observer = observer, let cfName = name else { return }
+            let handler = Unmanaged<SampleHandler>.fromOpaque(observer).takeUnretainedValue()
+            let nameStr = (cfName.rawValue as String)
+            if let bitStr = nameStr.components(separatedBy: ".").last, let bit = Int32(bitStr) {
+                NSLog("[SampleHandler] Received Darwin SET_BITRATE -> %d bps", bit)
+                handler.targetBitrate = bit
+                handler.videoEncoder?.updateConfiguration(bitrate: bit, targetShortSide: handler.targetShortSide, fps: handler.targetFps)
+            }
+        }
+
+        let resNames = [
+            "com.apowermirror.setRes.240", "com.apowermirror.setRes.360",
+            "com.apowermirror.setRes.480", "com.apowermirror.setRes.544",
+            "com.apowermirror.setRes.720", "com.apowermirror.setRes.1080",
+            "com.apowermirror.setRes.1440", "com.apowermirror.setRes.2160"
+        ]
+        for n in resNames {
+            CFNotificationCenterAddObserver(center, observer, resCallback, n as CFString, nil, .deliverImmediately)
+        }
+
+        let bitNames = [
+            "com.apowermirror.setBitrate.1000000", "com.apowermirror.setBitrate.2000000",
+            "com.apowermirror.setBitrate.4000000", "com.apowermirror.setBitrate.6000000",
+            "com.apowermirror.setBitrate.8000000", "com.apowermirror.setBitrate.12000000",
+            "com.apowermirror.setBitrate.16000000", "com.apowermirror.setBitrate.20000000"
+        ]
+        for n in bitNames {
+            CFNotificationCenterAddObserver(center, observer, bitCallback, n as CFString, nil, .deliverImmediately)
+        }
+
+        // Fallback default observer
         CFNotificationCenterAddObserver(
             center,
             observer,
             { _, observer, _, _, _ in
                 guard let observer = observer else { return }
                 let handler = Unmanaged<SampleHandler>.fromOpaque(observer).takeUnretainedValue()
-                var state: UInt64 = 0
-                if handler.settingsNotifyToken >= 0 && notify_get_state(handler.settingsNotifyToken, &state) == NOTIFY_STATUS_OK && state != 0 {
-                    let shortSide = Int32(bitPattern: UInt32((state >> 32) & 0xFFFFFFFF))
-                    let bitrate = Int32(bitPattern: UInt32(state & 0xFFFFFFFF))
-                    if shortSide > 0 && bitrate > 0 {
-                        handler.targetShortSide = shortSide
-                        handler.targetBitrate = bitrate
-                        handler.videoEncoder?.updateConfiguration(bitrate: bitrate, targetShortSide: shortSide, fps: handler.targetFps)
-                        return
-                    }
-                }
                 let settings = handler.readEncoderSettings()
                 handler.targetBitrate = settings.bitrate
                 handler.targetShortSide = settings.shortSide
                 handler.targetFps = settings.fps
-                NSLog("[SampleHandler] Received Darwin settings notification -> Rebuilding encoder: %dp @ %d bps", settings.shortSide, settings.bitrate)
                 handler.videoEncoder?.updateConfiguration(bitrate: settings.bitrate, targetShortSide: settings.shortSide, fps: settings.fps)
             },
             SampleHandler.kUpdateSettingsNotification as CFString,
@@ -808,13 +804,22 @@ public class SampleHandler: RPBroadcastSampleHandler {
     }
 
     private func removeDarwinSettingsReceiver() {
-        if settingsNotifyToken >= 0 {
-            notify_cancel(settingsNotifyToken)
-            settingsNotifyToken = -1
-        }
         let center = CFNotificationCenterGetDarwinNotifyCenter()
         let observer = UnsafeRawPointer(Unmanaged.passUnretained(self).toOpaque())
-        CFNotificationCenterRemoveObserver(center, observer, CFNotificationName(SampleHandler.kUpdateSettingsNotification as CFString), nil)
+        let allNames = [
+            "com.apowermirror.setRes.240", "com.apowermirror.setRes.360",
+            "com.apowermirror.setRes.480", "com.apowermirror.setRes.544",
+            "com.apowermirror.setRes.720", "com.apowermirror.setRes.1080",
+            "com.apowermirror.setRes.1440", "com.apowermirror.setRes.2160",
+            "com.apowermirror.setBitrate.1000000", "com.apowermirror.setBitrate.2000000",
+            "com.apowermirror.setBitrate.4000000", "com.apowermirror.setBitrate.6000000",
+            "com.apowermirror.setBitrate.8000000", "com.apowermirror.setBitrate.12000000",
+            "com.apowermirror.setBitrate.16000000", "com.apowermirror.setBitrate.20000000",
+            SampleHandler.kUpdateSettingsNotification
+        ]
+        for n in allNames {
+            CFNotificationCenterRemoveObserver(center, observer, CFNotificationName(n as CFString), nil)
+        }
     }
 
     private func getMemoryFootprintMB() -> Double {

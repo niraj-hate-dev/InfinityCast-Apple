@@ -674,31 +674,13 @@ open class WXHomeViewController: UIViewController, ScreenRecorderManagerDelegate
         // 4. Update in-app ScreenRecorderManager if active
         ScreenRecorderManager.shared.updateConfiguration(bitrate: bps, shortSide: shortSide, fps: 60)
 
-        // 5. Darwin notify_set_state & notify_post (Kernel-level IPC: 100% reliable across sandboxes)
-        var token: Int32 = 0
-        let regStatus = notify_register_check("com.apowermirror.encoderSettings", &token)
-        if regStatus == NOTIFY_STATUS_OK {
-            let combinedState = (UInt64(UInt32(bitPattern: shortSide)) << 32) | UInt64(UInt32(bitPattern: bps))
-            notify_set_state(token, combinedState)
-            notify_post("com.apowermirror.encoderSettings")
-            NSLog("[WXHomeViewController] Dispatched Darwin notification with state 0x%llx (shortSide: %d, bps: %d)", combinedState, shortSide, bps)
-        }
-
-        // 6. Post Darwin notifications to Broadcast Extension
-        CFNotificationCenterPostNotification(
-            CFNotificationCenterGetDarwinNotifyCenter(),
-            CFNotificationName("com.apowermirror.updateEncoderSettings" as CFString),
-            nil,
-            nil,
-            true
-        )
-        CFNotificationCenterPostNotification(
-            CFNotificationCenterGetDarwinNotifyCenter(),
-            CFNotificationName("com.apowermirror.forceKeyframe" as CFString),
-            nil,
-            nil,
-            true
-        )
+        // 5. Post preset-specific Darwin notifications (100% reliable across all sandboxes)
+        let center = CFNotificationCenterGetDarwinNotifyCenter()
+        CFNotificationCenterPostNotification(center, CFNotificationName("com.apowermirror.setRes.\(shortSide)" as CFString), nil, nil, true)
+        CFNotificationCenterPostNotification(center, CFNotificationName("com.apowermirror.setBitrate.\(bps)" as CFString), nil, nil, true)
+        CFNotificationCenterPostNotification(center, CFNotificationName("com.apowermirror.updateEncoderSettings" as CFString), nil, nil, true)
+        CFNotificationCenterPostNotification(center, CFNotificationName("com.apowermirror.forceKeyframe" as CFString), nil, nil, true)
+        NSLog("[WXHomeViewController] Dispatched Darwin presets: %dp @ %d bps", shortSide, bps)
 
         // 7. Direct TCP dispatch with SO_LINGER to Broadcast Extension port 25334
         DispatchQueue.global(qos: .utility).async {
