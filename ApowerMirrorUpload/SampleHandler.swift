@@ -291,9 +291,12 @@ public class SampleHandler: RPBroadcastSampleHandler {
                 setsockopt(clientFd, SOL_SOCKET, SO_NOSIGPIPE, &noSigpipe, socklen_t(MemoryLayout<Int32>.size))
                 var noDelay: Int32 = 1
                 setsockopt(clientFd, IPPROTO_TCP, TCP_NODELAY, &noDelay, socklen_t(MemoryLayout<Int32>.size))
-                var sndBuf: Int32 = 4 * 1024 * 1024 // 4 MB socket send buffer for zero-drop motion bursts
-                setsockopt(clientFd, SOL_SOCKET, SO_SNDBUF, &sndBuf, socklen_t(MemoryLayout<Int32>.size))
-                var timeout = timeval(tv_sec: 1, tv_usec: 0)
+                var sndBuf: Int32 = 1024 * 1024 // 1 MB kernel socket buffer
+                if setsockopt(clientFd, SOL_SOCKET, SO_SNDBUF, &sndBuf, socklen_t(MemoryLayout<Int32>.size)) != 0 {
+                    sndBuf = 512 * 1024
+                    setsockopt(clientFd, SOL_SOCKET, SO_SNDBUF, &sndBuf, socklen_t(MemoryLayout<Int32>.size))
+                }
+                var timeout = timeval(tv_sec: 2, tv_usec: 0)
                 setsockopt(clientFd, SOL_SOCKET, SO_SNDTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
 
                 self.directVideoLock.lock()
@@ -326,9 +329,7 @@ public class SampleHandler: RPBroadcastSampleHandler {
         }
 
         let mbps = Double(targetBitrate) / 1_000_000.0
-        let jsonStr = "{\"event\":\"STREAM_METRICS\",\"preset\":\"\(presetTag)\",\"bitrateMbps\":\(mbps),\"shortSide\":\(targetShortSide),\"bitrateBps\":\(targetBitrate),\"fps\":\(targetFps)}\n"
-        guard let data = jsonStr.data(using: .utf8) else { return }
-        sendToDirectVideoClients(data)
+        NSLog("[SampleHandler] Stream configuration: %dp (%@) @ %.2f Mbps, %d fps", targetShortSide, presetTag, mbps, targetFps)
     }
 
     private func listenForClientCommands(clientFd: Int32) {
@@ -498,15 +499,17 @@ public class SampleHandler: RPBroadcastSampleHandler {
                         retries = 0
                     } else if sent < 0 && (errno == EAGAIN || errno == EWOULDBLOCK) {
                         retries += 1
-                        if retries > 30 {
-                            // Buffer saturated for >30ms: force immediate clean IDR keyframe on next frame to prevent tearing
+                        if retries > 50 {
+                            // Socket buffer genuinely stalled for >250ms -> disconnect to prevent stream corruption
+                            NSLog("[SampleHandler] Video client socket %d stalled (>250ms), disconnecting", fd)
+                            dead.append(fd)
                             self.videoEncoder?.forceKeyFrame()
                             break
                         }
                         var pfd = pollfd(fd: fd, events: Int16(POLLOUT), revents: 0)
-                        poll(&pfd, 1, 1) // Wait at most 1ms for socket buffer to drain immediately
+                        poll(&pfd, 1, 5) // Wait up to 5ms for socket buffer to drain
                     } else {
-                        // Fatal socket failure (e.g. EPIPE, ECONNRESET): peer truly disconnected
+                        // Fatal socket failure (e.g. EPIPE, ECONNRESET): peer disconnected
                         dead.append(fd)
                         self.videoEncoder?.forceKeyFrame()
                         break
