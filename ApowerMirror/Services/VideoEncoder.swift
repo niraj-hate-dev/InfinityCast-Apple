@@ -285,7 +285,7 @@ public final class VideoEncoder {
 
         // Keyframe cadence: 1 keyframe every 2.5s (150 frames at 60fps) + on-demand IDR upon client connect / request
         // Extending keyframe spacing frees up 90% of bitrate for crystal-clear motion P-frames with zero lag spikes
-        let keyFrameIntervalFrames = max(60, Int(fps * 2.5))
+        let keyFrameIntervalFrames = max(60, Int(Double(fps) * 2.5))
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ExpectedFrameRate, value: fps as CFNumber)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameInterval, value: keyFrameIntervalFrames as CFNumber)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameIntervalDuration, value: 2.5 as CFNumber)
