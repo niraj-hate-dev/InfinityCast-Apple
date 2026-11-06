@@ -82,7 +82,7 @@ public class SampleHandler: RPBroadcastSampleHandler {
         self.lastAudioReceivedTime = CACurrentMediaTime()
 
         if self.audioEncoder == nil {
-            self.audioEncoder = AudioEncoder(sampleRate: 44100.0, channels: 2) { [weak self] packet in
+            self.audioEncoder = AudioEncoder(sampleRate: 48000.0, channels: 2) { [weak self] packet in
                 self?.sendToDirectAudioClients(packet)
             }
         }
@@ -109,7 +109,7 @@ public class SampleHandler: RPBroadcastSampleHandler {
             let now = CACurrentMediaTime()
             if now - self.lastAudioReceivedTime >= 0.5 {
                 if self.audioEncoder == nil {
-                    self.audioEncoder = AudioEncoder(sampleRate: 44100.0, channels: 2) { [weak self] packet in
+                    self.audioEncoder = AudioEncoder(sampleRate: 48000.0, channels: 2) { [weak self] packet in
                         self?.sendToDirectAudioClients(packet)
                     }
                 }
@@ -436,7 +436,7 @@ public class SampleHandler: RPBroadcastSampleHandler {
                 DispatchQueue.global(qos: .userInteractive).async { [weak self] in
                     guard let self = self, self.isBroadcasting else { return }
                     if self.audioEncoder == nil {
-                        self.audioEncoder = AudioEncoder(sampleRate: 44100.0, channels: 2) { [weak self] packet in
+                        self.audioEncoder = AudioEncoder(sampleRate: 48000.0, channels: 2) { [weak self] packet in
                             self?.sendToDirectAudioClients(packet)
                         }
                     }
@@ -544,18 +544,18 @@ public class SampleHandler: RPBroadcastSampleHandler {
             var dead: [Int32] = []
             for fd in clients {
                 var totalSent = 0
-                var retries = 0
                 while totalSent < data.count {
                     let sent = send(fd, basePtr.advanced(by: totalSent), data.count - totalSent, 0)
                     if sent > 0 {
                         totalSent += sent
-                        retries = 0
-                    } else if (errno == EAGAIN || errno == EWOULDBLOCK) && retries < 50 {
-                        retries += 1
-                        usleep(1000)
-                    } else if errno == EAGAIN || errno == EWOULDBLOCK {
-                        // Transient buffer pressure: drop remainder of packet but KEEP socket alive!
-                        break
+                    } else if sent < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) {
+                        var pfd = pollfd(fd: fd, events: Int16(POLLOUT), revents: 0)
+                        let pr = poll(&pfd, 1, 5) // Wait up to 5ms for socket buffer to drain
+                        if pr < 0 && errno != EINTR {
+                            dead.append(fd)
+                            break
+                        }
+                        continue
                     } else {
                         dead.append(fd)
                         break

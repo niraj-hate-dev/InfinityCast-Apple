@@ -32,7 +32,7 @@ public final class AudioEncoder {
     private let packetHandler: EncodedAudioHandler
 
     private var currentPcmSourceFormat: AudioStreamBasicDescription?
-    private var sampleRate: Double = 44100.0
+    private var sampleRate: Double = 48000.0
     private let channels: UInt32 = 2
 
     // Persistent PCM Ring Buffer
@@ -46,7 +46,7 @@ public final class AudioEncoder {
 
     // MARK: - Initialization
 
-    public init(sampleRate: Double = 44100.0, channels: UInt32 = 2, handler: @escaping EncodedAudioHandler) {
+    public init(sampleRate: Double = 48000.0, channels: UInt32 = 2, handler: @escaping EncodedAudioHandler) {
         self.sampleRate = sampleRate
         self.packetHandler = handler
         self.aacBuffer = UnsafeMutablePointer<UInt8>.allocate(capacity: aacBufferSize)
@@ -231,8 +231,8 @@ public final class AudioEncoder {
 
         // Ring buffer overflow protection: Keep max 2 frames (~46ms, 8,192 bytes), strictly 4-byte frame aligned
         // Prevents bufferbloat and latency buildup while ensuring ultra-low latency response in games
-        if self.pcmBuffer.count > 8192 {
-            let excess = self.pcmBuffer.count - 4096
+        if self.pcmBuffer.count > 32768 {
+            let excess = self.pcmBuffer.count - 16384
             let alignedToRemove = (excess / 4) * 4
             if alignedToRemove > 0 {
                 self.pcmBuffer.removeSubrange(0..<alignedToRemove)
