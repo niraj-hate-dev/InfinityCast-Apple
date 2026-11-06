@@ -272,17 +272,18 @@ public final class VideoEncoder {
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ProfileLevel, value: kVTProfileLevel_H264_High_AutoLevel)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_H264EntropyMode, value: kVTH264EntropyMode_CABAC)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AllowFrameReordering, value: kCFBooleanFalse)
-        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxFrameDelayCount, value: 1 as CFNumber)
 
-        // Enforce true 12-16 Mbps bitrate without quality-override throttling
-        if #available(iOS 16.0, *) {
-            VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ConstantBitRate, value: bitrate as CFNumber)
-        } else {
-            VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AverageBitRate, value: bitrate as CFNumber)
+        // Force zero-frame delay: emit frames immediately without internal buffering delay
+        let maxDelay: Int32 = 0
+        if VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxFrameDelayCount, value: maxDelay as CFNumber) != noErr {
+            VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxFrameDelayCount, value: 1 as CFNumber)
         }
 
-        // Permissive 1-second burst cap (2.0x bitrate) guarantees full bitrate allocation during fast motion
-        let byteLimit = Int(Float(bitrate) / 8.0 * 2.0)
+        // Pure low-latency rate control: AverageBitRate (CBR is strictly avoided because it forces HRD buffer lookahead delay)
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AverageBitRate, value: bitrate as CFNumber)
+
+        // WebRTC standard burst ceiling (1.5x bitrate over 1.0s window) allows motion spikes while preventing buffer stalls
+        let byteLimit = Int(Float(bitrate) / 8.0 * 1.5)
         let dataRateLimits: [CFNumber] = [byteLimit as CFNumber, 1.0 as CFNumber]
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_DataRateLimits, value: dataRateLimits as CFArray)
 
