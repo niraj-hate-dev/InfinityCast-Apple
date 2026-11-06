@@ -273,17 +273,15 @@ public final class VideoEncoder {
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_H264EntropyMode, value: kVTH264EntropyMode_CABAC)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AllowFrameReordering, value: kCFBooleanFalse)
 
-        // Force zero-frame delay: emit frames immediately without internal buffering delay
-        let maxDelay: Int32 = 0
-        if VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxFrameDelayCount, value: maxDelay as CFNumber) != noErr {
-            VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxFrameDelayCount, value: 1 as CFNumber)
-        }
+        // 1-frame hardware pipelining: enables hardware H.264 engine to encode asynchronously
+        // without blocking the dispatch queue, guaranteeing rock-solid 60 FPS cadence
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxFrameDelayCount, value: 1 as CFNumber)
 
         // Pure low-latency rate control: AverageBitRate (CBR is strictly avoided because it forces HRD buffer lookahead delay)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AverageBitRate, value: bitrate as CFNumber)
 
-        // WebRTC standard burst ceiling (1.5x bitrate over 1.0s window) allows motion spikes while preventing buffer stalls
-        let byteLimit = Int(Float(bitrate) / 8.0 * 1.5)
+        // Permissive 2.0x burst ceiling allows complex motion scenes to expand freely without rate throttling
+        let byteLimit = Int(Float(bitrate) / 8.0 * 2.0)
         let dataRateLimits: [CFNumber] = [byteLimit as CFNumber, 1.0 as CFNumber]
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_DataRateLimits, value: dataRateLimits as CFArray)
 
