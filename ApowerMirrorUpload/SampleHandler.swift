@@ -300,10 +300,6 @@ public class SampleHandler: RPBroadcastSampleHandler {
                 setsockopt(clientFd, SOL_SOCKET, SO_SNDTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
 
                 self.directVideoLock.lock()
-                for oldFd in self.directVideoClients {
-                    close(oldFd)
-                }
-                self.directVideoClients.removeAll()
                 self.directVideoClients.append(clientFd)
                 self.directVideoLock.unlock()
 
@@ -432,10 +428,6 @@ public class SampleHandler: RPBroadcastSampleHandler {
                 setsockopt(clientFd, SOL_SOCKET, SO_SNDTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
 
                 self.directAudioLock.lock()
-                for oldFd in self.directAudioClients {
-                    close(oldFd)
-                }
-                self.directAudioClients.removeAll()
                 self.directAudioClients.append(clientFd)
                 self.directAudioLock.unlock()
                 NSLog("[SampleHandler] Desktop connected directly to Extension Audio port %d", port)
