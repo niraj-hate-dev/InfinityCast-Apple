@@ -73,16 +73,13 @@ jobs:
           /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName InfinityCast" build/Payload/InfinityCast.app/Info.plist || /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string InfinityCast" build/Payload/InfinityCast.app/Info.plist
           /usr/libexec/PlistBuddy -c "Set :CFBundleName InfinityCast" build/Payload/InfinityCast.app/Info.plist || /usr/libexec/PlistBuddy -c "Add :CFBundleName string InfinityCast" build/Payload/InfinityCast.app/Info.plist
 
-          echo "=== Verifying Embedded Extension PlugIns ==="
-          ls -la build/Payload/InfinityCast.app/PlugIns
+          # Strip PlugIns to eliminate Sideloadly 'Mismatched bundle IDs' installation rejection
+          rm -rf build/Payload/InfinityCast.app/PlugIns
+          echo "=== Embedded PlugIns stripped for smooth Sideloadly install ==="
 
           echo "=== Verifying Info.plist ==="
           /usr/libexec/PlistBuddy -c "Print :CFBundleDisplayName" build/Payload/InfinityCast.app/Info.plist
           /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" build/Payload/InfinityCast.app/Info.plist
-
-          echo "=== Verifying Extension Info.plist ==="
-          /usr/libexec/PlistBuddy -c "Print :CFBundleDisplayName" build/Payload/InfinityCast.app/PlugIns/ApowerMirrorUpload.appex/Info.plist
-          /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" build/Payload/InfinityCast.app/PlugIns/ApowerMirrorUpload.appex/Info.plist
 
           cd build
           zip -r InfinityCast.ipa Payload
