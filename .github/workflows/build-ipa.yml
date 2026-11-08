@@ -57,7 +57,10 @@ jobs:
       - name: Build Native Touch Automation Runner
         run: |
           set -o pipefail
-          xcodebuild clean build-for-testing \
+          echo "=== Available Destinations for InfinityCastRunner ==="
+          xcodebuild -showdestinations -project ApowerMirror.xcodeproj -scheme InfinityCastRunner || true
+
+          xcodebuild clean build \
             -project ApowerMirror.xcodeproj \
             -scheme InfinityCastRunner \
             -configuration Debug \
@@ -69,12 +72,12 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             AD_HOC_CODE_SIGNING_ALLOWED=YES 2>&1 | tee xcodebuild-runner.log || {
               echo "::error::Build failed in xcodebuild-runner"
-              grep -in "error:" xcodebuild-runner.log | head -n 30 | while IFS= read -r line; do
+              head -n 30 xcodebuild-runner.log | while IFS= read -r line; do
                 echo "::error::$line"
               done
               echo "### Compilation Error in xcodebuild-runner" >> $GITHUB_STEP_SUMMARY
               echo '```' >> $GITHUB_STEP_SUMMARY
-              grep -in "error:" xcodebuild-runner.log | head -n 40 >> $GITHUB_STEP_SUMMARY || true
+              head -n 40 xcodebuild-runner.log >> $GITHUB_STEP_SUMMARY || true
               tail -n 80 xcodebuild-runner.log >> $GITHUB_STEP_SUMMARY
               echo '```' >> $GITHUB_STEP_SUMMARY
               exit 1

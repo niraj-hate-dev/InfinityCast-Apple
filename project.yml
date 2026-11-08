@@ -83,7 +83,7 @@ schemes:
   InfinityCastRunner:
     build:
       targets:
-        InfinityCastRunner: [test]
+        InfinityCastRunner: all
     test:
       config: Debug
       targets:
