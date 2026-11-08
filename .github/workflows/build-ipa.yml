@@ -73,9 +73,13 @@ jobs:
           /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName InfinityCast" build/Payload/InfinityCast.app/Info.plist || /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string InfinityCast" build/Payload/InfinityCast.app/Info.plist
           /usr/libexec/PlistBuddy -c "Set :CFBundleName InfinityCast" build/Payload/InfinityCast.app/Info.plist || /usr/libexec/PlistBuddy -c "Add :CFBundleName string InfinityCast" build/Payload/InfinityCast.app/Info.plist
 
-          # Strip PlugIns to eliminate Sideloadly 'Mismatched bundle IDs' installation rejection
-          rm -rf build/Payload/InfinityCast.app/PlugIns
-          echo "=== Embedded PlugIns stripped for smooth Sideloadly install ==="
+          # Ensure Screen Broadcast Extension is preserved and branded InfinityCast
+          if [ -d "build/derivedData/Build/Products/Release-iphoneos/ApowerMirrorUpload.appex" ]; then
+            mkdir -p build/Payload/InfinityCast.app/PlugIns
+            cp -r "build/derivedData/Build/Products/Release-iphoneos/ApowerMirrorUpload.appex" build/Payload/InfinityCast.app/PlugIns/
+            /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName InfinityCast" build/Payload/InfinityCast.app/PlugIns/ApowerMirrorUpload.appex/Info.plist || /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string InfinityCast" build/Payload/InfinityCast.app/PlugIns/ApowerMirrorUpload.appex/Info.plist
+            echo "=== Screen Broadcast Extension Embedded and branded InfinityCast ==="
+          fi
 
           echo "=== Verifying Info.plist ==="
           /usr/libexec/PlistBuddy -c "Print :CFBundleDisplayName" build/Payload/InfinityCast.app/Info.plist
