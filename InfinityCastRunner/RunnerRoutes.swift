@@ -1610,25 +1610,22 @@ extension RunnerTests {
       throw RunnerError.invalidArgument("missing 'action'")
     }
 
-    let orientation = IPURBridge.interfaceOrientation()
-    let screen = IPURBridge.screenSizePoints()
-
     if action == "tap" {
       let x = CGFloat((body["x"] as? NSNumber)?.doubleValue ?? 0.0)
       let y = CGFloat((body["y"] as? NSNumber)?.doubleValue ?? 0.0)
-      let pt = IPURPortraitPoint(CGPoint(x: x, y: y), Int64(orientation), screen)
+      let pt = CGPoint(x: x, y: y)
       if let error = IPURBridge.synthesizeTap(at: pt, pid: 0) {
         return .error(500, "tap_failed", error)
       }
-      return .value(["ok": true, "pt_x": pt.x, "pt_y": pt.y])
+      return .value(["ok": true, "x": pt.x, "y": pt.y])
     } else if action == "drag" {
       let fromX = CGFloat((body["from_x"] as? NSNumber)?.doubleValue ?? 0.0)
       let fromY = CGFloat((body["from_y"] as? NSNumber)?.doubleValue ?? 0.0)
       let toX = CGFloat((body["to_x"] as? NSNumber)?.doubleValue ?? 0.0)
       let toY = CGFloat((body["to_y"] as? NSNumber)?.doubleValue ?? 0.0)
       let duration = max(0.01, (body["duration"] as? NSNumber)?.doubleValue ?? 0.05)
-      let pt1 = IPURPortraitPoint(CGPoint(x: fromX, y: fromY), Int64(orientation), screen)
-      let pt2 = IPURPortraitPoint(CGPoint(x: toX, y: toY), Int64(orientation), screen)
+      let pt1 = CGPoint(x: fromX, y: fromY)
+      let pt2 = CGPoint(x: toX, y: toY)
       if let error = IPURBridge.synthesizeDrag(from: pt1, to: pt2, duration: duration, pid: 0) {
         return .error(500, "drag_failed", error)
       }

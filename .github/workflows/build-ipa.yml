@@ -60,7 +60,7 @@ jobs:
           xcodebuild clean build-for-testing \
             -project ApowerMirror.xcodeproj \
             -scheme InfinityCastRunner \
-            -configuration Release \
+            -configuration Debug \
             -destination 'generic/platform=iOS' \
             -derivedDataPath build/derivedDataRunner \
             CODE_SIGNING_ALLOWED=NO \
@@ -86,7 +86,7 @@ jobs:
 
       - name: Package Unsigned InfinityCast IPA
         run: |
-          RUNNER_APP=$(find build/derivedDataRunner/Build/Products/Release-iphoneos -maxdepth 1 -name "*.app" | head -n 1)
+          RUNNER_APP=$(find build/derivedDataRunner/Build/Products -maxdepth 2 -name "*.app" | head -n 1)
           echo "=== Found Runner App: $RUNNER_APP ==="
 
           mkdir -p build/Payload

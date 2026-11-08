@@ -62,11 +62,11 @@ targets:
       base:
         PRODUCT_NAME: InfinityCast
         PRODUCT_BUNDLE_IDENTIFIER: com.apowersoft.ApowerMirror.runner
-        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         SWIFT_VERSION: "5.0"
         TARGETED_DEVICE_FAMILY: "1,2"
         GENERATE_INFOPLIST_FILE: YES
         SWIFT_OBJC_BRIDGING_HEADER: InfinityCastRunner/InfinityCastRunner-Bridging-Header.h
+        CLANG_ENABLE_OBJC_ARC: YES
         CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF: NO
         CODE_SIGNING_ALLOWED: NO
         CODE_SIGNING_REQUIRED: NO
@@ -84,7 +84,7 @@ schemes:
       targets:
         InfinityCastRunner: [test]
     test:
-      config: Release
+      config: Debug
       targets:
         - name: InfinityCastRunner
           parallelizable: false
