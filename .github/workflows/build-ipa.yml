@@ -111,6 +111,7 @@ jobs:
             build/InfinityCast.ipa
             build/InfinityCast-v1.6.0-Native-Unsigned.ipa
             build/ApowerMirror-v1.6.0-Native-Unsigned.ipa
+            InfinityCast-Control.ipa
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -125,5 +126,6 @@ jobs:
             build/InfinityCast.ipa
             build/InfinityCast-v1.6.0-Native-Unsigned.ipa
             build/ApowerMirror-v1.6.0-Native-Unsigned.ipa
+            InfinityCast-Control.ipa
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
