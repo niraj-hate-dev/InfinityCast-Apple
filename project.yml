@@ -23,6 +23,9 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         SWIFT_VERSION: "5.0"
         TARGETED_DEVICE_FAMILY: "1,2"
+        SWIFT_OBJC_BRIDGING_HEADER: ApowerMirror/ApowerMirror-Bridging-Header.h
+        CLANG_ENABLE_OBJC_ARC: YES
+        CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF: NO
         CODE_SIGNING_ALLOWED: NO
         CODE_SIGNING_REQUIRED: NO
         CODE_SIGN_IDENTITY: ""
@@ -52,40 +55,9 @@ targets:
         CODE_SIGN_IDENTITY: ""
         AD_HOC_CODE_SIGNING_ALLOWED: YES
 
-  InfinityCastRunner:
-    type: bundle.ui-testing
-    platform: iOS
-    deploymentTarget: "15.0"
-    sources:
-      - path: InfinityCastRunner
-    settings:
-      base:
-        PRODUCT_NAME: InfinityCast
-        PRODUCT_BUNDLE_IDENTIFIER: com.apowersoft.ApowerMirror.runner
-        SWIFT_VERSION: "5.0"
-        TARGETED_DEVICE_FAMILY: "1,2"
-        GENERATE_INFOPLIST_FILE: YES
-        SWIFT_OBJC_BRIDGING_HEADER: InfinityCastRunner/InfinityCastRunner-Bridging-Header.h
-        CLANG_ENABLE_OBJC_ARC: YES
-        CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF: NO
-        CODE_SIGN_STYLE: Manual
-        CODE_SIGNING_ALLOWED: YES
-        CODE_SIGNING_REQUIRED: NO
-        CODE_SIGN_IDENTITY: "-"
-        AD_HOC_CODE_SIGNING_ALLOWED: YES
-
 schemes:
   ApowerMirror:
     build:
       targets:
         ApowerMirror: all
         ApowerMirrorUpload: all
-  InfinityCastRunner:
-    build:
-      targets:
-        InfinityCastRunner: all
-    test:
-      config: Debug
-      targets:
-        - name: InfinityCastRunner
-          parallelizable: false

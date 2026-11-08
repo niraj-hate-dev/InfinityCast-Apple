@@ -37,7 +37,10 @@ class AppDelegate: UIResponder, UIApplicationDelegate, MMWormholeManagerDelegate
         // 4. Initialize Core Mirroring Engine
         WXMirrorCore.shared.configureMirroringOptions(fps: 60, bitrate: 4_000_000, resolution: 1080)
 
-        // 5. Initialize Root Window with WXHomeViewController
+        // 5. Start Integrated Touch Automation Server (port 8200 for low-latency USB control)
+        TouchServer.shared.start(port: 8200)
+
+        // 6. Initialize Root Window with WXHomeViewController
         if window == nil {
             let win = UIWindow(frame: UIScreen.main.bounds)
             let homeVC = WXHomeViewController()
