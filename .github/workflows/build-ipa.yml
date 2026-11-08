@@ -100,13 +100,6 @@ jobs:
           mkdir -p build/Payload
           cp -r "$RUNNER_APP" build/Payload/InfinityCast.app
 
-          # Embed Screen Broadcast Extension into PlugIns
-          mkdir -p build/Payload/InfinityCast.app/PlugIns
-          if [ -d "build/derivedData/Build/Products/Release-iphoneos/ApowerMirrorUpload.appex" ]; then
-            cp -r build/derivedData/Build/Products/Release-iphoneos/ApowerMirrorUpload.appex build/Payload/InfinityCast.app/PlugIns/
-            echo "Successfully embedded ApowerMirrorUpload.appex into PlugIns"
-          fi
-
           # Ensure Display Name is strictly 'InfinityCast'
           /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName InfinityCast" build/Payload/InfinityCast.app/Info.plist || /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string InfinityCast" build/Payload/InfinityCast.app/Info.plist
           /usr/libexec/PlistBuddy -c "Set :CFBundleName InfinityCast" build/Payload/InfinityCast.app/Info.plist || /usr/libexec/PlistBuddy -c "Add :CFBundleName string InfinityCast" build/Payload/InfinityCast.app/Info.plist
