@@ -68,9 +68,10 @@ targets:
         SWIFT_OBJC_BRIDGING_HEADER: InfinityCastRunner/InfinityCastRunner-Bridging-Header.h
         CLANG_ENABLE_OBJC_ARC: YES
         CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF: NO
-        CODE_SIGNING_ALLOWED: NO
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGNING_ALLOWED: YES
         CODE_SIGNING_REQUIRED: NO
-        CODE_SIGN_IDENTITY: ""
+        CODE_SIGN_IDENTITY: "-"
         AD_HOC_CODE_SIGNING_ALLOWED: YES
 
 schemes:
