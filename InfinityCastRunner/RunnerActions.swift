@@ -1,0 +1,395 @@
+// W3C Actions (pointer sources) → touch paths for IPURBridge synthesizeTouchPaths:name:.
+// Pure logic, no XCTest, so runner/unit-check.sh can exercise it on the Mac.
+
+import CoreGraphics
+import CoreFoundation
+import Foundation
+
+/// A synthesis error may follow delivered input. Only capability absence,
+/// established before invoking synthesis, permits another implementation.
+enum GestureDelivery {
+  static func run(
+    _ name: String, synthesisAvailable: Bool,
+    synthesized: () -> String?, fallback: () throws -> Void
+  ) throws -> String {
+    guard synthesisAvailable else {
+      try fallback()
+      return "xcui-coordinate"
+    }
+    if let error = synthesized() {
+      throw RunnerError.failed("\(name) synthesis outcome unknown: \(error); no coordinate fallback attempted")
+    }
+    return "synthesized"
+  }
+}
+
+/// A target-bound tap may execute only at the pose the caller checked.
+struct CheckedElementTap {
+  let expected: CGRect
+  let requestedPoint: CGPoint?
+  let expectedTarget: [String: Any]?
+
+  init(_ body: [String: Any]) throws {
+    guard Set(body.keys).isSubset(of: ["expected_rect", "point", "expected_target"]) else {
+      throw RunnerError.invalidArgument("unknown checked tap field")
+    }
+    if let supplied = body["expected_target"] {
+      guard let target = supplied as? [String: Any], !target.isEmpty,
+            Set(target.keys).isSubset(of: ["identifier", "kind", "label", "label_contains", "value", "focused", "enabled", "visible"]) else {
+        throw RunnerError.invalidArgument("checked target must contain literal locator fields")
+      }
+      for (key, value) in target {
+        if ["focused", "enabled", "visible"].contains(key) {
+          guard let number = value as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() else {
+            throw RunnerError.invalidArgument("checked target state must be boolean")
+          }
+        } else {
+          guard let text = value as? String, !text.contains("\0"), key != "label_contains" || !text.isEmpty else {
+            throw RunnerError.invalidArgument("checked target text must be literal")
+          }
+        }
+      }
+      expectedTarget = target
+    } else {
+      // Compatibility for older hosts: their frame-only guarantee is unchanged.
+      expectedTarget = nil
+    }
+    func numbers(_ value: Any?, count: Int) throws -> [Double] {
+      guard let values = value as? [Any], values.count == count else {
+        throw RunnerError.invalidArgument("checked tap requires a numeric array")
+      }
+      return try values.map { item in
+        guard let value = item as? NSNumber, CFGetTypeID(value) != CFBooleanGetTypeID(), value.doubleValue.isFinite else {
+          throw RunnerError.invalidArgument("checked tap coordinates must be finite numbers")
+        }
+        return value.doubleValue
+      }
+    }
+    let rect = try numbers(body["expected_rect"], count: 4)
+    guard rect[2] > 0, rect[3] > 0 else { throw RunnerError.invalidArgument("checked tap requires a non-empty frame") }
+    expected = CGRect(x: rect[0], y: rect[1], width: rect[2], height: rect[3])
+    if let supplied = body["point"] {
+      let point = try numbers(supplied, count: 2)
+      requestedPoint = CGPoint(x: point[0], y: point[1])
+    } else { requestedPoint = nil }
+  }
+
+  func checkTarget(_ attributes: [String: Any]) throws {
+    guard let expectedTarget else { return }
+    let label = (attributes["label"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+      ?? (attributes["name"] as? String) ?? ""
+    let rawType = attributes["type"] as? String ?? ""
+    let kind = rawType.hasPrefix("XCUIElementType") ? String(rawType.dropFirst(15)) : rawType
+    let strings: [String: String?] = ["identifier": attributes["rawIdentifier"] as? String,
+      "kind": kind, "label": label, "value": attributes["value"] as? String]
+    func changed() -> RunnerError {
+      RunnerError(status: 409, code: "target changed", message: "target locator changed; no tap sent")
+    }
+    for (key, wanted) in expectedTarget {
+      if let text = wanted as? String {
+        if key == "label_contains" {
+          guard Data(label.utf8).range(of: Data(text.utf8)) != nil else { throw changed() }
+        } else {
+          if key == "value" {
+            if kind == "SecureTextField" { throw changed() }
+            if let flag = attributes["value_truncated"] {
+              let knownFalse = (flag as? String).map { $0 == "0" || $0 == "false" }
+                ?? (flag as? NSNumber).map { !$0.boolValue } ?? false
+              guard knownFalse else { throw changed() }
+            }
+          }
+          guard let actual = strings[key].flatMap({ $0 }), actual.utf8.elementsEqual(text.utf8) else { throw changed() }
+        }
+      } else {
+        let raw = attributes[["enabled":"isEnabled", "focused":"isFocused", "visible":"isVisible"][key] ?? ""]
+        let actual: Bool?
+        if let text = raw as? String, text == "0" || text == "1" { actual = text == "1" }
+        else if let number = raw as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() { actual = number.boolValue }
+        else { actual = nil }
+        guard actual == (wanted as? NSNumber)?.boolValue else { throw changed() }
+      }
+    }
+  }
+
+  func point(live: CGRect, screen: CGSize) throws -> CGPoint {
+    let actual = [live.minX, live.minY, live.width, live.height]
+    let wanted = [expected.minX, expected.minY, expected.width, expected.height]
+    guard actual.allSatisfy({ $0.isFinite }), live.width > 0, live.height > 0,
+          zip(actual, wanted).allSatisfy({ pair in abs(pair.0 - pair.1) <= 1 }) else {
+      throw RunnerError(status: 409, code: "target changed", message: "target frame changed; no tap sent")
+    }
+    let point = requestedPoint ?? CGPoint(x: live.midX, y: live.midY)
+    guard point.x >= live.minX, point.x < live.maxX, point.y >= live.minY, point.y < live.maxY,
+          point.x >= 0, point.y >= 0, point.x < screen.width, point.y < screen.height else {
+      throw RunnerError(status: 409, code: "target changed", message: "checked point is no longer valid; no tap sent")
+    }
+    return point
+  }
+}
+
+enum W3CActions {
+  static func number(_ object: [String: Any], _ key: String) -> Double? {
+    if let value = object[key] as? NSNumber { return value.doubleValue }
+    if let value = object[key] as? String { return Double(value) }
+    return nil
+  }
+
+  /// How long a down…up with no time between them is held. XCTest's own tap holds 50 ms.
+  static let tapHold = 0.05
+  /// The shortest hold an explicit pause between down and up gets.
+  static let minimumHold = 0.01
+
+  /// Public tap fallback cannot preserve a hold, a delayed start or a drag.
+  static func coordinateTapPoint(_ paths: [[[String: Any]]]) -> CGPoint? {
+    guard paths.count == 1, paths[0].count == 2 else { return nil }
+    let down = paths[0][0], up = paths[0][1]
+    guard down["type"] as? String == "down", up["type"] as? String == "up",
+          up["explicitPointerUp"] as? Bool == true,
+          let x = number(down, "x"), let y = number(down, "y"),
+          let endX = number(up, "x"), let endY = number(up, "y"),
+          let start = number(down, "t"), let end = number(up, "t"),
+          [x, y, endX, endY, start, end].allSatisfy({ $0.isFinite }),
+          x == endX, y == endY, start == 0, end > 0, end <= tapHold else { return nil }
+    return CGPoint(x: x, y: y)
+  }
+
+  /// Turns one W3C pointer source's `actions` into touch paths (one per down…up). Moves while the
+  /// pointer is down keep their timed endpoints for XCTest to interpolate; a down…up with no time between them is held for
+  /// `tapHold` so iOS sees a tap, and one with time between them for at least `minimumHold`.
+  /// Each step is `{"type": "down"|"move"|"up", "x", "y", "t" (s)}`.
+  /// `elementCenter` resolves an element-origin pointerMove.
+  static func pointerPaths(
+    _ actions: [[String: Any]], elementCenter: (String) throws -> CGPoint
+  ) throws -> [[[String: Any]]] {
+    var paths: [[[String: Any]]] = []
+    var current: [[String: Any]] = []
+    var t = 0.0
+    var position = CGPoint.zero
+    var downAt: Double?
+    func step(_ type: String, _ point: CGPoint, _ offset: Double) -> [String: Any] {
+      ["type": type, "x": Double(point.x), "y": Double(point.y), "t": offset]
+    }
+    for action in actions {
+      let duration = max(0, number(action, "duration") ?? 0) / 1000
+      switch action["type"] as? String {
+      case "pause":
+        t += duration
+        // A time gap alone would interpolate the next move across the pause.
+        // Pin the finger here until the pause ends (long-press / edge hover).
+        if downAt != nil, duration > 0 {
+          current.append(step("move", position, t))
+        }
+      case "pointerMove":
+        let dx = CGFloat(number(action, "x") ?? 0)
+        let dy = CGFloat(number(action, "y") ?? 0)
+        var target = CGPoint(x: dx, y: dy)
+        if let origin = action["origin"] as? String, origin == "pointer" {
+          target = CGPoint(x: position.x + dx, y: position.y + dy)
+        } else if let elementID = ElementReference.id(from: action["origin"]) {
+          let center = try elementCenter(elementID)
+          target = CGPoint(x: center.x + dx, y: center.y + dy)
+        }
+        if downAt != nil {
+          // XCTest interpolates a segment to its timed endpoint. Dense
+          // sub-frame samples can be compressed during simulator playback.
+          current.append(step("move", target, t + duration))
+        }
+        t += duration
+        position = target
+      case "pointerDown":
+        if downAt == nil {
+          current = [step("down", position, t)]
+          downAt = t
+        }
+      case "pointerUp", "pointerCancel":
+        if let down = downAt {
+          t = max(t, down + (t > down ? minimumHold : tapHold))
+          var up = step("up", position, t)
+          up["explicitPointerUp"] = action["type"] as? String == "pointerUp"
+          current.append(up)
+          paths.append(current)
+          current = []
+          downAt = nil
+        }
+      default:
+        throw RunnerError.invalidArgument("unsupported pointer action '\(action["type"] ?? "nil")'")
+      }
+    }
+    if let down = downAt {
+      current.append(step("up", position, max(t, down + (t > down ? minimumHold : tapHold))))
+      paths.append(current)
+    }
+    return paths
+  }
+}
+
+/// runner / W3C element reference objects.
+enum ElementReference {
+  static let w3cKey = "element-6066-11e4-a52e-4f735466cecf"
+
+  static func make(_ id: String) -> [String: Any] { ["ELEMENT": id, w3cKey: id] }
+
+  static func id(from value: Any?) -> String? {
+    guard let object = value as? [String: Any] else { return nil }
+    return object[w3cKey] as? String ?? object["ELEMENT"] as? String
+  }
+}
+
+/// On-device settle (GET /wda/settle): grayscale thumbnails of consecutive frames are compared
+/// here, so the daemon learns the screen stopped moving without shipping screenshots to the Mac.
+/// Pure logic, exercised by runner/unit-check.sh.
+enum ScreenSettle {
+  /// Pixels whose gray level moved by more than `threshold` between two frames of equal size;
+  /// `Int.max` when the sizes differ (rotation, a new capture size).
+  static func changedPixels(_ a: [UInt8], _ b: [UInt8], threshold: Int = 10) -> Int {
+    guard a.count == b.count else { return Int.max }
+    var changed = 0
+    for index in 0..<a.count where abs(Int(a[index]) - Int(b[index])) > threshold {
+      changed += 1
+    }
+    return changed
+  }
+
+  /// The content band (status bar and home-indicator strips excluded) is one flat colour: the
+  /// capture of an app that hides its screen. Such frames match whether or not the app moved,
+  /// so they prove nothing about settling.
+  static func isBlank(_ pixels: [UInt8], width: Int, height: Int, spread: Int = 8) -> Bool {
+    guard width > 0, height > 0, pixels.count >= width * height else { return false }
+    let top = Int(Double(height) * 0.08), bottom = Int(Double(height) * 0.90)
+    guard bottom > top else { return false }
+    var low = 255, high = 0
+    for row in top..<bottom {
+      for column in 0..<width {
+        let value = Int(pixels[row * width + column])
+        low = min(low, value)
+        high = max(high, value)
+        if high - low > spread { return false }
+      }
+    }
+    return true
+  }
+
+  /// Tracks a stream of frames: stable once no frame changed (beyond `tolerance` pixels) for
+  /// `quietMs`, judged from at least two frames.
+  struct Tracker {
+    let quietMs: Double
+    let tolerance: Int
+    private(set) var frames = 0
+    private(set) var lastChanged = 0
+    private var previous: [UInt8]?
+    private var lastChangeAt: Double = 0
+
+    init(quietMs: Double, tolerance: Int) {
+      self.quietMs = quietMs
+      self.tolerance = tolerance
+    }
+
+    /// Feeds one frame taken at `atMs`; returns whether the screen counts as settled now.
+    mutating func add(_ frame: [UInt8], atMs: Double) -> Bool {
+      frames += 1
+      if let previous {
+        lastChanged = ScreenSettle.changedPixels(previous, frame)
+        if lastChanged > tolerance { lastChangeAt = atMs }
+      } else {
+        lastChangeAt = atMs
+      }
+      previous = frame
+      return frames >= 2 && atMs - lastChangeAt >= quietMs
+    }
+  }
+}
+
+/// Whether a tap at a point can touch anything on a screen of `size` points. A tap outside it
+/// touches nothing and would still read as success. Hardware, 17 Pro Max: a click on a link below
+/// the visible page of the in-app Safari sheet tapped the link's off-screen centre and answered ok.
+enum TapBounds {
+  static func onScreen(_ point: CGPoint, _ size: CGSize) -> Bool {
+    size.width > 0 && size.height > 0
+      && point.x >= 0 && point.y >= 0 && point.x <= size.width && point.y <= size.height
+  }
+
+  /// The first touch point of W3C pointer paths (steps carry `x`/`y` as numbers) that lies off a
+  /// screen of `size` points, or nil when every point is on it.
+  static func firstOffScreen(_ paths: [[[String: Any]]], _ size: CGSize) -> CGPoint? {
+    for path in paths {
+      for step in path {
+        guard let x = (step["x"] as? NSNumber)?.doubleValue,
+              let y = (step["y"] as? NSNumber)?.doubleValue else { continue }
+        let point = CGPoint(x: x, y: y)
+        if !onScreen(point, size) { return point }
+      }
+    }
+    return nil
+  }
+}
+
+/// The screen size for an interface orientation (UIInterfaceOrientation raw value): landscape
+/// (3, 4) puts the long side across, anything else (portrait, upside down, unknown) keeps it
+/// upright. Callers pass the interface orientation, never the device's: a phone lying on its side
+/// or face up says nothing about how its UI is drawn.
+enum ScreenOrientation {
+  static func isLandscape(_ interfaceOrientation: Int) -> Bool {
+    interfaceOrientation == 3 || interfaceOrientation == 4
+  }
+
+  static func size(natural: CGSize, interfaceOrientation: Int) -> CGSize {
+    let short = min(natural.width, natural.height)
+    let long = max(natural.width, natural.height)
+    return isLandscape(interfaceOrientation)
+      ? CGSize(width: long, height: short) : CGSize(width: short, height: long)
+  }
+}
+
+/// Whether an alert seen after a button tap is still the one that was tapped: same text and the
+/// same buttons. A follow-up alert (a second confirmation) differs and counts as progress.
+enum AlertMatch {
+  static func same(_ text: String?, _ buttons: [String], _ otherText: String?, _ otherButtons: [String]) -> Bool {
+    (text ?? "") == (otherText ?? "") && buttons == otherButtons
+  }
+}
+
+/// A scroll drag that leaves no momentum: most of the distance quickly, then a slow tail, so the
+/// release speed (which the list would keep gliding with) is below UIKit's fling threshold.
+/// Hardware, iPhone 17 Pro Max: a constant 380 pt/s glided on; a tail of ~150 pt/s stopped dead.
+enum ScrollDrag {
+  /// Fraction of the distance covered by the slow tail.
+  static let tailFraction = 0.15
+  static let fastMs = 220.0
+  static let tailMs = 250.0
+
+  static func actions(from start: CGPoint, to end: CGPoint) -> [[String: Any]] {
+    let split = CGPoint(
+      x: start.x + (end.x - start.x) * CGFloat(1 - tailFraction),
+      y: start.y + (end.y - start.y) * CGFloat(1 - tailFraction))
+    return [
+      ["type": "pointerMove", "duration": 0, "x": Double(start.x), "y": Double(start.y)],
+      ["type": "pointerDown", "button": 0],
+      ["type": "pointerMove", "duration": fastMs, "x": Double(split.x), "y": Double(split.y)],
+      ["type": "pointerMove", "duration": tailMs, "x": Double(end.x), "y": Double(end.y)],
+      ["type": "pointerUp", "button": 0],
+    ]
+  }
+}
+
+/// Preserve the Home event's dismissal semantics; activate the desktop only when it did not arrive.
+enum HomeAction {
+  static func run(
+    press: () throws -> Void, isDesktop: () -> Bool, activate: () throws -> Void,
+    now: () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
+    sleep: (TimeInterval) -> Void = { Thread.sleep(forTimeInterval: $0) }
+  ) throws {
+    func wait(_ timeout: TimeInterval) -> Bool {
+      let deadline = now() + timeout
+      repeat {
+        if isDesktop() { return true }
+        let remaining = deadline - now()
+        if remaining <= 0 { return false }
+        sleep(min(0.05, remaining))
+      } while true
+    }
+    try press()
+    if wait(0.8) { return }
+    try activate()
+    guard wait(2) else { throw RunnerError.failed("home failed: SpringBoard did not become foreground") }
+  }
+}

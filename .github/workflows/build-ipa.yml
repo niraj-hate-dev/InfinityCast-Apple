@@ -54,42 +54,77 @@ jobs:
               exit 1
             }
 
-      - name: Upload Build Log on Failure
+      - name: Build Native Touch Automation Runner
+        run: |
+          set -o pipefail
+          xcodebuild clean build-for-testing \
+            -project ApowerMirror.xcodeproj \
+            -scheme InfinityCastRunner \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build/derivedDataRunner \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            AD_HOC_CODE_SIGNING_ALLOWED=YES 2>&1 | tee xcodebuild-runner.log || {
+              echo "### Compilation Error in xcodebuild-runner" >> $GITHUB_STEP_SUMMARY
+              echo '```' >> $GITHUB_STEP_SUMMARY
+              grep -in "error:" xcodebuild-runner.log | head -n 40 >> $GITHUB_STEP_SUMMARY || true
+              tail -n 80 xcodebuild-runner.log >> $GITHUB_STEP_SUMMARY
+              echo '```' >> $GITHUB_STEP_SUMMARY
+              exit 1
+            }
+
+      - name: Upload Build Logs on Failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: xcodebuild-compilation-log
-          path: xcodebuild.log
+          name: xcodebuild-compilation-logs
+          path: |
+            xcodebuild.log
+            xcodebuild-runner.log
 
-      - name: Package Unsigned IPA
+      - name: Package Unsigned InfinityCast IPA
         run: |
+          RUNNER_APP=$(find build/derivedDataRunner/Build/Products/Release-iphoneos -maxdepth 1 -name "*.app" | head -n 1)
+          echo "=== Found Runner App: $RUNNER_APP ==="
+
           mkdir -p build/Payload
-          cp -r build/derivedData/Build/Products/Release-iphoneos/ApowerMirror.app build/Payload/
+          cp -r "$RUNNER_APP" build/Payload/InfinityCast.app
 
-          echo "=== Verifying Embedded Extension ==="
-          ls -la build/Payload/ApowerMirror.app/PlugIns || echo "No PlugIns directory created"
+          # Embed Screen Broadcast Extension into PlugIns
+          mkdir -p build/Payload/InfinityCast.app/PlugIns
+          if [ -d "build/derivedData/Build/Products/Release-iphoneos/ApowerMirrorUpload.appex" ]; then
+            cp -r build/derivedData/Build/Products/Release-iphoneos/ApowerMirrorUpload.appex build/Payload/InfinityCast.app/PlugIns/
+            echo "Successfully embedded ApowerMirrorUpload.appex into PlugIns"
+          fi
 
-          echo "=== Verifying App Bundle ID ==="
-          /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" build/Payload/ApowerMirror.app/Info.plist
+          # Ensure Display Name is strictly 'InfinityCast'
+          /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName InfinityCast" build/Payload/InfinityCast.app/Info.plist || /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string InfinityCast" build/Payload/InfinityCast.app/Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleName InfinityCast" build/Payload/InfinityCast.app/Info.plist || /usr/libexec/PlistBuddy -c "Add :CFBundleName string InfinityCast" build/Payload/InfinityCast.app/Info.plist
+
+          # Copy official glowing App Icons from ApowerMirror
+          cp build/derivedData/Build/Products/Release-iphoneos/ApowerMirror.app/AppIcon* build/Payload/InfinityCast.app/ 2>/dev/null || true
+
+          echo "=== Verifying Embedded Plugins ==="
+          ls -la build/Payload/InfinityCast.app/PlugIns || echo "No PlugIns directory created"
+
+          echo "=== Verifying Info.plist ==="
+          /usr/libexec/PlistBuddy -c "Print :CFBundleDisplayName" build/Payload/InfinityCast.app/Info.plist
+          /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" build/Payload/InfinityCast.app/Info.plist
 
           cd build
-          zip -r InfinityCast-v1.6.0-Native-Unsigned.ipa Payload
-          cp InfinityCast-v1.6.0-Native-Unsigned.ipa ApowerMirror-v1.6.0-Native-Unsigned.ipa
-          echo "=== IPA Generated Successfully ==="
+          zip -r InfinityCast.ipa Payload
+          cp InfinityCast.ipa InfinityCast-v1.6.0-Native-Unsigned.ipa
+          cp InfinityCast.ipa ApowerMirror-v1.6.0-Native-Unsigned.ipa
+          echo "=== InfinityCast IPA Generated Successfully ==="
           ls -lh *.ipa
 
       - name: Upload InfinityCast IPA Artifact
         uses: actions/upload-artifact@v4
         with:
           name: InfinityCast-v1.6.0-Native-Unsigned
-          path: build/InfinityCast-v1.6.0-Native-Unsigned.ipa
-          retention-days: 14
-
-      - name: Upload ApowerMirror Legacy Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ApowerMirror-v1.6.0-Native-Unsigned
-          path: build/ApowerMirror-v1.6.0-Native-Unsigned.ipa
+          path: build/InfinityCast.ipa
           retention-days: 14
 
       - name: Publish IPA to GitHub Release (Versioned)
@@ -101,6 +136,7 @@ jobs:
           name: "InfinityCast v1.6.1 (Build ${{ github.run_number }})"
           make_latest: true
           files: |
+            build/InfinityCast.ipa
             build/InfinityCast-v1.6.0-Native-Unsigned.ipa
             build/ApowerMirror-v1.6.0-Native-Unsigned.ipa
         env:
@@ -114,6 +150,7 @@ jobs:
           tag_name: latest
           name: "InfinityCast Latest Release (Build ${{ github.run_number }})"
           files: |
+            build/InfinityCast.ipa
             build/InfinityCast-v1.6.0-Native-Unsigned.ipa
             build/ApowerMirror-v1.6.0-Native-Unsigned.ipa
         env:
