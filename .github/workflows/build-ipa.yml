@@ -104,9 +104,23 @@ jobs:
         if: github.ref == 'refs/heads/niraj' || github.ref == 'refs/heads/main'
         continue-on-error: true
         with:
-          tag_name: "v1.6.1-build.${{ github.run_number }}"
-          name: "InfinityCast v1.6.1 (Build ${{ github.run_number }})"
+          tag_name: "v1.7.0-build.${{ github.run_number }}"
+          name: "InfinityCast v1.7.0 (Build ${{ github.run_number }})"
           make_latest: true
+          body: |
+            ## 🚀 InfinityCast v1.7.0 Release
+            
+            ### Included Assets:
+            - **`InfinityCast.ipa`**: Native iOS Screen Broadcast Mirroring App with ReplayKit Extension (Branded **InfinityCast**).
+            - **`InfinityCast-Control.ipa`**: XCUITest Runner IPA for background multi-touch session.
+            - **`InfinityCast-v1.6.0-Native-Unsigned.ipa`**: Standalone native unsigned bundle.
+            - **`ApowerMirror-v1.6.0-Native-Unsigned.ipa`**: Compatibility bundle.
+            
+            ### What's New in v1.7.0:
+            - **Universal HID Hardware Touch Support**: Zero-app USB touch injection on iOS 18+ bypassing sandbox suspension when Free Fire is open.
+            - **Multi-Touch Support**: Up to 5 simultaneous touch points (WASD joystick, Camera look, and action keys).
+            - **ReplayKit Screen Broadcast Extension**: Preserved and branded InfinityCast.
+            - **Windows Software Integration**: Real-time Universal HID indicator in the top bar and Keymap Editor drawer.
           files: |
             build/InfinityCast.ipa
             build/InfinityCast-v1.6.0-Native-Unsigned.ipa
@@ -115,13 +129,22 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Update Latest Release Tag
+      - name: Update v1.7.0 Release Tag
         uses: softprops/action-gh-release@v2
         if: github.ref == 'refs/heads/niraj' || github.ref == 'refs/heads/main'
         continue-on-error: true
         with:
-          tag_name: latest
-          name: "InfinityCast Latest Release (Build ${{ github.run_number }})"
+          tag_name: v1.7.0
+          name: "InfinityCast v1.7.0 (Latest Release)"
+          make_latest: true
+          body: |
+            ## 🚀 InfinityCast v1.7.0 (Latest)
+            
+            ### Included Assets:
+            - **`InfinityCast.ipa`**: Native iOS Screen Broadcast Mirroring App with ReplayKit Extension (Branded **InfinityCast**).
+            - **`InfinityCast-Control.ipa`**: XCUITest Runner IPA for background multi-touch session.
+            - **`InfinityCast-v1.6.0-Native-Unsigned.ipa`**: Standalone native unsigned bundle.
+            - **`ApowerMirror-v1.6.0-Native-Unsigned.ipa`**: Compatibility bundle.
           files: |
             build/InfinityCast.ipa
             build/InfinityCast-v1.6.0-Native-Unsigned.ipa
