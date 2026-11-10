@@ -66,7 +66,15 @@ public final class WXMirrorCore: WXCastiOSSenderDelegate {
     // MARK: - Session Control
 
     public func prepareForMirroring() {
-        configureMirroringOptions()
+        let groupDefaults = UserDefaults(suiteName: appGroupName)
+        let savedBitrate = groupDefaults?.integer(forKey: "kEncoderBitrate") ?? 0
+        let savedRes = groupDefaults?.integer(forKey: "kEncoderShortSide") ?? 0
+        let savedFps = groupDefaults?.integer(forKey: "kEncoderFps") ?? 0
+        configureMirroringOptions(
+            fps: savedFps > 0 ? savedFps : 60,
+            bitrate: savedBitrate > 0 ? savedBitrate : 4_000_000,
+            resolution: savedRes > 0 ? savedRes : 1080
+        )
         WXCastiOSSender.shared.startMirrorService()
         currentState = .waitingForBroadcast
     }

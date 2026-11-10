@@ -34,18 +34,21 @@ class AppDelegate: UIResponder, UIApplicationDelegate, MMWormholeManagerDelegate
         // 3. Connect MMWormhole IPC Manager
         MMWormholeManager.shared.delegate = self
 
-        // 4. Initialize Core Mirroring Engine
-        WXMirrorCore.shared.configureMirroringOptions(fps: 60, bitrate: 4_000_000, resolution: 1080)
+        // 4. Initialize Core Mirroring Engine using persisted user stream preferences
+        let savedStream = InfinityStreamSettings.load()
+        WXMirrorCore.shared.configureMirroringOptions(
+            fps: 60,
+            bitrate: savedStream.bitrate.bps,
+            resolution: savedStream.resolution.shortSide
+        )
 
         // 5. Start Integrated Touch Automation Server (port 8200 for low-latency USB control)
         TouchServer.shared.start(port: 8200)
 
-        // 6. Initialize Root Window with WXHomeViewController
+        // 6. Initialize Root Window with InfinityRootTabController (Cast + Me tabs)
         if window == nil {
             let win = UIWindow(frame: UIScreen.main.bounds)
-            let homeVC = WXHomeViewController()
-            let nav = UINavigationController(rootViewController: homeVC)
-            win.rootViewController = nav
+            win.rootViewController = InfinityRootTabController()
             win.makeKeyAndVisible()
             self.window = win
         }

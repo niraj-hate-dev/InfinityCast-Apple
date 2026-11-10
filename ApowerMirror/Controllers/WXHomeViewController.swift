@@ -1,12 +1,12 @@
 //
 //  WXHomeViewController.swift
-//  ApowerMirror
+//  ApowerMirror / Controllers
 //
-//  Clean Direct In-App Screen Recording & Real-time Live Diagnostics:
-//  - Prominent Start Screen Recording button with iOS permission prompt
-//  - Live ReplayKit Screen Recording Status Card (Success / Error / Duration)
-//  - Live Windows PC Receiver Connection Status Card (Connected / Listening / Error)
-//  - Seamless fallback to System Broadcast Extension if desired
+//  Cast Home tab matching Android's fragment_home.xml UI:
+//  - Top translucent glass header with circular InfinityLogo & "InfinityCast"
+//  - Ambient radial glow behind a centered status card & 3-ring circular Cast button
+//  - Invisible ReplayKit RPSystemBroadcastPickerView overlay for direct iOS broadcast start
+//  - Reactive Darwin + UIScreen + WXCastiOSSender state sync
 //
 
 import UIKit
@@ -16,79 +16,69 @@ import Darwin
 @objc(WXHomeViewController)
 open class WXHomeViewController: UIViewController, ScreenRecorderManagerDelegate, WXCastiOSSenderDelegate, BroadcastPickerManagerDelegate {
 
-    // MARK: - UI Components
+    // MARK: - Top Bar UI
+
+    private let topBarView = UIView()
+    private let topBarLogo = InfinityBrandLogoView()
+    private let topBarTitleLabel = UILabel()
+    private let topBarHairline = UIView()
+
+    // MARK: - Hero UI
+
+    private let centerContainer = UIView()
+    private let radialGlowView = InfinityRadialGlowView()
+
+    private let statusCard = InfinityGlassCardView(cornerRadius: 10)
+    private let statusTitleLabel = UILabel()
+    private let statusSubtitleLabel = UILabel()
+    private let streamConfigLabel = UILabel()
+
+    // 220x220 3-ring Cast Button
+    private let castCircleContainer = UIView()
+    private let outerGlowRing = UIView()
+    private let middleRing = UIView()
+    private let innerCoreRing = UIView()
+    private let castIconView = UIImageView()
+    private let castActionLabel = UILabel()
+
     private var nativePickerView: RPSystemBroadcastPickerView?
-    private var stopButton: UIButton?
-    private var scanBtnSubLabel: UILabel?
-    private var hintLabel: UILabel?
-    private var pulseLayer: CAShapeLayer?
+    private weak var hookedPickerButton: UIButton?
+    private let stopOverlayButton = UIButton(type: .custom)
 
-    // Live Diagnostic UI Cards
-    private var replayKitStatusCard: UIView?
-    private var replayKitDotView: UIView?
-    private var replayKitTitleLabel: UILabel?
-    private var replayKitDetailLabel: UILabel?
+    private let hintLabel = UILabel()
 
-    private var connectionStatusCard: UIView?
-    private var connectionDotView: UIView?
-    private var connectionTitleLabel: UILabel?
-    private var connectionDetailLabel: UILabel?
+    // MARK: - State
 
-    private var systemBroadcastButton: UIButton?
-
-    // Quality & Bitrate Controls
-    private var qualityCard: UIView?
-    private var resValueLabel: UILabel?
-    private var bitrateValueLabel: UILabel?
-    private var applyButton: UIButton?
-    private var saveStatusLabel: UILabel?
-    private var currentResolution: String = "720p"
-    private var currentBitrate: String = "4 Mbps"
-
-    // State Tracking
-    private var durationTimer: Timer?
-    private var recordingSeconds = 0
-    private var lastErrorMessage: String?
+    private var currentResolutionKey: String = "1080p"
+    private var currentBitrateLabel: String = "4 Mbps"
     private var isDesktopConnected = false
+    private var lastErrorMessage: String?
+
+    private var recordingStartTime: Date?
+    private var durationTimer: Timer?
 
     // MARK: - Lifecycle
 
     open override func viewDidLoad() {
         super.viewDidLoad()
-        setupUI()
-        setupObservers()
+        view.backgroundColor = .clear
 
-        // Bind delegates
+        loadPersistedSettings()
+
         ScreenRecorderManager.shared.delegate = self
         WXCastiOSSender.shared.delegate = self
         BroadcastPickerManager.shared.delegate = self
-
-        // Prepare broadcast picker view in hierarchy
         BroadcastPickerManager.shared.preparePickerView(in: view)
 
-        // Load saved stream quality preferences
-        if let savedRes = (UserDefaults(suiteName: "group.apowersoft.mirror")?.string(forKey: "kEncoderResolution")) ?? UserDefaults.standard.string(forKey: "kEncoderResolution") {
-            let valid = ["544p", "720p", "1080p", "2k", "4k"]
-            if valid.contains(where: { $0.caseInsensitiveCompare(savedRes) == .orderedSame }) {
-                currentResolution = savedRes
-            } else {
-                currentResolution = "720p"
-            }
-        }
-        if let savedBit = (UserDefaults(suiteName: "group.apowersoft.mirror")?.string(forKey: "kEncoderBitrateString")) ?? UserDefaults.standard.string(forKey: "kEncoderBitrateString") {
-            currentBitrate = savedBit
-        }
-        updateQualityLabels()
-
-        let qualityBtn = UIBarButtonItem(title: "⚙️ Quality", style: .plain, target: self, action: #selector(handleQualityNavAction))
-        qualityBtn.tintColor = .white
-        navigationItem.rightBarButtonItem = qualityBtn
+        setupUI()
+        setupObservers()
+        updateUIState()
     }
 
     open override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
-        navigationController?.setNavigationBarHidden(false, animated: animated)
-        updateStatusCards()
+        loadPersistedSettings()
+        updateUIState()
         startPulseAnimation()
     }
 
@@ -99,659 +89,258 @@ open class WXHomeViewController: UIViewController, ScreenRecorderManagerDelegate
 
     open override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
+
         if let picker = nativePickerView {
             picker.preferredExtension = BroadcastPickerManager.shared.extensionBundleId
             for subview in picker.subviews {
                 if let button = subview as? UIButton {
                     button.frame = picker.bounds
-                    button.tintColor = .white
-                    button.transform = CGAffineTransform(scaleX: 1.6, y: 1.6)
+                    if hookedPickerButton !== button {
+                        button.addTarget(self, action: #selector(handlePickerTouchDown), for: .touchUpInside)
+                        hookedPickerButton = button
+                    }
                 }
             }
         }
     }
 
-    // MARK: - UI Construction
+    open override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        if traitCollection.hasDifferentColorAppearance(comparedTo: previousTraitCollection) {
+            innerCoreRing.layer.borderColor = InfinityTheme.brandBlueLight.resolvedColor(with: traitCollection).cgColor
+        }
+    }
+
+    deinit {
+        stopDurationTimer()
+        NotificationCenter.default.removeObserver(self)
+        CFNotificationCenterRemoveEveryObserver(
+            CFNotificationCenterGetDarwinNotifyCenter(),
+            Unmanaged.passUnretained(self).toOpaque()
+        )
+    }
+
+    // MARK: - UI Setup
 
     private func setupUI() {
-        view.backgroundColor = UIColor(red: 0.95, green: 0.96, blue: 0.98, alpha: 1.0)
-        title = "ApowerMirror"
+        setupTopBar()
+        setupCenterWorkspace()
+    }
 
-        // Top decorative blue banner
-        let topBg = UIView()
-        topBg.translatesAutoresizingMaskIntoConstraints = false
-        topBg.backgroundColor = UIColor(red: 0.15, green: 0.50, blue: 0.98, alpha: 1.0)
-        view.addSubview(topBg)
+    private func setupTopBar() {
+        topBarView.translatesAutoresizingMaskIntoConstraints = false
+        topBarView.backgroundColor = InfinityTheme.topBarBg
+        view.addSubview(topBarView)
 
-        // Device Info Header Card
-        let infoCard = UIView()
-        infoCard.translatesAutoresizingMaskIntoConstraints = false
-        infoCard.backgroundColor = .white
-        infoCard.layer.cornerRadius = 14
-        infoCard.layer.shadowColor = UIColor.black.cgColor
-        infoCard.layer.shadowOffset = CGSize(width: 0, height: 3)
-        infoCard.layer.shadowOpacity = 0.08
-        infoCard.layer.shadowRadius = 8
-        view.addSubview(infoCard)
+        topBarLogo.translatesAutoresizingMaskIntoConstraints = false
+        topBarView.addSubview(topBarLogo)
 
-        let phoneIcon = UIImageView()
-        phoneIcon.translatesAutoresizingMaskIntoConstraints = false
-        phoneIcon.image = UIImage(systemName: "iphone")
-        phoneIcon.tintColor = UIColor(red: 0.15, green: 0.50, blue: 0.98, alpha: 1.0)
-        phoneIcon.contentMode = .scaleAspectFit
-        infoCard.addSubview(phoneIcon)
+        topBarTitleLabel.text = "InfinityCast"
+        topBarTitleLabel.font = .systemFont(ofSize: 22, weight: .bold)
+        topBarTitleLabel.textColor = InfinityTheme.textPrimary
+        topBarTitleLabel.translatesAutoresizingMaskIntoConstraints = false
+        topBarView.addSubview(topBarTitleLabel)
 
-        let devName = UILabel()
-        devName.translatesAutoresizingMaskIntoConstraints = false
-        devName.text = UIDevice.current.name
-        devName.font = UIFont.systemFont(ofSize: 16, weight: .bold)
-        devName.textColor = UIColor(white: 0.15, alpha: 1.0)
-        infoCard.addSubview(devName)
+        topBarHairline.backgroundColor = InfinityTheme.separator
+        topBarHairline.translatesAutoresizingMaskIntoConstraints = false
+        topBarView.addSubview(topBarHairline)
 
-        let wifiLbl = UILabel()
-        wifiLbl.translatesAutoresizingMaskIntoConstraints = false
-        let ssid = NetworkDetector.currentSSID() ?? "Wi-Fi Connected"
-        wifiLbl.text = "● \(ssid)"
-        wifiLbl.font = UIFont.systemFont(ofSize: 13, weight: .medium)
-        wifiLbl.textColor = UIColor(red: 0.10, green: 0.65, blue: 0.35, alpha: 1.0)
-        infoCard.addSubview(wifiLbl)
+        NSLayoutConstraint.activate([
+            topBarView.topAnchor.constraint(equalTo: view.topAnchor),
+            topBarView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            topBarView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            topBarView.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 64),
 
-        // 1. Center Native ReplayKit Broadcast Picker (START) - 100% Direct Apple Touch Interaction
+            topBarLogo.leadingAnchor.constraint(equalTo: topBarView.leadingAnchor, constant: 20),
+            topBarLogo.bottomAnchor.constraint(equalTo: topBarView.bottomAnchor, constant: -16),
+            topBarLogo.widthAnchor.constraint(equalToConstant: 32),
+            topBarLogo.heightAnchor.constraint(equalToConstant: 32),
+
+            topBarTitleLabel.leadingAnchor.constraint(equalTo: topBarLogo.trailingAnchor, constant: 12),
+            topBarTitleLabel.centerYAnchor.constraint(equalTo: topBarLogo.centerYAnchor),
+
+            topBarHairline.leadingAnchor.constraint(equalTo: topBarView.leadingAnchor),
+            topBarHairline.trailingAnchor.constraint(equalTo: topBarView.trailingAnchor),
+            topBarHairline.bottomAnchor.constraint(equalTo: topBarView.bottomAnchor),
+            topBarHairline.heightAnchor.constraint(equalToConstant: 1.0 / UIScreen.main.scale)
+        ])
+    }
+
+    private func setupCenterWorkspace() {
+        centerContainer.translatesAutoresizingMaskIntoConstraints = false
+        centerContainer.backgroundColor = .clear
+        view.addSubview(centerContainer)
+
+        radialGlowView.translatesAutoresizingMaskIntoConstraints = false
+        centerContainer.addSubview(radialGlowView)
+
+        // Status Card (bg_status_card)
+        statusCard.translatesAutoresizingMaskIntoConstraints = false
+        centerContainer.addSubview(statusCard)
+
+        statusTitleLabel.font = .systemFont(ofSize: 18, weight: .bold)
+        statusTitleLabel.textColor = InfinityTheme.textPrimary
+        statusTitleLabel.textAlignment = .center
+
+        statusSubtitleLabel.font = .systemFont(ofSize: 14, weight: .regular)
+        statusSubtitleLabel.textColor = InfinityTheme.textSecondary
+        statusSubtitleLabel.textAlignment = .center
+        statusSubtitleLabel.numberOfLines = 2
+
+        streamConfigLabel.font = .systemFont(ofSize: 12, weight: .semibold)
+        streamConfigLabel.textColor = InfinityTheme.brandBlueLight
+        streamConfigLabel.textAlignment = .center
+
+        let cardStack = UIStackView(arrangedSubviews: [statusTitleLabel, statusSubtitleLabel, streamConfigLabel])
+        cardStack.axis = .vertical
+        cardStack.alignment = .center
+        cardStack.spacing = 6
+        cardStack.translatesAutoresizingMaskIntoConstraints = false
+        statusCard.addSubview(cardStack)
+
+        // 220x220 Concentric 3-Ring Circle Cast Button
+        castCircleContainer.translatesAutoresizingMaskIntoConstraints = false
+        castCircleContainer.backgroundColor = .clear
+        centerContainer.addSubview(castCircleContainer)
+
+        outerGlowRing.translatesAutoresizingMaskIntoConstraints = false
+        outerGlowRing.backgroundColor = InfinityTheme.circleGlow
+        outerGlowRing.layer.cornerRadius = 110
+        outerGlowRing.isUserInteractionEnabled = false
+        castCircleContainer.addSubview(outerGlowRing)
+
+        middleRing.translatesAutoresizingMaskIntoConstraints = false
+        middleRing.backgroundColor = InfinityTheme.circleRing
+        middleRing.layer.cornerRadius = 102
+        middleRing.layer.borderWidth = 2
+        middleRing.layer.borderColor = InfinityTheme.circleRing.cgColor
+        middleRing.isUserInteractionEnabled = false
+        castCircleContainer.addSubview(middleRing)
+
+        innerCoreRing.translatesAutoresizingMaskIntoConstraints = false
+        innerCoreRing.backgroundColor = InfinityTheme.circleCore
+        innerCoreRing.layer.cornerRadius = 94
+        innerCoreRing.layer.borderWidth = 4
+        innerCoreRing.layer.borderColor = InfinityTheme.brandBlueLight.resolvedColor(with: traitCollection).cgColor
+        innerCoreRing.isUserInteractionEnabled = false
+        castCircleContainer.addSubview(innerCoreRing)
+
+        castIconView.contentMode = .scaleAspectFit
+        castIconView.tintColor = InfinityTheme.brandBlue
+        castIconView.translatesAutoresizingMaskIntoConstraints = false
+
+        castActionLabel.font = .systemFont(ofSize: 20, weight: .bold)
+        castActionLabel.textColor = InfinityTheme.brandBlue
+        castActionLabel.textAlignment = .center
+        castActionLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        let circleContentStack = UIStackView(arrangedSubviews: [castIconView, castActionLabel])
+        circleContentStack.axis = .vertical
+        circleContentStack.alignment = .center
+        circleContentStack.spacing = 10
+        circleContentStack.isUserInteractionEnabled = false
+        circleContentStack.translatesAutoresizingMaskIntoConstraints = false
+        innerCoreRing.addSubview(circleContentStack)
+
+        // ReplayKit System Broadcast Picker (nearly transparent touch surface over the Start button)
         let picker = RPSystemBroadcastPickerView()
         picker.translatesAutoresizingMaskIntoConstraints = false
         picker.preferredExtension = BroadcastPickerManager.shared.extensionBundleId
         picker.showsMicrophoneButton = false
-        picker.backgroundColor = UIColor(red: 0.15, green: 0.50, blue: 0.98, alpha: 1.0)
-        picker.layer.cornerRadius = 80
-        picker.layer.shadowColor = UIColor(red: 0.15, green: 0.50, blue: 0.98, alpha: 0.45).cgColor
-        picker.layer.shadowOffset = CGSize(width: 0, height: 8)
-        picker.layer.shadowOpacity = 0.5
-        picker.layer.shadowRadius = 16
-        picker.layer.masksToBounds = false
-        picker.tintColor = .white
-        picker.alpha = 1.0
-        view.addSubview(picker)
+        picker.backgroundColor = .clear
+        picker.tintColor = .clear
+        picker.alpha = 0.02
+        picker.layer.cornerRadius = 110
+        picker.clipsToBounds = true
+        castCircleContainer.addSubview(picker)
         self.nativePickerView = picker
 
-        let btnSub = UILabel()
-        btnSub.translatesAutoresizingMaskIntoConstraints = false
-        btnSub.text = "START"
-        btnSub.font = UIFont.systemFont(ofSize: 13, weight: .heavy)
-        btnSub.textColor = UIColor.white.withAlphaComponent(0.95)
-        btnSub.isUserInteractionEnabled = false
-        picker.addSubview(btnSub)
-        self.scanBtnSubLabel = btnSub
+        // Stop button overlay (active only while streaming)
+        stopOverlayButton.translatesAutoresizingMaskIntoConstraints = false
+        stopOverlayButton.backgroundColor = .clear
+        stopOverlayButton.layer.cornerRadius = 110
+        stopOverlayButton.isHidden = true
+        stopOverlayButton.addTarget(self, action: #selector(handleStopAction), for: .touchUpInside)
+        castCircleContainer.addSubview(stopOverlayButton)
 
-        // 2. Center STOP Button (visible only when active recording is in progress)
-        let stopBtn = UIButton(type: .custom)
-        stopBtn.translatesAutoresizingMaskIntoConstraints = false
-        stopBtn.backgroundColor = UIColor(red: 0.90, green: 0.25, blue: 0.20, alpha: 1.0)
-        stopBtn.layer.cornerRadius = 80
-        stopBtn.layer.shadowColor = UIColor(red: 0.90, green: 0.25, blue: 0.20, alpha: 0.45).cgColor
-        stopBtn.layer.shadowOffset = CGSize(width: 0, height: 8)
-        stopBtn.layer.shadowOpacity = 0.5
-        stopBtn.layer.shadowRadius = 16
-        stopBtn.addTarget(self, action: #selector(handleStopAction), for: .touchUpInside)
-        stopBtn.isHidden = true
-        view.addSubview(stopBtn)
-        self.stopButton = stopBtn
+        // Subtle Footer Hint
+        hintLabel.font = .systemFont(ofSize: 13, weight: .medium)
+        hintLabel.textColor = InfinityTheme.textSecondary
+        hintLabel.textAlignment = .center
+        hintLabel.numberOfLines = 2
+        hintLabel.translatesAutoresizingMaskIntoConstraints = false
+        centerContainer.addSubview(hintLabel)
 
-        let stopLbl = UILabel()
-        stopLbl.translatesAutoresizingMaskIntoConstraints = false
-        stopLbl.text = "STOP"
-        stopLbl.font = UIFont.systemFont(ofSize: 26, weight: .black)
-        stopLbl.textColor = .white
-        stopLbl.isUserInteractionEnabled = false
-        stopBtn.addSubview(stopLbl)
-
-        let stopSubLbl = UILabel()
-        stopSubLbl.translatesAutoresizingMaskIntoConstraints = false
-        stopSubLbl.text = "TAP TO END"
-        stopSubLbl.font = UIFont.systemFont(ofSize: 11, weight: .heavy)
-        stopSubLbl.textColor = UIColor.white.withAlphaComponent(0.9)
-        stopSubLbl.isUserInteractionEnabled = false
-        stopBtn.addSubview(stopSubLbl)
-
-        let hint = UILabel()
-        hint.translatesAutoresizingMaskIntoConstraints = false
-        hint.text = "Tap to Launch Screen Recording"
-        hint.font = UIFont.systemFont(ofSize: 14, weight: .medium)
-        hint.textColor = UIColor(white: 0.4, alpha: 1.0)
-        view.addSubview(hint)
-        self.hintLabel = hint
-
-        // Diagnostic Card 1: ReplayKit Screen Recording Status
-        let rkCard = createDiagnosticCard(
-            title: "ReplayKit Screen Recording",
-            initialStatus: "Ready",
-            initialDetail: "Tap 'M' START above to grant screen recording permission.",
-            dotColor: UIColor.systemGray
-        )
-        view.addSubview(rkCard.card)
-        self.replayKitStatusCard = rkCard.card
-        self.replayKitDotView = rkCard.dot
-        self.replayKitTitleLabel = rkCard.titleLbl
-        self.replayKitDetailLabel = rkCard.detailLbl
-
-        // Diagnostic Card 2: Windows PC Connection Status
-        let connCard = createDiagnosticCard(
-            title: "Windows Receiver Connection",
-            initialStatus: "Listening on Ports 25333 / 25334",
-            initialDetail: "Waiting for Windows Software (Open AppleCast on PC).",
-            dotColor: UIColor.systemOrange
-        )
-        view.addSubview(connCard.card)
-        self.connectionStatusCard = connCard.card
-        self.connectionDotView = connCard.dot
-        self.connectionTitleLabel = connCard.titleLbl
-        self.connectionDetailLabel = connCard.detailLbl
-
-        // Diagnostic Card 3: Stream Quality & Bitrate Card
-        let qCard = createQualityCard()
-        view.addSubview(qCard)
-        self.qualityCard = qCard
-
-        // Constraints
         NSLayoutConstraint.activate([
-            topBg.topAnchor.constraint(equalTo: view.topAnchor),
-            topBg.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            topBg.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            topBg.heightAnchor.constraint(equalToConstant: 160),
+            centerContainer.topAnchor.constraint(equalTo: topBarView.bottomAnchor),
+            centerContainer.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            centerContainer.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            centerContainer.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor),
 
-            infoCard.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 12),
-            infoCard.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
-            infoCard.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
-            infoCard.heightAnchor.constraint(equalToConstant: 64),
+            radialGlowView.centerXAnchor.constraint(equalTo: centerContainer.centerXAnchor),
+            radialGlowView.centerYAnchor.constraint(equalTo: castCircleContainer.centerYAnchor, constant: -40),
+            radialGlowView.widthAnchor.constraint(equalToConstant: 380),
+            radialGlowView.heightAnchor.constraint(equalToConstant: 380),
 
-            phoneIcon.leadingAnchor.constraint(equalTo: infoCard.leadingAnchor, constant: 16),
-            phoneIcon.centerYAnchor.constraint(equalTo: infoCard.centerYAnchor),
-            phoneIcon.widthAnchor.constraint(equalToConstant: 28),
-            phoneIcon.heightAnchor.constraint(equalToConstant: 28),
+            statusCard.centerXAnchor.constraint(equalTo: centerContainer.centerXAnchor),
+            statusCard.widthAnchor.constraint(greaterThanOrEqualToConstant: 264),
+            statusCard.widthAnchor.constraint(lessThanOrEqualTo: centerContainer.widthAnchor, constant: -48),
 
-            devName.leadingAnchor.constraint(equalTo: phoneIcon.trailingAnchor, constant: 12),
-            devName.centerYAnchor.constraint(equalTo: infoCard.centerYAnchor),
+            cardStack.topAnchor.constraint(equalTo: statusCard.topAnchor, constant: 16),
+            cardStack.leadingAnchor.constraint(equalTo: statusCard.leadingAnchor, constant: 24),
+            cardStack.trailingAnchor.constraint(equalTo: statusCard.trailingAnchor, constant: -24),
+            cardStack.bottomAnchor.constraint(equalTo: statusCard.bottomAnchor, constant: -16),
 
-            wifiLbl.trailingAnchor.constraint(equalTo: infoCard.trailingAnchor, constant: -16),
-            wifiLbl.centerYAnchor.constraint(equalTo: infoCard.centerYAnchor),
+            castCircleContainer.topAnchor.constraint(equalTo: statusCard.bottomAnchor, constant: 38),
+            castCircleContainer.centerXAnchor.constraint(equalTo: centerContainer.centerXAnchor),
+            castCircleContainer.centerYAnchor.constraint(equalTo: centerContainer.centerYAnchor, constant: 46),
+            castCircleContainer.widthAnchor.constraint(equalToConstant: 220),
+            castCircleContainer.heightAnchor.constraint(equalToConstant: 220),
 
-            picker.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            picker.topAnchor.constraint(equalTo: infoCard.bottomAnchor, constant: 32),
-            picker.widthAnchor.constraint(equalToConstant: 160),
-            picker.heightAnchor.constraint(equalToConstant: 160),
+            outerGlowRing.topAnchor.constraint(equalTo: castCircleContainer.topAnchor),
+            outerGlowRing.leadingAnchor.constraint(equalTo: castCircleContainer.leadingAnchor),
+            outerGlowRing.trailingAnchor.constraint(equalTo: castCircleContainer.trailingAnchor),
+            outerGlowRing.bottomAnchor.constraint(equalTo: castCircleContainer.bottomAnchor),
 
-            btnSub.centerXAnchor.constraint(equalTo: picker.centerXAnchor),
-            btnSub.bottomAnchor.constraint(equalTo: picker.bottomAnchor, constant: -18),
+            middleRing.topAnchor.constraint(equalTo: castCircleContainer.topAnchor, constant: 8),
+            middleRing.leadingAnchor.constraint(equalTo: castCircleContainer.leadingAnchor, constant: 8),
+            middleRing.trailingAnchor.constraint(equalTo: castCircleContainer.trailingAnchor, constant: -8),
+            middleRing.bottomAnchor.constraint(equalTo: castCircleContainer.bottomAnchor, constant: -8),
 
-            stopBtn.centerXAnchor.constraint(equalTo: picker.centerXAnchor),
-            stopBtn.centerYAnchor.constraint(equalTo: picker.centerYAnchor),
-            stopBtn.widthAnchor.constraint(equalToConstant: 160),
-            stopBtn.heightAnchor.constraint(equalToConstant: 160),
+            innerCoreRing.topAnchor.constraint(equalTo: castCircleContainer.topAnchor, constant: 16),
+            innerCoreRing.leadingAnchor.constraint(equalTo: castCircleContainer.leadingAnchor, constant: 16),
+            innerCoreRing.trailingAnchor.constraint(equalTo: castCircleContainer.trailingAnchor, constant: -16),
+            innerCoreRing.bottomAnchor.constraint(equalTo: castCircleContainer.bottomAnchor, constant: -16),
 
-            stopLbl.centerXAnchor.constraint(equalTo: stopBtn.centerXAnchor),
-            stopLbl.centerYAnchor.constraint(equalTo: stopBtn.centerYAnchor, constant: -8),
+            castIconView.widthAnchor.constraint(equalToConstant: 46),
+            castIconView.heightAnchor.constraint(equalToConstant: 46),
 
-            stopSubLbl.centerXAnchor.constraint(equalTo: stopBtn.centerXAnchor),
-            stopSubLbl.topAnchor.constraint(equalTo: stopLbl.bottomAnchor, constant: 2),
+            circleContentStack.centerXAnchor.constraint(equalTo: innerCoreRing.centerXAnchor),
+            circleContentStack.centerYAnchor.constraint(equalTo: innerCoreRing.centerYAnchor),
 
-            hint.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            hint.topAnchor.constraint(equalTo: picker.bottomAnchor, constant: 14),
+            picker.topAnchor.constraint(equalTo: castCircleContainer.topAnchor),
+            picker.leadingAnchor.constraint(equalTo: castCircleContainer.leadingAnchor),
+            picker.trailingAnchor.constraint(equalTo: castCircleContainer.trailingAnchor),
+            picker.bottomAnchor.constraint(equalTo: castCircleContainer.bottomAnchor),
 
-            rkCard.card.topAnchor.constraint(equalTo: hint.bottomAnchor, constant: 24),
-            rkCard.card.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
-            rkCard.card.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
-            rkCard.card.heightAnchor.constraint(equalToConstant: 78),
+            stopOverlayButton.topAnchor.constraint(equalTo: castCircleContainer.topAnchor),
+            stopOverlayButton.leadingAnchor.constraint(equalTo: castCircleContainer.leadingAnchor),
+            stopOverlayButton.trailingAnchor.constraint(equalTo: castCircleContainer.trailingAnchor),
+            stopOverlayButton.bottomAnchor.constraint(equalTo: castCircleContainer.bottomAnchor),
 
-            connCard.card.topAnchor.constraint(equalTo: rkCard.card.bottomAnchor, constant: 12),
-            connCard.card.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
-            connCard.card.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
-            connCard.card.heightAnchor.constraint(equalToConstant: 78),
-
-            qCard.topAnchor.constraint(equalTo: connCard.card.bottomAnchor, constant: 12),
-            qCard.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
-            qCard.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
-            qCard.heightAnchor.constraint(equalToConstant: 98)
+            hintLabel.topAnchor.constraint(equalTo: castCircleContainer.bottomAnchor, constant: 18),
+            hintLabel.leadingAnchor.constraint(equalTo: centerContainer.leadingAnchor, constant: 28),
+            hintLabel.trailingAnchor.constraint(equalTo: centerContainer.trailingAnchor, constant: -28)
         ])
     }
 
-    private func createDiagnosticCard(
-        title: String,
-        initialStatus: String,
-        initialDetail: String,
-        dotColor: UIColor
-    ) -> (card: UIView, dot: UIView, titleLbl: UILabel, detailLbl: UILabel) {
-        let card = UIView()
-        card.translatesAutoresizingMaskIntoConstraints = false
-        card.backgroundColor = .white
-        card.layer.cornerRadius = 12
-        card.layer.shadowColor = UIColor.black.cgColor
-        card.layer.shadowOffset = CGSize(width: 0, height: 2)
-        card.layer.shadowOpacity = 0.06
-        card.layer.shadowRadius = 6
+    // MARK: - Settings & Observers
 
-        let dot = UIView()
-        dot.translatesAutoresizingMaskIntoConstraints = false
-        dot.backgroundColor = dotColor
-        dot.layer.cornerRadius = 6
-        card.addSubview(dot)
-
-        let tLbl = UILabel()
-        tLbl.translatesAutoresizingMaskIntoConstraints = false
-        tLbl.text = "\(title): \(initialStatus)"
-        tLbl.font = UIFont.systemFont(ofSize: 14, weight: .bold)
-        tLbl.textColor = UIColor(white: 0.15, alpha: 1.0)
-        card.addSubview(tLbl)
-
-        let dLbl = UILabel()
-        dLbl.translatesAutoresizingMaskIntoConstraints = false
-        dLbl.text = initialDetail
-        dLbl.font = UIFont.systemFont(ofSize: 12, weight: .regular)
-        dLbl.textColor = UIColor(white: 0.5, alpha: 1.0)
-        dLbl.numberOfLines = 2
-        card.addSubview(dLbl)
-
-        NSLayoutConstraint.activate([
-            dot.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 16),
-            dot.topAnchor.constraint(equalTo: card.topAnchor, constant: 18),
-            dot.widthAnchor.constraint(equalToConstant: 12),
-            dot.heightAnchor.constraint(equalToConstant: 12),
-
-            tLbl.leadingAnchor.constraint(equalTo: dot.trailingAnchor, constant: 10),
-            tLbl.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -14),
-            tLbl.centerYAnchor.constraint(equalTo: dot.centerYAnchor),
-
-            dLbl.leadingAnchor.constraint(equalTo: tLbl.leadingAnchor),
-            dLbl.trailingAnchor.constraint(equalTo: tLbl.trailingAnchor),
-            dLbl.topAnchor.constraint(equalTo: tLbl.bottomAnchor, constant: 4)
-        ])
-
-        return (card, dot, tLbl, dLbl)
+    private func loadPersistedSettings() {
+        let loaded = InfinityStreamSettings.load()
+        currentResolutionKey = loaded.resolution.key
+        currentBitrateLabel = loaded.bitrate.label
     }
-
-    // MARK: - Stream Quality & Bitrate Card
-
-    private func createQualityCard() -> UIView {
-        let card = UIView()
-        card.translatesAutoresizingMaskIntoConstraints = false
-        card.backgroundColor = .white
-        card.layer.cornerRadius = 12
-        card.layer.shadowColor = UIColor.black.cgColor
-        card.layer.shadowOffset = CGSize(width: 0, height: 2)
-        card.layer.shadowOpacity = 0.06
-        card.layer.shadowRadius = 6
-
-        let headerIcon = UIImageView(image: UIImage(systemName: "slider.horizontal.3"))
-        headerIcon.tintColor = UIColor(red: 0.15, green: 0.50, blue: 0.98, alpha: 1.0)
-        headerIcon.translatesAutoresizingMaskIntoConstraints = false
-        card.addSubview(headerIcon)
-
-        let titleLbl = UILabel()
-        titleLbl.translatesAutoresizingMaskIntoConstraints = false
-        titleLbl.text = "STREAM QUALITY & BITRATE"
-        titleLbl.font = UIFont.systemFont(ofSize: 11, weight: .bold)
-        titleLbl.textColor = UIColor(white: 0.45, alpha: 1.0)
-        card.addSubview(titleLbl)
-
-        let stack = UIStackView()
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        stack.axis = .horizontal
-        stack.distribution = .fillEqually
-        stack.spacing = 10
-        card.addSubview(stack)
-
-        // 1. Resolution Pill Button
-        let resContainer = UIButton(type: .custom)
-        resContainer.translatesAutoresizingMaskIntoConstraints = false
-        resContainer.backgroundColor = UIColor(red: 0.93, green: 0.96, blue: 1.0, alpha: 1.0)
-        resContainer.layer.cornerRadius = 10
-        resContainer.layer.borderColor = UIColor(red: 0.80, green: 0.88, blue: 0.99, alpha: 1.0).cgColor
-        resContainer.layer.borderWidth = 1.0
-        resContainer.addTarget(self, action: #selector(showResolutionPicker), for: .touchUpInside)
-
-        let resSubLbl = UILabel()
-        resSubLbl.translatesAutoresizingMaskIntoConstraints = false
-        resSubLbl.text = "RESOLUTION"
-        resSubLbl.font = UIFont.systemFont(ofSize: 9, weight: .bold)
-        resSubLbl.textColor = UIColor(red: 0.15, green: 0.45, blue: 0.90, alpha: 1.0)
-        resSubLbl.isUserInteractionEnabled = false
-        resContainer.addSubview(resSubLbl)
-
-        let resValLbl = UILabel()
-        resValLbl.translatesAutoresizingMaskIntoConstraints = false
-        resValLbl.text = "\(currentResolution) ▾"
-        resValLbl.font = UIFont.systemFont(ofSize: 15, weight: .heavy)
-        resValLbl.textColor = UIColor(red: 0.10, green: 0.35, blue: 0.85, alpha: 1.0)
-        resValLbl.isUserInteractionEnabled = false
-        resContainer.addSubview(resValLbl)
-        self.resValueLabel = resValLbl
-
-        NSLayoutConstraint.activate([
-            resSubLbl.topAnchor.constraint(equalTo: resContainer.topAnchor, constant: 8),
-            resSubLbl.leadingAnchor.constraint(equalTo: resContainer.leadingAnchor, constant: 12),
-
-            resValLbl.topAnchor.constraint(equalTo: resSubLbl.bottomAnchor, constant: 2),
-            resValLbl.leadingAnchor.constraint(equalTo: resContainer.leadingAnchor, constant: 12),
-            resValLbl.trailingAnchor.constraint(equalTo: resContainer.trailingAnchor, constant: -12),
-            resValLbl.bottomAnchor.constraint(equalTo: resContainer.bottomAnchor, constant: -8)
-        ])
-        stack.addArrangedSubview(resContainer)
-
-        // 2. Bitrate Pill Button
-        let bitContainer = UIButton(type: .custom)
-        bitContainer.translatesAutoresizingMaskIntoConstraints = false
-        bitContainer.backgroundColor = UIColor(red: 0.94, green: 0.98, blue: 0.95, alpha: 1.0)
-        bitContainer.layer.cornerRadius = 10
-        bitContainer.layer.borderColor = UIColor(red: 0.82, green: 0.94, blue: 0.86, alpha: 1.0).cgColor
-        bitContainer.layer.borderWidth = 1.0
-        bitContainer.addTarget(self, action: #selector(showBitratePicker), for: .touchUpInside)
-
-        let bitSubLbl = UILabel()
-        bitSubLbl.translatesAutoresizingMaskIntoConstraints = false
-        bitSubLbl.text = "BITRATE"
-        bitSubLbl.font = UIFont.systemFont(ofSize: 9, weight: .bold)
-        bitSubLbl.textColor = UIColor(red: 0.12, green: 0.60, blue: 0.32, alpha: 1.0)
-        bitSubLbl.isUserInteractionEnabled = false
-        bitContainer.addSubview(bitSubLbl)
-
-        let bitValLbl = UILabel()
-        bitValLbl.translatesAutoresizingMaskIntoConstraints = false
-        bitValLbl.text = "\(currentBitrate) ▾"
-        bitValLbl.font = UIFont.systemFont(ofSize: 15, weight: .heavy)
-        bitValLbl.textColor = UIColor(red: 0.08, green: 0.50, blue: 0.25, alpha: 1.0)
-        bitValLbl.isUserInteractionEnabled = false
-        bitContainer.addSubview(bitValLbl)
-        self.bitrateValueLabel = bitValLbl
-
-        NSLayoutConstraint.activate([
-            bitSubLbl.topAnchor.constraint(equalTo: bitContainer.topAnchor, constant: 8),
-            bitSubLbl.leadingAnchor.constraint(equalTo: bitContainer.leadingAnchor, constant: 12),
-
-            bitValLbl.topAnchor.constraint(equalTo: bitSubLbl.bottomAnchor, constant: 2),
-            bitValLbl.leadingAnchor.constraint(equalTo: bitContainer.leadingAnchor, constant: 12),
-            bitValLbl.trailingAnchor.constraint(equalTo: bitContainer.trailingAnchor, constant: -12),
-            bitValLbl.bottomAnchor.constraint(equalTo: bitContainer.bottomAnchor, constant: -8)
-        ])
-        stack.addArrangedSubview(bitContainer)
-
-        // 3. Save & Apply Button
-        let applyBtn = UIButton(type: .system)
-        applyBtn.translatesAutoresizingMaskIntoConstraints = false
-        applyBtn.backgroundColor = UIColor(red: 0.12, green: 0.48, blue: 0.95, alpha: 1.0)
-        applyBtn.setTitleColor(.white, for: .normal)
-        applyBtn.titleLabel?.font = UIFont.systemFont(ofSize: 14, weight: .bold)
-        applyBtn.setTitle("⚡ Save & Apply to Windows", for: .normal)
-        applyBtn.layer.cornerRadius = 10
-        applyBtn.layer.masksToBounds = true
-        applyBtn.addTarget(self, action: #selector(handleApplySaveButtonTapped), for: .touchUpInside)
-        card.addSubview(applyBtn)
-        self.applyButton = applyBtn
-
-        // 4. Status Hint Label
-        let statusLbl = UILabel()
-        statusLbl.translatesAutoresizingMaskIntoConstraints = false
-        statusLbl.text = "Tap to save & instantly reconfigure Windows stream"
-        statusLbl.font = UIFont.systemFont(ofSize: 10, weight: .medium)
-        statusLbl.textColor = UIColor(white: 0.50, alpha: 1.0)
-        statusLbl.textAlignment = .center
-        card.addSubview(statusLbl)
-        self.saveStatusLabel = statusLbl
-
-        NSLayoutConstraint.activate([
-            headerIcon.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 14),
-            headerIcon.topAnchor.constraint(equalTo: card.topAnchor, constant: 12),
-            headerIcon.widthAnchor.constraint(equalToConstant: 14),
-            headerIcon.heightAnchor.constraint(equalToConstant: 14),
-
-            titleLbl.leadingAnchor.constraint(equalTo: headerIcon.trailingAnchor, constant: 6),
-            titleLbl.centerYAnchor.constraint(equalTo: headerIcon.centerYAnchor),
-
-            stack.topAnchor.constraint(equalTo: titleLbl.bottomAnchor, constant: 8),
-            stack.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 12),
-            stack.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -12),
-
-            applyBtn.topAnchor.constraint(equalTo: stack.bottomAnchor, constant: 10),
-            applyBtn.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 12),
-            applyBtn.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -12),
-            applyBtn.heightAnchor.constraint(equalToConstant: 42),
-
-            statusLbl.topAnchor.constraint(equalTo: applyBtn.bottomAnchor, constant: 6),
-            statusLbl.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 12),
-            statusLbl.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -12),
-            statusLbl.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -10)
-        ])
-
-        return card
-    }
-
-    private func updateQualityLabels() {
-        resValueLabel?.text = "\(currentResolution) ▾"
-        bitrateValueLabel?.text = "\(currentBitrate) ▾"
-        applyButton?.setTitle("⚡ Save & Apply (\(currentResolution) • \(currentBitrate))", for: .normal)
-    }
-
-    @objc public func handleApplySaveButtonTapped() {
-        let generator = UIImpactFeedbackGenerator(style: .medium)
-        generator.prepare()
-        generator.impactOccurred()
-
-        saveAndBroadcastSettings(resolution: currentResolution, bitrateStr: currentBitrate)
-
-        // Visual confirmation
-        applyButton?.backgroundColor = UIColor(red: 0.10, green: 0.65, blue: 0.35, alpha: 1.0)
-        applyButton?.setTitle("✓ Saved & Applied to Windows!", for: .normal)
-        saveStatusLabel?.text = "✓ Reconfigured to \(currentResolution) @ \(currentBitrate) - Windows Live!"
-        saveStatusLabel?.textColor = UIColor(red: 0.08, green: 0.60, blue: 0.28, alpha: 1.0)
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
-            guard let self = self else { return }
-            self.applyButton?.backgroundColor = UIColor(red: 0.12, green: 0.48, blue: 0.95, alpha: 1.0)
-            self.updateQualityLabels()
-            self.saveStatusLabel?.text = "Tap to save & instantly reconfigure Windows stream"
-            self.saveStatusLabel?.textColor = UIColor(white: 0.50, alpha: 1.0)
-        }
-    }
-
-    @objc public func handleQualityNavAction() {
-        let alert = UIAlertController(
-            title: "⚙️ Stream Quality Settings",
-            message: "Active: \(currentResolution) @ \(currentBitrate)\nWindows receiver will dynamically auto-detect any changes.",
-            preferredStyle: .actionSheet
-        )
-        alert.addAction(UIAlertAction(title: "Change Resolution (\(currentResolution))", style: .default, handler: { [weak self] _ in
-            self?.showResolutionPicker()
-        }))
-        alert.addAction(UIAlertAction(title: "Change Bitrate (\(currentBitrate))", style: .default, handler: { [weak self] _ in
-            self?.showBitratePicker()
-        }))
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel, handler: nil))
-
-        if let popover = alert.popoverPresentationController {
-            popover.barButtonItem = navigationItem.rightBarButtonItem
-        }
-        present(alert, animated: true, completion: nil)
-    }
-
-    @objc public func showResolutionPicker() {
-        let alert = UIAlertController(
-            title: "📐 Select Resolution",
-            message: "Windows receiver automatically adapts window size and aspect ratio:",
-            preferredStyle: .actionSheet
-        )
-
-        let presets = [
-            ("544p", "544p • Standard Definition (544p)"),
-            ("720p", "720p • High Definition (Recommended)"),
-            ("1080p", "1080p • Full HD (Crisp Gaming)"),
-            ("2K", "2K • 1440p Quad HD"),
-            ("4K", "4K • 2160p Ultra HD / Native Maximum")
-        ]
-
-        for (resKey, label) in presets {
-            let isCurrent = (resKey.lowercased() == currentResolution.lowercased())
-            let checkmark = isCurrent ? "  ✓" : ""
-            alert.addAction(UIAlertAction(title: "\(label)\(checkmark)", style: .default, handler: { [weak self] _ in
-                guard let self = self else { return }
-                self.saveAndBroadcastSettings(resolution: resKey, bitrateStr: self.currentBitrate)
-            }))
-        }
-
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel, handler: nil))
-
-        if let popover = alert.popoverPresentationController {
-            popover.sourceView = qualityCard ?? view
-            popover.sourceRect = qualityCard?.bounds ?? view.bounds
-        }
-        present(alert, animated: true, completion: nil)
-    }
-
-    @objc public func showBitratePicker() {
-        let alert = UIAlertController(
-            title: "⚡ Select Bitrate",
-            message: "Windows receiver automatically measures and displays real-time Mbps:",
-            preferredStyle: .actionSheet
-        )
-
-        let presets = [
-            ("1 Mbps", "1 Mbps • Minimum / Ultra Bandwidth Saver"),
-            ("2 Mbps", "2 Mbps • Low Bitrate"),
-            ("4 Mbps", "4 Mbps • Balanced (Recommended Default)"),
-            ("6 Mbps", "6 Mbps • High Quality"),
-            ("8 Mbps", "8 Mbps • Very High Quality (Fast Wi-Fi / USB)"),
-            ("12 Mbps", "12 Mbps • Gaming Quality"),
-            ("16 Mbps", "16 Mbps • Pro Gaming Quality"),
-            ("20 Mbps", "20 Mbps • Maximum Limit (Ultra Low Compression)")
-        ]
-
-        for (bitKey, label) in presets {
-            let isCurrent = (bitKey == currentBitrate)
-            let checkmark = isCurrent ? "  ✓" : ""
-            alert.addAction(UIAlertAction(title: "\(label)\(checkmark)", style: .default, handler: { [weak self] _ in
-                guard let self = self else { return }
-                self.saveAndBroadcastSettings(resolution: self.currentResolution, bitrateStr: bitKey)
-            }))
-        }
-
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel, handler: nil))
-
-        if let popover = alert.popoverPresentationController {
-            popover.sourceView = qualityCard ?? view
-            popover.sourceRect = qualityCard?.bounds ?? view.bounds
-        }
-        present(alert, animated: true, completion: nil)
-    }
-
-    private func saveAndBroadcastSettings(resolution: String, bitrateStr: String) {
-        currentResolution = resolution
-        currentBitrate = bitrateStr
-        updateQualityLabels()
-
-        let shortSide = VideoEncoder.resolutionToShortSide(resolution)
-        let bps = VideoEncoder.bitrateStringToBps(bitrateStr)
-
-        NSLog("[WXHomeViewController] User selected quality: %@ (%d shortSide) @ %@ (%d bps)", resolution, shortSide, bitrateStr, bps)
-
-        // 1. Persist to standard UserDefaults
-        UserDefaults.standard.set(resolution, forKey: "kEncoderResolution")
-        UserDefaults.standard.set(bitrateStr, forKey: "kEncoderBitrateString")
-        UserDefaults.standard.set(Int(shortSide), forKey: "kEncoderShortSide")
-        UserDefaults.standard.set(Int(bps), forKey: "kEncoderBitrate")
-
-        // 2. Persist to App Group UserDefaults (best-effort)
-        if let sharedDefaults = UserDefaults(suiteName: "group.apowersoft.mirror") {
-            sharedDefaults.set(resolution, forKey: "kEncoderResolution")
-            sharedDefaults.set(bitrateStr, forKey: "kEncoderBitrateString")
-            sharedDefaults.set(Int(shortSide), forKey: "kEncoderShortSide")
-            sharedDefaults.set(Int(bps), forKey: "kEncoderBitrate")
-            sharedDefaults.synchronize()
-        }
-
-        // 3. Persist to MMWormhole archive file
-        MMWormholeManager.shared.writeMessageObject([
-            "resolution": resolution,
-            "bitrateString": bitrateStr,
-            "shortSide": Int(shortSide),
-            "bitrate": Int(bps),
-            "fps": 60
-        ], identifier: "encoderSettings")
-
-        // 4. Update in-app ScreenRecorderManager if active
-        ScreenRecorderManager.shared.updateConfiguration(bitrate: bps, shortSide: shortSide, fps: 60)
-
-        // 5. Post preset-specific Darwin notifications (100% reliable across all sandboxes)
-        let center = CFNotificationCenterGetDarwinNotifyCenter()
-        CFNotificationCenterPostNotification(center, CFNotificationName("com.apowermirror.setRes.\(shortSide)" as CFString), nil, nil, true)
-        CFNotificationCenterPostNotification(center, CFNotificationName("com.apowermirror.setBitrate.\(bps)" as CFString), nil, nil, true)
-        CFNotificationCenterPostNotification(center, CFNotificationName("com.apowermirror.forceKeyframe" as CFString), nil, nil, true)
-        NSLog("[WXHomeViewController] Dispatched Darwin presets: %dp @ %d bps", shortSide, bps)
-
-        // 6. Update UI status indicators
-        hintLabel?.text = "Broadcasting: \(resolution) @ \(bitrateStr) • Tap STOP to end"
-        let isCapturing = ScreenRecorderManager.shared.isCapturing || UIScreen.main.isCaptured
-        if isCapturing {
-            let mins = recordingSeconds / 60
-            let secs = recordingSeconds % 60
-            let timeStr = String(format: "%02d:%02d", mins, secs)
-            replayKitDetailLabel?.text = "Live 60 FPS Stream Active • \(currentResolution) • \(currentBitrate) • Duration: \(timeStr)"
-        }
-    }
-
-    // MARK: - Direct Screen Recording Actions
-
-    @objc public func handleStopAction() {
-        NSLog("[WXHomeViewController] User tapped STOP -> Stopping all screen recording")
-        BroadcastPickerManager.shared.stopBroadcast()
-        ScreenRecorderManager.shared.stopRecording { [weak self] _ in
-            self?.updateStatusCards()
-        }
-        SilentAudioKeepAlive.shared.stop()
-        lastErrorMessage = nil
-        updateStatusCards()
-    }
-
-    @objc public func handleDirectMirrorAction() {
-        let isCapturing = UIScreen.main.isCaptured || ScreenRecorderManager.shared.isCapturing
-        if isCapturing {
-            // STOP Recording
-            NSLog("[WXHomeViewController] User tapped STOP -> Stopping all screen recording")
-            BroadcastPickerManager.shared.stopBroadcast()
-            ScreenRecorderManager.shared.stopRecording { [weak self] _ in
-                self?.updateStatusCards()
-            }
-            SilentAudioKeepAlive.shared.stop()
-            lastErrorMessage = nil
-            updateStatusCards()
-            return
-        }
-
-        // START Recording -> Prompts ReplayKit System Broadcast Permission
-        NSLog("[WXHomeViewController] User tapped START -> Launching ReplayKit System Broadcast Picker")
-        lastErrorMessage = nil
-
-        // Immediate Visual Feedback
-        replayKitDotView?.backgroundColor = UIColor.systemOrange
-        replayKitTitleLabel?.text = "ReplayKit: Opening Broadcast Dialog..."
-        replayKitDetailLabel?.text = "Please tap 'Start Broadcast' on the iOS system prompt to begin mirroring."
-        hintLabel?.text = "Waiting for broadcast confirmation..."
-
-        // Start background keepalive audio
-        SilentAudioKeepAlive.shared.start()
-
-        // Launch the ReplayKit Broadcast Picker
-        BroadcastPickerManager.shared.presentBroadcastPicker()
-
-        // 15-second fallback timer to check if user cancelled or if broadcast started
-        DispatchQueue.main.asyncAfter(deadline: .now() + 15.0) { [weak self] in
-            guard let self = self else { return }
-            if !UIScreen.main.isCaptured && !ScreenRecorderManager.shared.isCapturing {
-                if self.lastErrorMessage == nil {
-                    self.lastErrorMessage = "Screen recording is not started. Tap START and choose 'Start Broadcast' on the dialog."
-                }
-                // Do not stop keepalive here; keep CoreAudio primed and background active
-                self.updateStatusCards()
-            }
-        }
-    }
-
-    // MARK: - Observer & State Handling
 
     private func setupObservers() {
         NotificationCenter.default.addObserver(
@@ -761,18 +350,26 @@ open class WXHomeViewController: UIViewController, ScreenRecorderManagerDelegate
             object: nil
         )
 
-        // Darwin notifications from Extension
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleSettingsChanged),
+            name: InfinityStreamSettings.didChangeNotification,
+            object: nil
+        )
+
+        let darwinCenter = CFNotificationCenterGetDarwinNotifyCenter()
         CFNotificationCenterAddObserver(
-            CFNotificationCenterGetDarwinNotifyCenter(),
+            darwinCenter,
             Unmanaged.passUnretained(self).toOpaque(),
-            { _, observer, _, _, _ in
+            { (_, observer, _, _, _) in
                 guard let obs = observer else { return }
                 let vc = Unmanaged<WXHomeViewController>.fromOpaque(obs).takeUnretainedValue()
                 DispatchQueue.main.async {
                     vc.lastErrorMessage = nil
                     SilentAudioKeepAlive.shared.start()
-                    vc.updateStatusCards()
-                    vc.saveAndBroadcastSettings(resolution: vc.currentResolution, bitrateStr: vc.currentBitrate)
+                    let loaded = InfinityStreamSettings.load()
+                    InfinityStreamSettings.saveAndApply(resolution: loaded.resolution, bitrate: loaded.bitrate)
+                    vc.updateUIState()
                 }
             },
             "com.apowermirror.broadcast.BroadcastStarted" as CFString,
@@ -781,14 +378,16 @@ open class WXHomeViewController: UIViewController, ScreenRecorderManagerDelegate
         )
 
         CFNotificationCenterAddObserver(
-            CFNotificationCenterGetDarwinNotifyCenter(),
+            darwinCenter,
             Unmanaged.passUnretained(self).toOpaque(),
-            { _, observer, _, _, _ in
+            { (_, observer, _, _, _) in
                 guard let obs = observer else { return }
                 let vc = Unmanaged<WXHomeViewController>.fromOpaque(obs).takeUnretainedValue()
                 DispatchQueue.main.async {
                     SilentAudioKeepAlive.shared.stop()
-                    vc.updateStatusCards()
+                    vc.recordingStartTime = nil
+                    vc.stopDurationTimer()
+                    vc.updateUIState()
                 }
             },
             "com.apowermirror.broadcast.Finish" as CFString,
@@ -797,130 +396,161 @@ open class WXHomeViewController: UIViewController, ScreenRecorderManagerDelegate
         )
     }
 
+    @objc private func handleSettingsChanged() {
+        loadPersistedSettings()
+        updateUIState()
+    }
+
     @objc private func handleScreenCapturedChanged() {
         DispatchQueue.main.async { [weak self] in
-            guard let self = self else { return }
             if UIScreen.main.isCaptured {
-                self.lastErrorMessage = nil
                 SilentAudioKeepAlive.shared.start()
-            } else {
+            } else if !ScreenRecorderManager.shared.isCapturing {
                 SilentAudioKeepAlive.shared.stop()
             }
-            self.updateStatusCards()
+            self?.updateUIState()
         }
     }
 
-    private func updateStatusCards() {
+    // MARK: - Actions
+
+    @objc private func handlePickerTouchDown() {
+        lastErrorMessage = nil
+        SilentAudioKeepAlive.shared.start()
+        hintLabel.text = "Select 'Start Broadcast' on the iOS prompt..."
+    }
+
+    @objc public func handleStopAction() {
+        BroadcastPickerManager.shared.stopBroadcast()
+        ScreenRecorderManager.shared.stopRecording { [weak self] _ in
+            self?.updateUIState()
+        }
+        SilentAudioKeepAlive.shared.stop()
+        recordingStartTime = nil
+        stopDurationTimer()
+        updateUIState()
+    }
+
+    @objc public func handleDirectMirrorAction() {
+        let isCapturing = UIScreen.main.isCaptured || ScreenRecorderManager.shared.isCapturing
+        if isCapturing {
+            handleStopAction()
+        } else {
+            lastErrorMessage = nil
+            SilentAudioKeepAlive.shared.start()
+            BroadcastPickerManager.shared.presentBroadcastPicker()
+        }
+    }
+
+    // MARK: - State & Animations
+
+    private func updateUIState() {
         let isCapturing = ScreenRecorderManager.shared.isCapturing || UIScreen.main.isCaptured
 
+        streamConfigLabel.text = "\(currentResolutionKey)  •  60 FPS  •  \(currentBitrateLabel)"
+
         if isCapturing {
-            // Screen Recording ACTIVE
-            nativePickerView?.isHidden = true
-            stopButton?.isHidden = false
-
-            replayKitDotView?.backgroundColor = UIColor(red: 0.10, green: 0.75, blue: 0.35, alpha: 1.0)
-            replayKitTitleLabel?.text = "ReplayKit: Screen Recording ACTIVE"
-            replayKitDetailLabel?.text = "Live 60 FPS Stream Active • \(currentResolution) • \(currentBitrate)"
-            hintLabel?.text = "Broadcasting live: \(currentResolution) @ \(currentBitrate) • Tap STOP to end"
-
+            if recordingStartTime == nil {
+                recordingStartTime = Date()
+            }
             startDurationTimer()
-        } else if let err = lastErrorMessage {
-            // Screen Recording FAILED / CANCELLED / NOT STARTED
-            stopDurationTimer()
-            nativePickerView?.isHidden = false
-            stopButton?.isHidden = true
 
-            replayKitDotView?.backgroundColor = UIColor.systemRed
-            replayKitTitleLabel?.text = "ReplayKit: Screen is not started"
-            replayKitDetailLabel?.text = err
-            hintLabel?.text = "Tap START and choose 'Start Broadcast'"
+            statusTitleLabel.text = "🟢 Streaming"
+            statusSubtitleLabel.text = "Screen is shared • \(formattedElapsedTime())"
+
+            let stopImg = UIImage(systemName: "stop.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 38, weight: .bold))
+            castIconView.image = stopImg
+            castIconView.tintColor = InfinityTheme.statusRed
+            castActionLabel.text = "Stop"
+            castActionLabel.textColor = InfinityTheme.statusRed
+            innerCoreRing.layer.borderColor = InfinityTheme.statusRed.withAlphaComponent(0.75).cgColor
+
+            nativePickerView?.isHidden = true
+            nativePickerView?.isUserInteractionEnabled = false
+            stopOverlayButton.isHidden = false
+
+            hintLabel.text = lastErrorMessage ?? "Mirroring live • Tap Stop to end"
+            hintLabel.textColor = lastErrorMessage != nil ? InfinityTheme.statusRed : InfinityTheme.textSecondary
         } else {
-            // Screen Recording INACTIVE / READY
+            recordingStartTime = nil
             stopDurationTimer()
+
+            if isDesktopConnected {
+                statusTitleLabel.text = "🟢 Connected"
+                statusSubtitleLabel.text = "Ready to cast!"
+            } else {
+                statusTitleLabel.text = "🔴 Disconnected"
+                statusSubtitleLabel.text = "Waiting for connection..."
+            }
+
+            let playImg = UIImage(systemName: "play.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 40, weight: .bold))
+            castIconView.image = playImg
+            castIconView.tintColor = InfinityTheme.brandBlue
+            castActionLabel.text = "Start Casting"
+            castActionLabel.textColor = InfinityTheme.brandBlue
+            innerCoreRing.layer.borderColor = InfinityTheme.brandBlueLight.resolvedColor(with: traitCollection).cgColor
+
             nativePickerView?.isHidden = false
-            stopButton?.isHidden = true
+            nativePickerView?.isUserInteractionEnabled = true
+            stopOverlayButton.isHidden = true
 
-            replayKitDotView?.backgroundColor = UIColor.systemGray
-            replayKitTitleLabel?.text = "ReplayKit: Ready"
-            replayKitDetailLabel?.text = "Tap START circle above to begin screen broadcast."
-            hintLabel?.text = "Tap START and choose 'Start Broadcast'"
+            if let err = lastErrorMessage {
+                hintLabel.text = err
+                hintLabel.textColor = InfinityTheme.statusRed
+            } else {
+                hintLabel.text = "Tap Start Casting to mirror your iPhone screen"
+                hintLabel.textColor = InfinityTheme.textSecondary
+            }
         }
+    }
 
-        // Update Windows Connection Card
-        if isDesktopConnected {
-            connectionDotView?.backgroundColor = UIColor(red: 0.10, green: 0.75, blue: 0.35, alpha: 1.0)
-            connectionTitleLabel?.text = "Windows Receiver: CONNECTED"
-            connectionDetailLabel?.text = "AppleCast on PC is connected and ready to receive stream."
-        } else {
-            connectionDotView?.backgroundColor = UIColor.systemRed
-            connectionTitleLabel?.text = "Windows Receiver: NOT CONNECTED (Connection Issue)"
-            connectionDetailLabel?.text = "Connection issue: Open AppleCast on PC and connect USB cable or Wi-Fi."
-        }
+    private func formattedElapsedTime() -> String {
+        guard let start = recordingStartTime else { return "00:00" }
+        let elapsed = max(0, Int(Date().timeIntervalSince(start)))
+        return String(format: "%02d:%02d", elapsed / 60, elapsed % 60)
     }
 
     private func startDurationTimer() {
-        stopDurationTimer()
-        recordingSeconds = 0
+        guard durationTimer == nil else { return }
         durationTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             guard let self = self else { return }
-            self.recordingSeconds += 1
-            let mins = self.recordingSeconds / 60
-            let secs = self.recordingSeconds % 60
-            let timeStr = String(format: "%02d:%02d", mins, secs)
-            self.replayKitDetailLabel?.text = "Live 60 FPS Stream Active • \(self.currentResolution) • \(self.currentBitrate) • Duration: \(timeStr)"
+            if ScreenRecorderManager.shared.isCapturing || UIScreen.main.isCaptured {
+                self.statusSubtitleLabel.text = "Screen is shared • \(self.formattedElapsedTime())"
+            } else {
+                self.stopDurationTimer()
+                self.updateUIState()
+            }
         }
     }
 
     private func stopDurationTimer() {
         durationTimer?.invalidate()
         durationTimer = nil
-        recordingSeconds = 0
     }
 
-    // MARK: - Pulse Animation
-
     private func startPulseAnimation() {
-        stopPulseAnimation()
-        guard let btn = nativePickerView ?? stopButton else { return }
-
-        let pulse = CAShapeLayer()
-        pulse.frame = btn.bounds
-        pulse.path = UIBezierPath(ovalIn: btn.bounds).cgPath
-        pulse.strokeColor = UIColor(red: 0.15, green: 0.50, blue: 0.98, alpha: 0.4).cgColor
-        pulse.fillColor = UIColor.clear.cgColor
-        pulse.lineWidth = 4
-        btn.layer.insertSublayer(pulse, at: 0)
-        self.pulseLayer = pulse
-
-        let scaleAnim = CABasicAnimation(keyPath: "transform.scale")
-        scaleAnim.fromValue = 1.0
-        scaleAnim.toValue = 1.25
-
-        let opacityAnim = CABasicAnimation(keyPath: "opacity")
-        opacityAnim.fromValue = 0.8
-        opacityAnim.toValue = 0.0
-
-        let group = CAAnimationGroup()
-        group.animations = [scaleAnim, opacityAnim]
-        group.duration = 1.8
-        group.repeatCount = .infinity
-        group.timingFunction = CAMediaTimingFunction(name: .easeOut)
-        pulse.add(group, forKey: "pulse")
+        outerGlowRing.layer.removeAnimation(forKey: "pulseScale")
+        let scale = CABasicAnimation(keyPath: "transform.scale")
+        scale.fromValue = 1.0
+        scale.toValue = 1.08
+        scale.duration = 1.6
+        scale.autoreverses = true
+        scale.repeatCount = .infinity
+        scale.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        outerGlowRing.layer.add(scale, forKey: "pulseScale")
     }
 
     private func stopPulseAnimation() {
-        pulseLayer?.removeAllAnimations()
-        pulseLayer?.removeFromSuperlayer()
-        pulseLayer = nil
+        outerGlowRing.layer.removeAnimation(forKey: "pulseScale")
     }
 
-    // MARK: - ScreenRecorderManagerDelegate Callbacks
+    // MARK: - ScreenRecorderManagerDelegate
 
     public func screenRecorderDidStart() {
         DispatchQueue.main.async { [weak self] in
             self?.lastErrorMessage = nil
-            self?.updateStatusCards()
             WXCastiOSSender.shared.sendStartCastPayload()
+            self?.updateUIState()
         }
     }
 
@@ -929,15 +559,15 @@ open class WXHomeViewController: UIViewController, ScreenRecorderManagerDelegate
             if let error = error {
                 self?.lastErrorMessage = error.localizedDescription
             }
-            self?.updateStatusCards()
             WXCastiOSSender.shared.sendStartCastPayload()
+            self?.updateUIState()
         }
     }
 
     public func screenRecorderDidFail(error: Error) {
         DispatchQueue.main.async { [weak self] in
             self?.lastErrorMessage = error.localizedDescription
-            self?.updateStatusCards()
+            self?.updateUIState()
         }
     }
 
@@ -945,7 +575,7 @@ open class WXHomeViewController: UIViewController, ScreenRecorderManagerDelegate
 
     public func broadcastCaptureStateChanged(isCaptured: Bool) {
         DispatchQueue.main.async { [weak self] in
-            self?.updateStatusCards()
+            self?.updateUIState()
         }
     }
 
@@ -953,28 +583,19 @@ open class WXHomeViewController: UIViewController, ScreenRecorderManagerDelegate
 
     public func castSenderDidConnectDesktop() {
         DispatchQueue.main.async { [weak self] in
-            guard let self = self else { return }
-            self.isDesktopConnected = true
-            self.updateStatusCards()
+            self?.isDesktopConnected = true
+            self?.updateUIState()
         }
     }
 
     public func castSenderDidDisconnectDesktop() {
         DispatchQueue.main.async { [weak self] in
-            guard let self = self else { return }
-            self.isDesktopConnected = false
-            self.updateStatusCards()
+            self?.isDesktopConnected = false
+            self?.updateUIState()
         }
     }
 
     public func castSenderDidRequestIDRKeyframe() {
-        NSLog("[WXHomeViewController] Desktop requested IDR Keyframe refresh")
         ScreenRecorderManager.shared.requestKeyframe()
-    }
-
-    deinit {
-        stopDurationTimer()
-        NotificationCenter.default.removeObserver(self)
-        CFNotificationCenterRemoveEveryObserver(CFNotificationCenterGetDarwinNotifyCenter(), Unmanaged.passUnretained(self).toOpaque())
     }
 }
