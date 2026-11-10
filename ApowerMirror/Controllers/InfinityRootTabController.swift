@@ -32,7 +32,11 @@ public final class InfinityRootTabController: UIViewController, UINavigationCont
     private var splashVC: InfinitySplashViewController?
 
     public override var childForStatusBarStyle: UIViewController? {
-        return splashVC ?? activeNav
+        return splashVC
+    }
+
+    public override var preferredStatusBarStyle: UIStatusBarStyle {
+        return InfinityThemeManager.shared.isDark ? .lightContent : .darkContent
     }
 
     // MARK: - Lifecycle

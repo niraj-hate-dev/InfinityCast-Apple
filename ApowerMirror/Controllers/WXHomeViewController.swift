@@ -21,6 +21,7 @@ open class WXHomeViewController: UIViewController, ScreenRecorderManagerDelegate
     private let topBarView = UIView()
     private let topBarLogo = InfinityBrandLogoView()
     private let topBarTitleLabel = UILabel()
+    private let themeToggleButton = InfinityThemeToggleButton()
     private let topBarHairline = UIView()
 
     // MARK: - Hero UI
@@ -107,7 +108,8 @@ open class WXHomeViewController: UIViewController, ScreenRecorderManagerDelegate
     open override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
         super.traitCollectionDidChange(previousTraitCollection)
         if traitCollection.hasDifferentColorAppearance(comparedTo: previousTraitCollection) {
-            innerCoreRing.layer.borderColor = InfinityTheme.brandBlueLight.resolvedColor(with: traitCollection).cgColor
+            updateUIState()
+            themeToggleButton.updateState(animated: false)
         }
     }
 
@@ -141,6 +143,10 @@ open class WXHomeViewController: UIViewController, ScreenRecorderManagerDelegate
         topBarTitleLabel.translatesAutoresizingMaskIntoConstraints = false
         topBarView.addSubview(topBarTitleLabel)
 
+        themeToggleButton.translatesAutoresizingMaskIntoConstraints = false
+        themeToggleButton.addTarget(self, action: #selector(handleThemeToggle), for: .touchUpInside)
+        topBarView.addSubview(themeToggleButton)
+
         topBarHairline.backgroundColor = InfinityTheme.separator
         topBarHairline.translatesAutoresizingMaskIntoConstraints = false
         topBarView.addSubview(topBarHairline)
@@ -158,6 +164,10 @@ open class WXHomeViewController: UIViewController, ScreenRecorderManagerDelegate
 
             topBarTitleLabel.leadingAnchor.constraint(equalTo: topBarLogo.trailingAnchor, constant: 12),
             topBarTitleLabel.centerYAnchor.constraint(equalTo: topBarLogo.centerYAnchor),
+            topBarTitleLabel.trailingAnchor.constraint(lessThanOrEqualTo: themeToggleButton.leadingAnchor, constant: -12),
+
+            themeToggleButton.trailingAnchor.constraint(equalTo: topBarView.trailingAnchor, constant: -20),
+            themeToggleButton.centerYAnchor.constraint(equalTo: topBarLogo.centerYAnchor),
 
             topBarHairline.leadingAnchor.constraint(equalTo: topBarView.leadingAnchor),
             topBarHairline.trailingAnchor.constraint(equalTo: topBarView.trailingAnchor),
@@ -357,6 +367,13 @@ open class WXHomeViewController: UIViewController, ScreenRecorderManagerDelegate
             object: nil
         )
 
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleThemeDidChange),
+            name: InfinityThemeManager.didChangeNotification,
+            object: nil
+        )
+
         let darwinCenter = CFNotificationCenterGetDarwinNotifyCenter()
         CFNotificationCenterAddObserver(
             darwinCenter,
@@ -413,6 +430,18 @@ open class WXHomeViewController: UIViewController, ScreenRecorderManagerDelegate
     }
 
     // MARK: - Actions
+
+    @objc private func handleThemeToggle() {
+        let feedback = UIImpactFeedbackGenerator(style: .light)
+        feedback.impactOccurred()
+        let targetWindow = view.window ?? UIApplication.shared.windows.first
+        InfinityThemeManager.shared.toggle(in: targetWindow)
+        themeToggleButton.updateState(animated: true)
+    }
+
+    @objc private func handleThemeDidChange() {
+        themeToggleButton.updateState(animated: true)
+    }
 
     @objc private func handlePickerTouchDown() {
         lastErrorMessage = nil

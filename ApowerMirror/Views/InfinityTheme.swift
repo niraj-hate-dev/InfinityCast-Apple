@@ -422,3 +422,198 @@ public enum InfinityStreamSettings {
         CFNotificationCenterPostNotification(center, CFNotificationName(name as CFString), nil, nil, true)
     }
 }
+
+// MARK: - Theme Preference Manager (White / Light <-> Dark)
+
+public final class InfinityThemeManager {
+
+    public static let shared = InfinityThemeManager()
+    public static let didChangeNotification = Notification.Name("InfinityThemeDidChange")
+
+    private let defaultsKey = "kInfinityDarkThemeEnabled"
+
+    public private(set) var isDark: Bool
+
+    private init() {
+        self.isDark = UserDefaults.standard.bool(forKey: defaultsKey)
+    }
+
+    public func toggle(in window: UIWindow?) {
+        setDark(!isDark, in: window, animated: true)
+    }
+
+    public func setDark(_ dark: Bool, in window: UIWindow?, animated: Bool) {
+        isDark = dark
+        UserDefaults.standard.set(dark, forKey: defaultsKey)
+        UserDefaults.standard.synchronize()
+        apply(to: window, animated: animated)
+        NotificationCenter.default.post(name: Self.didChangeNotification, object: nil)
+    }
+
+    public func apply(to window: UIWindow?, animated: Bool = false) {
+        let targetStyle: UIUserInterfaceStyle = isDark ? .dark : .light
+        guard let win = window else { return }
+
+        let applyStyle = {
+            win.overrideUserInterfaceStyle = targetStyle
+            win.rootViewController?.setNeedsStatusBarAppearanceUpdate()
+        }
+
+        if animated {
+            UIView.transition(
+                with: win,
+                duration: 0.36,
+                options: [.transitionCrossDissolve, .allowUserInteraction],
+                animations: applyStyle,
+                completion: nil
+            )
+        } else {
+            applyStyle()
+        }
+    }
+}
+
+// MARK: - Animated Light / Dark Theme Toggle Pill (Cast Top Bar)
+
+public final class InfinityThemeToggleButton: UIControl {
+
+    private let trackView = UIView()
+    private let sunTrackIcon = UIImageView()
+    private let moonTrackIcon = UIImageView()
+    private let thumbView = UIView()
+    private let thumbIconView = UIImageView()
+
+    private var thumbLeadingConstraint: NSLayoutConstraint!
+
+    public override init(frame: CGRect) {
+        super.init(frame: frame)
+        setupUI()
+        updateState(animated: false)
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        setupUI()
+        updateState(animated: false)
+    }
+
+    private func setupUI() {
+        accessibilityLabel = "Toggle Light or Dark Theme"
+
+        trackView.translatesAutoresizingMaskIntoConstraints = false
+        trackView.layer.cornerRadius = 17
+        trackView.layer.borderWidth = 1.0
+        trackView.isUserInteractionEnabled = false
+        addSubview(trackView)
+
+        let trackCfg = UIImage.SymbolConfiguration(pointSize: 12, weight: .semibold)
+        sunTrackIcon.image = UIImage(systemName: "sun.max.fill", withConfiguration: trackCfg)
+        sunTrackIcon.contentMode = .scaleAspectFit
+        sunTrackIcon.translatesAutoresizingMaskIntoConstraints = false
+
+        moonTrackIcon.image = UIImage(systemName: "moon.stars.fill", withConfiguration: trackCfg)
+        moonTrackIcon.contentMode = .scaleAspectFit
+        moonTrackIcon.translatesAutoresizingMaskIntoConstraints = false
+
+        trackView.addSubview(sunTrackIcon)
+        trackView.addSubview(moonTrackIcon)
+
+        thumbView.translatesAutoresizingMaskIntoConstraints = false
+        thumbView.layer.cornerRadius = 13
+        thumbView.layer.shadowColor = UIColor.black.cgColor
+        thumbView.layer.shadowOpacity = 0.20
+        thumbView.layer.shadowOffset = CGSize(width: 0, height: 2)
+        thumbView.layer.shadowRadius = 4
+        thumbView.isUserInteractionEnabled = false
+        trackView.addSubview(thumbView)
+
+        thumbIconView.translatesAutoresizingMaskIntoConstraints = false
+        thumbIconView.contentMode = .scaleAspectFit
+        thumbView.addSubview(thumbIconView)
+
+        thumbLeadingConstraint = thumbView.leadingAnchor.constraint(equalTo: trackView.leadingAnchor, constant: 4)
+
+        NSLayoutConstraint.activate([
+            widthAnchor.constraint(equalToConstant: 64),
+            heightAnchor.constraint(equalToConstant: 34),
+
+            trackView.topAnchor.constraint(equalTo: topAnchor),
+            trackView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            trackView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            trackView.bottomAnchor.constraint(equalTo: bottomAnchor),
+
+            sunTrackIcon.leadingAnchor.constraint(equalTo: trackView.leadingAnchor, constant: 9),
+            sunTrackIcon.centerYAnchor.constraint(equalTo: trackView.centerYAnchor),
+            sunTrackIcon.widthAnchor.constraint(equalToConstant: 15),
+            sunTrackIcon.heightAnchor.constraint(equalToConstant: 15),
+
+            moonTrackIcon.trailingAnchor.constraint(equalTo: trackView.trailingAnchor, constant: -9),
+            moonTrackIcon.centerYAnchor.constraint(equalTo: trackView.centerYAnchor),
+            moonTrackIcon.widthAnchor.constraint(equalToConstant: 15),
+            moonTrackIcon.heightAnchor.constraint(equalToConstant: 15),
+
+            thumbLeadingConstraint,
+            thumbView.centerYAnchor.constraint(equalTo: trackView.centerYAnchor),
+            thumbView.widthAnchor.constraint(equalToConstant: 26),
+            thumbView.heightAnchor.constraint(equalToConstant: 26),
+
+            thumbIconView.centerXAnchor.constraint(equalTo: thumbView.centerXAnchor),
+            thumbIconView.centerYAnchor.constraint(equalTo: thumbView.centerYAnchor),
+            thumbIconView.widthAnchor.constraint(equalToConstant: 15),
+            thumbIconView.heightAnchor.constraint(equalToConstant: 15)
+        ])
+    }
+
+    public func updateState(animated: Bool) {
+        let isDark = InfinityThemeManager.shared.isDark
+        thumbLeadingConstraint.constant = isDark ? 34.0 : 4.0
+
+        let thumbCfg = UIImage.SymbolConfiguration(pointSize: 13, weight: .bold)
+        let iconName = isDark ? "moon.stars.fill" : "sun.max.fill"
+        thumbIconView.image = UIImage(systemName: iconName, withConfiguration: thumbCfg)
+
+        let applyColors = {
+            if isDark {
+                self.trackView.backgroundColor = UIColor(red: 16.0 / 255.0, green: 28.0 / 255.0, blue: 58.0 / 255.0, alpha: 0.90)
+                self.trackView.layer.borderColor = UIColor(white: 1.0, alpha: 0.24).cgColor
+                self.thumbView.backgroundColor = InfinityTheme.brandBlue
+                self.thumbIconView.tintColor = .white
+                self.sunTrackIcon.tintColor = UIColor(white: 1.0, alpha: 0.45)
+                self.moonTrackIcon.tintColor = .clear
+            } else {
+                self.trackView.backgroundColor = UIColor(red: 218.0 / 255.0, green: 230.0 / 255.0, blue: 248.0 / 255.0, alpha: 0.92)
+                self.trackView.layer.borderColor = UIColor(white: 0.0, alpha: 0.14).cgColor
+                self.thumbView.backgroundColor = .white
+                self.thumbIconView.tintColor = UIColor(red: 245.0 / 255.0, green: 158.0 / 255.0, blue: 11.0 / 255.0, alpha: 1.0)
+                self.sunTrackIcon.tintColor = .clear
+                self.moonTrackIcon.tintColor = UIColor(red: 75.0 / 255.0, green: 95.0 / 255.0, blue: 130.0 / 255.0, alpha: 0.55)
+            }
+            self.layoutIfNeeded()
+        }
+
+        if animated {
+            self.thumbIconView.transform = CGAffineTransform(rotationAngle: isDark ? -0.45 : 0.45).scaledBy(x: 0.75, y: 0.75)
+            UIView.animate(
+                withDuration: 0.36,
+                delay: 0,
+                usingSpringWithDamping: 0.72,
+                initialSpringVelocity: 0.4,
+                options: [.curveEaseInOut, .allowUserInteraction]
+            ) {
+                self.thumbIconView.transform = .identity
+                applyColors()
+            }
+        } else {
+            self.thumbIconView.transform = .identity
+            applyColors()
+        }
+    }
+
+    public override var isHighlighted: Bool {
+        didSet {
+            UIView.animate(withDuration: 0.12) {
+                self.transform = self.isHighlighted ? CGAffineTransform(scaleX: 0.93, y: 0.93) : .identity
+            }
+        }
+    }
+}

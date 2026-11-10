@@ -2,10 +2,9 @@
 //  AboutViewController.swift
 //  ApowerMirror / Controllers
 //
-//  About screen matching Android's fragment_about.xml & AboutFragment.kt:
+//  About screen matching Android's fragment_about.xml:
 //  - Back header + centered 120pt circular InfinityLogo
-//  - "Infinity Cast" title + dynamic app version
-//  - Full-width #3B82F6 "Check Software Update" button linking to GitHub releases
+//  - "Infinity Cast" title + "Version 1.0.0"
 //
 
 import UIKit
@@ -16,7 +15,6 @@ public final class AboutViewController: UIViewController {
     private let logoView = InfinityBrandLogoView()
     private let appNameLabel = UILabel()
     private let versionLabel = UILabel()
-    private let checkUpdateButton = UIButton(type: .system)
 
     public override func viewDidLoad() {
         super.viewDidLoad()
@@ -40,35 +38,20 @@ public final class AboutViewController: UIViewController {
         appNameLabel.textColor = InfinityTheme.textPrimary
         appNameLabel.textAlignment = .center
 
-        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0"
-        versionLabel.text = "Version \(version)"
+        versionLabel.text = "Version 1.0.0"
         versionLabel.font = .systemFont(ofSize: 16, weight: .regular)
         versionLabel.textColor = InfinityTheme.textSecondary
         versionLabel.textAlignment = .center
 
-        checkUpdateButton.translatesAutoresizingMaskIntoConstraints = false
-        checkUpdateButton.setTitle("Check Software Update", for: .normal)
-        checkUpdateButton.setTitleColor(.white, for: .normal)
-        checkUpdateButton.titleLabel?.font = .systemFont(ofSize: 16, weight: .bold)
-        checkUpdateButton.backgroundColor = InfinityTheme.brandBlue
-        checkUpdateButton.layer.cornerRadius = 12
-        checkUpdateButton.layer.shadowColor = InfinityTheme.brandBlue.cgColor
-        checkUpdateButton.layer.shadowOpacity = 0.25
-        checkUpdateButton.layer.shadowOffset = CGSize(width: 0, height: 6)
-        checkUpdateButton.layer.shadowRadius = 12
-        checkUpdateButton.addTarget(self, action: #selector(handleCheckUpdate), for: .touchUpInside)
-
         let centerStack = UIStackView(arrangedSubviews: [
             logoView,
             appNameLabel,
-            versionLabel,
-            checkUpdateButton
+            versionLabel
         ])
         centerStack.axis = .vertical
         centerStack.alignment = .center
         centerStack.spacing = 8
         centerStack.setCustomSpacing(24, after: logoView)
-        centerStack.setCustomSpacing(40, after: versionLabel)
         centerStack.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(centerStack)
 
@@ -86,22 +69,14 @@ public final class AboutViewController: UIViewController {
             logoView.widthAnchor.constraint(equalToConstant: 120),
             logoView.heightAnchor.constraint(equalToConstant: 120),
 
-            checkUpdateButton.widthAnchor.constraint(equalTo: centerStack.widthAnchor),
-            checkUpdateButton.heightAnchor.constraint(equalToConstant: 56),
-
             centerStack.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             centerStack.centerYAnchor.constraint(equalTo: view.centerYAnchor, constant: 16),
-            centerStack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24),
-            centerStack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24)
+            centerStack.leadingAnchor.constraint(greaterThanOrEqualTo: view.leadingAnchor, constant: 24),
+            centerStack.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -24)
         ])
     }
 
     @objc private func handleBack() {
         navigationController?.popViewController(animated: true)
-    }
-
-    @objc private func handleCheckUpdate() {
-        guard let url = URL(string: "https://github.com/niraj-hate-dev/InfinityCast/tags") else { return }
-        UIApplication.shared.open(url, options: [:], completionHandler: nil)
     }
 }

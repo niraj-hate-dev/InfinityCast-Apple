@@ -48,9 +48,12 @@ class AppDelegate: UIResponder, UIApplicationDelegate, MMWormholeManagerDelegate
         // 6. Initialize Root Window with InfinityRootTabController (Cast + Me tabs)
         if window == nil {
             let win = UIWindow(frame: UIScreen.main.bounds)
+            InfinityThemeManager.shared.apply(to: win, animated: false)
             win.rootViewController = InfinityRootTabController()
             win.makeKeyAndVisible()
             self.window = win
+        } else if let existingWindow = window {
+            InfinityThemeManager.shared.apply(to: existingWindow, animated: false)
         }
 
         return true

@@ -90,8 +90,7 @@ public final class InfinitySplashViewController: UIViewController {
         centerStack.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(centerStack)
 
-        let shortVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.6.0"
-        versionLabel.text = "v\(shortVersion)"
+        versionLabel.text = "v 1.0.0"
         versionLabel.textColor = UIColor(red: 58.0 / 255.0, green: 74.0 / 255.0, blue: 96.0 / 255.0, alpha: 1.0)
         versionLabel.font = .systemFont(ofSize: 12, weight: .regular)
         versionLabel.textAlignment = .center
