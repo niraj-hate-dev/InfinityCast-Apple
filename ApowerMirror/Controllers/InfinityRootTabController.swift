@@ -29,6 +29,11 @@ public final class InfinityRootTabController: UIViewController, UINavigationCont
     private let meTabButton = FloatingTabButton(title: "Me", systemImageName: "person.fill")
 
     private var bottomBarHidden = false
+    private var splashVC: InfinitySplashViewController?
+
+    public override var childForStatusBarStyle: UIViewController? {
+        return splashVC ?? activeNav
+    }
 
     // MARK: - Lifecycle
 
@@ -38,6 +43,38 @@ public final class InfinityRootTabController: UIViewController, UINavigationCont
         setupFloatingBottomBar()
         setupChildNavControllers()
         selectTab(index: 0, animated: false)
+        showLaunchSplash()
+    }
+
+    private func showLaunchSplash() {
+        let splash = InfinitySplashViewController()
+        addChild(splash)
+        splash.view.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(splash.view)
+        NSLayoutConstraint.activate([
+            splash.view.topAnchor.constraint(equalTo: view.topAnchor),
+            splash.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            splash.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            splash.view.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        ])
+        splash.didMove(toParent: self)
+        self.splashVC = splash
+        setNeedsStatusBarAppearanceUpdate()
+
+        splash.onFinished = { [weak self, weak splash] in
+            guard let self = self, let splash = splash else { return }
+            UIView.animate(withDuration: 0.35, delay: 0, options: [.curveEaseOut], animations: {
+                splash.view.alpha = 0.0
+            }, completion: { _ in
+                splash.willMove(toParent: nil)
+                splash.view.removeFromSuperview()
+                splash.removeFromParent()
+                if self.splashVC === splash {
+                    self.splashVC = nil
+                    self.setNeedsStatusBarAppearanceUpdate()
+                }
+            })
+        }
     }
 
     public override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
