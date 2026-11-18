@@ -174,17 +174,31 @@ public final class VideoEncoder {
                     // Drop rather than build a backlog or exceed the extension memory limit.
                     return
                 }
-                let oriented = CIImage(cvPixelBuffer: pixelBuffer).oriented(orientation)
+                let cleanRect = CVImageBufferGetCleanRect(pixelBuffer)
+                let sourceImage = CIImage(cvPixelBuffer: pixelBuffer).cropped(to: cleanRect)
+                let oriented = sourceImage.oriented(orientation)
+                let orientedExtent = oriented.extent
                 let normalized = oriented.transformed(by: CGAffineTransform(
-                    translationX: -oriented.extent.minX, y: -oriented.extent.minY))
-                let scaleX = CGFloat(self.currentWidth) / normalized.extent.width
-                let scaleY = CGFloat(self.currentHeight) / normalized.extent.height
-                let scaled = normalized.applyingFilter("CILanczosScaleTransform", parameters: [
-                    kCIInputScaleKey: scaleY,
-                    kCIInputAspectRatioKey: scaleX / scaleY
-                ])
+                    translationX: -orientedExtent.minX, y: -orientedExtent.minY))
+                let srcW = max(1.0, normalized.extent.width)
+                let srcH = max(1.0, normalized.extent.height)
+                let targetBounds = CGRect(x: 0, y: 0, width: Int(self.currentWidth), height: Int(self.currentHeight))
+                let scaleX = targetBounds.width / srcW
+                let scaleY = targetBounds.height / srcH
+                let scaled: CIImage
+                if abs(scaleX - 1.0) < 0.001 && abs(scaleY - 1.0) < 0.001 {
+                    scaled = normalized.clampedToExtent().cropped(to: targetBounds)
+                } else {
+                    scaled = normalized
+                        .clampedToExtent()
+                        .applyingFilter("CILanczosScaleTransform", parameters: [
+                            kCIInputScaleKey: scaleY,
+                            kCIInputAspectRatioKey: scaleX / scaleY
+                        ])
+                        .cropped(to: targetBounds)
+                }
                 self.imageContext.render(scaled, to: prepared,
-                    bounds: CGRect(x: 0, y: 0, width: Int(self.currentWidth), height: Int(self.currentHeight)),
+                    bounds: targetBounds,
                     colorSpace: CGColorSpace(name: CGColorSpace.sRGB))
 
                 let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
@@ -252,9 +266,9 @@ public final class VideoEncoder {
             targetH = Int32(Float(targetH) * clampScale)
         }
 
-        // NV12 needs even dimensions. Avoid unnecessary 16-pixel aspect distortion.
-        currentWidth = max(2, (targetW / 2) * 2)
-        currentHeight = max(2, (targetH / 2) * 2)
+        // Macroblock 16-pixel alignment: eliminates H.264 crop padding & left-edge NV12 artifacts
+        currentWidth = max(16, (targetW / 16) * 16)
+        currentHeight = max(16, (targetH / 16) * 16)
 
         NSLog("[VideoEncoder] Initializing VTCompressionSession: %dx%d (Orientation: %d, Bitrate: %d)", currentWidth, currentHeight, orientation.rawValue, bitrate)
 
@@ -321,8 +335,33 @@ public final class VideoEncoder {
         self.forceNextKeyframe = true
 
         // Notify Desktop Receiver of Geometry Change
-        let rotationVal: Int32 = isLandscape ? 90 : 0
+        let rotationVal: Int32 = Int32(touchRotationDegrees(for: orientation))
         dimensionHandler?(currentWidth, currentHeight, rotationVal)
+    }
+
+    private func touchRotationDegrees(for orientation: CGImagePropertyOrientation) -> Int {
+        switch orientation {
+        case .right, .rightMirrored: return 90
+        case .down, .downMirrored: return 180
+        case .left, .leftMirrored: return 270
+        default: return 0
+        }
+    }
+
+    private func buildOrientationSeiNal() -> Data {
+        // Standard H.264 SEI NAL (type 6, payloadType 5 user_data_unregistered, size 20)
+        // 16-byte UUID ("ICOR-ORIENT-META") + 4-byte payload ("ROT" + code 1..4) + 0x80 RBSP stop bit
+        let deg = touchRotationDegrees(for: currentOrientation)
+        let code = UInt8(1 + (deg / 90)) // 1=0, 2=90, 3=180, 4=270
+        let bytes: [UInt8] = [
+            0x00, 0x00, 0x00, 0x01,
+            0x06, 0x05, 0x14,
+            0x49, 0x43, 0x4F, 0x52, 0x2D, 0x4F, 0x52, 0x49,
+            0x45, 0x4E, 0x54, 0x2D, 0x4D, 0x45, 0x54, 0x41,
+            0x52, 0x4F, 0x54, code,
+            0x80
+        ]
+        return Data(bytes)
     }
 
     // MARK: - Output Sample Handling & H.264 NAL Parsing
@@ -352,6 +391,7 @@ public final class VideoEncoder {
             fullFrameData.append(sps)
             fullFrameData.append(annexBStartCode)
             fullFrameData.append(pps)
+            fullFrameData.append(buildOrientationSeiNal())
         }
 
         // Iterate AVCC length-prefixed NALUs using safe non-contiguous block copy
