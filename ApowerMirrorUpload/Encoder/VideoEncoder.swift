@@ -176,7 +176,7 @@ public final class VideoEncoder {
                 }
                 let cleanRect = CVImageBufferGetCleanRect(pixelBuffer)
                 let sourceImage = CIImage(cvPixelBuffer: pixelBuffer).cropped(to: cleanRect)
-                let oriented = sourceImage.oriented(orientation)
+                let oriented = sourceImage.oriented(self.displayOrientation(for: orientation))
                 let orientedExtent = oriented.extent
                 let normalized = oriented.transformed(by: CGAffineTransform(
                     translationX: -orientedExtent.minX, y: -orientedExtent.minY))
@@ -339,8 +339,21 @@ public final class VideoEncoder {
         dimensionHandler?(currentWidth, currentHeight, rotationVal)
     }
 
+    private func displayOrientation(for rpOrientation: CGImagePropertyOrientation) -> CGImagePropertyOrientation {
+        // ReplayKit's RPVideoSampleOrientationKey (.left / .right) has opposite
+        // horizontal sign from CoreImage EXIF .oriented(_:), which caused 180-degree
+        // upside-down landscape video. Swap .left <-> .right so encoded frames are upright.
+        switch rpOrientation {
+        case .left: return .right
+        case .right: return .left
+        case .leftMirrored: return .rightMirrored
+        case .rightMirrored: return .leftMirrored
+        default: return rpOrientation
+        }
+    }
+
     private func touchRotationDegrees(for orientation: CGImagePropertyOrientation) -> Int {
-        switch orientation {
+        switch displayOrientation(for: orientation) {
         case .right, .rightMirrored: return 90
         case .down, .downMirrored: return 180
         case .left, .leftMirrored: return 270
