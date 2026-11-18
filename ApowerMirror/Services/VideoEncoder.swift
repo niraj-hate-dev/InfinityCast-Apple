@@ -12,6 +12,7 @@ import VideoToolbox
 import CoreMedia
 import CoreVideo
 import ImageIO
+import CoreImage
 
 public final class VideoEncoder {
 
@@ -38,6 +39,8 @@ public final class VideoEncoder {
     private var ppsHeader: Data?
     private let annexBStartCode = Data([0x00, 0x00, 0x00, 0x01])
     private var forceNextKeyframe = true
+    // Reuse the GPU context and avoid retaining intermediate frame textures.
+    private let imageContext = CIContext(options: [.cacheIntermediates: false])
 
     private static let forceKeyframeNotificationName = "com.apowermirror.forceKeyframe" as CFString
 
@@ -161,6 +164,28 @@ public final class VideoEncoder {
                 }
 
                 guard let session = self.compressionSession else { return }
+                guard let pool = VTCompressionSessionGetPixelBufferPool(session) else { return }
+                var preparedBuffer: CVPixelBuffer?
+                let allocation = CVPixelBufferPoolCreatePixelBufferWithAuxAttributes(
+                    kCFAllocatorDefault, pool,
+                    [kCVPixelBufferPoolAllocationThresholdKey as String: 3] as CFDictionary,
+                    &preparedBuffer)
+                guard allocation == kCVReturnSuccess, let prepared = preparedBuffer else {
+                    // Drop rather than build a backlog or exceed the extension memory limit.
+                    return
+                }
+                let oriented = CIImage(cvPixelBuffer: pixelBuffer).oriented(orientation)
+                let normalized = oriented.transformed(by: CGAffineTransform(
+                    translationX: -oriented.extent.minX, y: -oriented.extent.minY))
+                let scaleX = CGFloat(self.currentWidth) / normalized.extent.width
+                let scaleY = CGFloat(self.currentHeight) / normalized.extent.height
+                let scaled = normalized.applyingFilter("CILanczosScaleTransform", parameters: [
+                    kCIInputScaleKey: scaleY,
+                    kCIInputAspectRatioKey: scaleX / scaleY
+                ])
+                self.imageContext.render(scaled, to: prepared,
+                    bounds: CGRect(x: 0, y: 0, width: Int(self.currentWidth), height: Int(self.currentHeight)),
+                    colorSpace: CGColorSpace(name: CGColorSpace.sRGB))
 
                 let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
                 let duration = CMSampleBufferGetDuration(sampleBuffer)
@@ -175,7 +200,7 @@ public final class VideoEncoder {
                 var flags: VTEncodeInfoFlags = []
                 let status = VTCompressionSessionEncodeFrame(
                     session,
-                    imageBuffer: pixelBuffer,
+                    imageBuffer: prepared,
                     presentationTimeStamp: pts,
                     duration: duration,
                     frameProperties: frameProperties,
@@ -198,12 +223,10 @@ public final class VideoEncoder {
         var targetW = sourceWidth
         var targetH = sourceHeight
 
-        let isLandscape = (orientation == .left || orientation == .right || orientation == .leftMirrored || orientation == .rightMirrored)
-        if isLandscape && targetW < targetH {
-            swap(&targetW, &targetH)
-        } else if !isLandscape && targetW > targetH {
-            swap(&targetW, &targetH)
-        }
+        // Orientation describes a transform of the actual buffer, not its shape.
+        let quarterTurn = (orientation == .left || orientation == .right || orientation == .leftMirrored || orientation == .rightMirrored)
+        if quarterTurn { swap(&targetW, &targetH) }
+        let isLandscape = targetW > targetH
 
         let currentShort = min(targetW, targetH)
         let currentLong = max(targetW, targetH)
@@ -229,9 +252,9 @@ public final class VideoEncoder {
             targetH = Int32(Float(targetH) * clampScale)
         }
 
-        // Macroblock 16-pixel alignment: strictly divisible by 16
-        currentWidth = (targetW / 16) * 16
-        currentHeight = (targetH / 16) * 16
+        // NV12 needs even dimensions. Avoid unnecessary 16-pixel aspect distortion.
+        currentWidth = max(2, (targetW / 2) * 2)
+        currentHeight = max(2, (targetH / 2) * 2)
 
         NSLog("[VideoEncoder] Initializing VTCompressionSession: %dx%d (Orientation: %d, Bitrate: %d)", currentWidth, currentHeight, orientation.rawValue, bitrate)
 
@@ -246,6 +269,8 @@ public final class VideoEncoder {
 
         let sourceAttrs: [CFString: Any] = [
             kCVPixelBufferPixelFormatTypeKey: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
+            kCVPixelBufferWidthKey: currentWidth,
+            kCVPixelBufferHeightKey: currentHeight,
             kCVPixelBufferIOSurfacePropertiesKey: [:] as [String: Any]
         ]
 
