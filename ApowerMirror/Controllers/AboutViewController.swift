@@ -4,7 +4,7 @@
 //
 //  About screen matching Android's fragment_about.xml:
 //  - Back header + centered 120pt circular InfinityLogo
-//  - "Infinity Cast" title + "Version 1.0.0"
+//  - "Infinity Cast" title + dynamic "Version: v 1.0.0" from CFBundleShortVersionString
 //
 
 import UIKit
@@ -38,7 +38,8 @@ public final class AboutViewController: UIViewController {
         appNameLabel.textColor = InfinityTheme.textPrimary
         appNameLabel.textAlignment = .center
 
-        versionLabel.text = "Version 1.0.0"
+        let shortVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0"
+        versionLabel.text = "Version: v \(shortVersion)"
         versionLabel.font = .systemFont(ofSize: 16, weight: .regular)
         versionLabel.textColor = InfinityTheme.textSecondary
         versionLabel.textAlignment = .center

@@ -84,18 +84,19 @@ jobs:
           echo "=== Verifying Info.plist ==="
           /usr/libexec/PlistBuddy -c "Print :CFBundleDisplayName" build/Payload/InfinityCast.app/Info.plist
           /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" build/Payload/InfinityCast.app/Info.plist
+          /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" build/Payload/InfinityCast.app/Info.plist
 
           cd build
           zip -r InfinityCast.ipa Payload
-          cp InfinityCast.ipa InfinityCast-v1.6.0-Native-Unsigned.ipa
-          cp InfinityCast.ipa ApowerMirror-v1.6.0-Native-Unsigned.ipa
+          cp InfinityCast.ipa InfinityCast-v1.0.0-Native-Unsigned.ipa
+          cp InfinityCast.ipa ApowerMirror-v1.0.0-Native-Unsigned.ipa
           echo "=== InfinityCast IPA Generated Successfully ==="
           ls -lh *.ipa
 
       - name: Upload InfinityCast IPA Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: InfinityCast-v1.6.0-Native-Unsigned
+          name: InfinityCast-v1.0.0-Native-Unsigned
           path: build/InfinityCast.ipa
           retention-days: 14
 
@@ -113,8 +114,8 @@ jobs:
             ### Included Assets:
             - **`InfinityCast.ipa`**: Native iOS Screen Broadcast Mirroring App with ReplayKit Extension (Branded **InfinityCast**).
             - **`InfinityCast-Control.ipa`**: XCUITest Runner IPA for background multi-touch session.
-            - **`InfinityCast-v1.6.0-Native-Unsigned.ipa`**: Standalone native unsigned bundle.
-            - **`ApowerMirror-v1.6.0-Native-Unsigned.ipa`**: Compatibility bundle.
+            - **`InfinityCast-v1.0.0-Native-Unsigned.ipa`**: Standalone native unsigned bundle.
+            - **`ApowerMirror-v1.0.0-Native-Unsigned.ipa`**: Compatibility bundle.
             
             ### What's New in v1.7.0:
             - **Universal HID Hardware Touch Support**: Zero-app USB touch injection on iOS 18+ bypassing sandbox suspension when Free Fire is open.
@@ -123,8 +124,8 @@ jobs:
             - **Windows Software Integration**: Real-time Universal HID indicator in the top bar and Keymap Editor drawer.
           files: |
             build/InfinityCast.ipa
-            build/InfinityCast-v1.6.0-Native-Unsigned.ipa
-            build/ApowerMirror-v1.6.0-Native-Unsigned.ipa
+            build/InfinityCast-v1.0.0-Native-Unsigned.ipa
+            build/ApowerMirror-v1.0.0-Native-Unsigned.ipa
             InfinityCast-Control.ipa
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -143,12 +144,12 @@ jobs:
             ### Included Assets:
             - **`InfinityCast.ipa`**: Native iOS Screen Broadcast Mirroring App with ReplayKit Extension (Branded **InfinityCast**).
             - **`InfinityCast-Control.ipa`**: XCUITest Runner IPA for background multi-touch session.
-            - **`InfinityCast-v1.6.0-Native-Unsigned.ipa`**: Standalone native unsigned bundle.
-            - **`ApowerMirror-v1.6.0-Native-Unsigned.ipa`**: Compatibility bundle.
+            - **`InfinityCast-v1.0.0-Native-Unsigned.ipa`**: Standalone native unsigned bundle.
+            - **`ApowerMirror-v1.0.0-Native-Unsigned.ipa`**: Compatibility bundle.
           files: |
             build/InfinityCast.ipa
-            build/InfinityCast-v1.6.0-Native-Unsigned.ipa
-            build/ApowerMirror-v1.6.0-Native-Unsigned.ipa
+            build/InfinityCast-v1.0.0-Native-Unsigned.ipa
+            build/ApowerMirror-v1.0.0-Native-Unsigned.ipa
             InfinityCast-Control.ipa
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

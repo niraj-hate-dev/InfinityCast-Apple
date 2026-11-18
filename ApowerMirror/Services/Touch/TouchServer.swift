@@ -119,12 +119,13 @@ public class TouchServer: NSObject {
             }
         }
 
+        let shortVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0"
         if method == "GET" && (path == "/whoami" || path == "/status") {
             return httpResponse(status: 200, json: [
                 "status": 0,
                 "value": [
                     "name": "InfinityCast",
-                    "version": "1.6.0",
+                    "version": shortVersion,
                     "touch_available": IPURBridge.eventSynthesisAvailable(),
                     "state": "success"
                 ]
